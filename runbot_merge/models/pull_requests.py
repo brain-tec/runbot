@@ -849,7 +849,9 @@ class PullRequests(models.Model):
 
         if self.reviewed_by and self.reviewed_by.name == self.reviewed_by.github_login:
             # XXX: find other trigger(s) to sync github name?
-            self.reviewed_by.name = gh.user(self.reviewed_by.github_login)['name']
+            gh_name = gh.user(self.reviewed_by.github_login)['name']
+            if gh_name:
+                self.reviewed_by.name = gh_name
 
         # NOTE: lost merge v merge/copy distinction (head being
         #       a merge commit reused instead of being re-merged)
