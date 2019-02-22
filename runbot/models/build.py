@@ -423,6 +423,11 @@ class runbot_build(models.Model):
                         build._logger('%s time exceded (%ss)', build.job, build.job_time)
                         build.write({'job_end': now()})
                         build._kill(result='killed')
+                    else:
+                        # failfast
+                        if not build.result and build.guess_result in ('ko', 'warn'):
+                            build.result = build.guess_result
+                            build._github_status()
                     continue
                 build._logger('%s finished', build.job)
                 # schedule
@@ -753,11 +758,8 @@ class runbot_build(models.Model):
     @runbot_job('testing')
     def _job_10_test_base(self, build, log_path):
         build._log('test_base', 'Start test base module')
-        # run base test
         self._local_pg_createdb("%s-base" % build.dest)
         cmd, mods = build._cmd()
-        if grep(build._server("tools/config.py"), "test-enable"):
-            cmd.append("--test-enable")
         cmd += ['-d', '%s-base' % build.dest, '-i', 'base', '--stop-after-init', '--log-level=test', '--max-cron-threads=0']
         if build.extra_params:
             cmd.extend(shlex.split(build.extra_params))
