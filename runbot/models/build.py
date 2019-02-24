@@ -216,33 +216,7 @@ class runbot_build(models.Model):
             if name.startswith(branch['branch_name'] + '-') and self._branch_exists(branch['id']):
                 return result_for(branch, 'prefix')
 
-        # 4. Common ancestors (git merge-base)
-        for target_id in target_repo_ids:
-            common_refs = {}
-            self.env.cr.execute("""
-                SELECT b.name
-                  FROM runbot_branch b,
-                       runbot_branch t
-                 WHERE b.repo_id = %s
-                   AND t.repo_id = %s
-                   AND b.name = t.name
-                   AND b.name LIKE 'refs/heads/%%'
-            """, [repo.id, target_id])
-            for common_name, in self.env.cr.fetchall():
-                try:
-                    commit = repo._git(['merge-base', branch['name'], common_name]).strip()
-                    cmd = ['log', '-1', '--format=%cd', '--date=iso', commit]
-                    common_refs[common_name] = repo._git(cmd).strip()
-                except CalledProcessError:
-                    # If merge-base doesn't find any common ancestor, the command exits with a
-                    # non-zero return code, resulting in subprocess.check_output raising this
-                    # exception. We ignore this branch as there is no common ref between us.
-                    continue
-            if common_refs:
-                b = sorted(common_refs.items(), key=operator.itemgetter(1), reverse=True)[0][0]
-                return target_id, b, 'fuzzy'
-
-        # 5. last-resort value
+        # 4. last-resort value
         return target_repo_id, target_branch, 'default'
 
     @api.depends('name', 'branch_id.name')
@@ -449,6 +423,11 @@ class runbot_build(models.Model):
                         build._logger('%s time exceded (%ss)', build.job, build.job_time)
                         build.write({'job_end': now()})
                         build._kill(result='killed')
+                    else:
+                        # failfast
+                        if not build.result and build.guess_result in ('ko', 'warn'):
+                            build.result = build.guess_result
+                            build._github_status()
                     continue
                 build._logger('%s finished', build.job)
                 # schedule
@@ -612,6 +591,9 @@ class runbot_build(models.Model):
 
     def _local_pg_dropdb(self, dbname):
         with local_pgadmin_cursor() as local_cr:
+            pid_col = 'pid' if local_cr.connection.server_version >= 90200 else 'procpid'
+            query = 'SELECT pg_terminate_backend({}) FROM pg_stat_activity WHERE datname=%s'.format(pid_col)
+            local_cr.execute(query, [dbname])
             local_cr.execute('DROP DATABASE IF EXISTS "%s"' % dbname)
         # cleanup filestore
         datadir = appdirs.user_data_dir()
@@ -776,11 +758,8 @@ class runbot_build(models.Model):
     @runbot_job('testing')
     def _job_10_test_base(self, build, log_path):
         build._log('test_base', 'Start test base module')
-        # run base test
         self._local_pg_createdb("%s-base" % build.dest)
         cmd, mods = build._cmd()
-        if grep(build._server("tools/config.py"), "test-enable"):
-            cmd.append("--test-enable")
         cmd += ['-d', '%s-base' % build.dest, '-i', 'base', '--stop-after-init', '--log-level=test', '--max-cron-threads=0']
         if build.extra_params:
             cmd.extend(shlex.split(build.extra_params))
