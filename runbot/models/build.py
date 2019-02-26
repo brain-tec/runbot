@@ -103,7 +103,7 @@ class runbot_build(models.Model):
         if branch.job_type == 'none' or vals.get('job_type', '') == 'none':
             return self.env['runbot.build']
         build_id = super(runbot_build, self).create(vals)
-        extra_info = {'sequence': build_id.id}
+        extra_info = {'sequence': build_id.id if not build_id.sequence else build_id.sequence}
         job_type = vals['job_type'] if 'job_type' in vals else build_id.branch_id.job_type
         extra_info.update({'job_type': job_type})
         context = self.env.context
@@ -462,8 +462,6 @@ class runbot_build(models.Model):
                     build._log(build.job, "failed running job method, see runbot log")
                     build._kill(result='ko')
                     continue
-            # needed to prevent losing pids if multiple jobs are started and one them raise an exception
-            self.env.cr.commit()
 
             if pid == -2:
                 # no process to wait, directly call next job
@@ -511,6 +509,10 @@ class runbot_build(models.Model):
             # runbot log path
             os.makedirs(build._path("logs"), exist_ok=True)
             os.makedirs(build._server('addons'), exist_ok=True)
+
+            # update repo if needed
+            if not build.repo_id._hash_exists(build.name):
+                build.repo_id._update(build.repo_id)
 
             # checkout branch
             build.branch_id.repo_id._git_export(build.name, build._path())
