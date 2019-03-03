@@ -13,7 +13,7 @@ from itertools import takewhile
 from odoo import api, fields, models, tools
 from odoo.exceptions import ValidationError
 
-from .. import github, exceptions, controllers
+from .. import github, exceptions, controllers, utils
 
 STAGING_SLEEP = 20
 "temp hack: add a delay between staging repositories in case there's a race when quickly pushing a repo then its dependency"
@@ -130,7 +130,7 @@ class Project(models.Model):
                     "Error while trying to %s %s:%s (%s)",
                     'close' if f.close else 'send a comment to',
                     repo.name, f.pull_request,
-                    f.message and f.message[:200]
+                    utils.shorten(f.message, 200)
                 )
             else:
                 to_remove.append(f.id)
@@ -148,7 +148,13 @@ class Project(models.Model):
             if not f:
                 return
 
-            f.repository._load_pr(f.number)
+            self.env.cr.execute("SAVEPOINT runbot_merge_before_fetch")
+            try:
+                f.repository._load_pr(f.number)
+            except Exception:
+                self.env.cr.execute("ROLLBACK TO SAVEPOINT runbot_merge_before_fetch")
+                _logger.exception("Failed to load pr %s, skipping it", f.number)
+            self.env.cr.execute("RELEASE SAVEPOINT runbot_merge_before_fetch")
 
             # commit after each fetched PR
             f.active = False
@@ -538,8 +544,8 @@ class PullRequests(models.Model):
         )
 
         if not commands:
-            _logger.info("found no commands in comment of %s (%s) (%s%s)", author.github_login, author.display_name,
-                 comment[:50], '...' if len(comment) > 50 else ''
+            _logger.info("found no commands in comment of %s (%s) (%s)", author.github_login, author.display_name,
+                 utils.shorten(comment, 50)
             )
             return 'ok'
 
@@ -1108,10 +1114,14 @@ class Stagings(models.Model):
 
             s.state = st
 
-    def cancel(self, reason, *args):
+    @api.multi
+    def cancel(self, reason=None, *args):
         if not self:
             return
 
+        if reason is None:
+            reason = "explicitly cancelled by %s"
+            args = [self.env.user.display_name]
         _logger.info("Cancelling staging %s: " + reason, self, *args)
         self.batch_ids.write({'active': False})
         self.write({
@@ -1225,36 +1235,13 @@ class Stagings(models.Model):
             gh = {repo.name: repo.github() for repo in project.repo_ids}
             repo_name = None
             staging_heads = json.loads(self.heads)
+            self.env.cr.execute('''
+            SELECT 1 FROM runbot_merge_pull_requests
+            WHERE id in %s
+            FOR UPDATE
+            ''', [tuple(self.mapped('batch_ids.prs.id'))])
             try:
-                # reverting updates doesn't work if the branches are
-                # protected (because a revert is basically a force
-                # push), instead use the tmp branch as a dry-run
-                tmp_target = 'tmp.' + self.target.name
-                # first force-push the current targets to all tmps
-                for repo_name in staging_heads.keys():
-                    if repo_name.endswith('^'):
-                        continue
-                    g = gh[repo_name]
-                    g.set_ref(tmp_target, g.head(self.target.name))
-
-                # then attempt to FF the tmp to the staging
-                for repo_name, head in staging_heads.items():
-                    if repo_name.endswith('^'):
-                        continue
-                    gh[repo_name].fast_forward(tmp_target, staging_heads.get(repo_name + '^') or head)
-
-                # there is still a race condition here, but it's way
-                # lower than "the entire staging duration"...
-                for repo_name, head in staging_heads.items():
-                    if repo_name.endswith('^'):
-                        continue
-
-                    # if the staging has a $repo^ head, merge that,
-                    # otherwise merge the regular (CI'd) head
-                    gh[repo_name].fast_forward(
-                        self.target.name,
-                        staging_heads.get(repo_name + '^') or head
-                    )
+                repo_name = self._safety_dance(gh, staging_heads)
             except exceptions.FastForwardError as e:
                 logger.warning(
                     "Could not fast-forward successful staging on %s:%s",
@@ -1284,6 +1271,67 @@ class Stagings(models.Model):
                 self.write({'active': False})
         elif self.state == 'failure' or project.is_timed_out(self):
             self.try_splitting()
+
+    def _safety_dance(self, gh, staging_heads):
+        """ Reverting updates doesn't work if the branches are protected
+        (because a revert is basically a force push). So we can update
+        REPO_A, then fail to update REPO_B for some reason, and we're hosed.
+
+        To try and make this issue less likely, do the safety dance:
+
+        * First, perform a dry run using the tmp branches (which can be
+          force-pushed and sacrificed), that way if somebody pushed directly
+          to REPO_B during the staging we catch it. If we're really unlucky
+          they could still push after the dry run but...
+        * An other issue then is that the github call sometimes fails for no
+          noticeable reason (e.g. network failure or whatnot), if it fails
+          on REPO_B when REPO_A has already been updated things get pretty
+          bad. In that case, wait a bit and retry for now. A more complex
+          strategy (including disabling the branch entirely until somebody
+          has looked at and fixed the issue) might be necessary.
+
+        :returns: the last repo it tried to update (probably the one on which
+                  it failed, if it failed)
+        """
+        # FIXME: would make sense for FFE to be richer, and contain the repo name
+        repo_name = None
+        tmp_target = 'tmp.' + self.target.name
+        # first force-push the current targets to all tmps
+        for repo_name in staging_heads.keys():
+            if repo_name.endswith('^'):
+                continue
+            g = gh[repo_name]
+            g.set_ref(tmp_target, g.head(self.target.name))
+        # then attempt to FF the tmp to the staging
+        for repo_name, head in staging_heads.items():
+            if repo_name.endswith('^'):
+                continue
+            gh[repo_name].fast_forward(tmp_target, staging_heads.get(repo_name + '^') or head)
+        # there is still a race condition here, but it's way
+        # lower than "the entire staging duration"...
+        first = True
+        for repo_name, head in staging_heads.items():
+            if repo_name.endswith('^'):
+                continue
+
+            for pause in [0.1, 0.3, 0.5, 0.9, 0]: # last one must be 0/falsy of we lose the exception
+                try:
+                    # if the staging has a $repo^ head, merge that,
+                    # otherwise merge the regular (CI'd) head
+                    gh[repo_name].fast_forward(
+                        self.target.name,
+                        staging_heads.get(repo_name + '^') or head
+                    )
+                except exceptions.FastForwardError:
+                    # The GH API regularly fails us. If the failure does not
+                    # occur on the first repository, retry a few times with a
+                    # little pause.
+                    if not first and pause:
+                        time.sleep(pause)
+                        continue
+                    raise
+            first = False
+        return repo_name
 
 class Split(models.Model):
     _name = 'runbot_merge.split'

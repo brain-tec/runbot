@@ -19,7 +19,7 @@ class MergebotController(Controller):
 
         c = EVENTS.get(event)
         if not c:
-            _logger.warn('Unknown event %s', event)
+            _logger.warning('Unknown event %s', event)
             return 'Unknown event {}'.format(event)
 
         repo = request.jsonrequest['repository']['full_name']
@@ -31,7 +31,7 @@ class MergebotController(Controller):
         if secret:
             signature = 'sha1=' + hmac.new(secret.encode('ascii'), req.get_data(), hashlib.sha1).hexdigest()
             if not hmac.compare_digest(signature, req.headers.get('X-Hub-Signature', '')):
-                _logger.warn("Ignored hook with incorrect signature %s",
+                _logger.warning("Ignored hook with incorrect signature %s",
                              req.headers.get('X-Hub-Signature'))
                 return werkzeug.exceptions.Forbidden()
 
@@ -141,7 +141,7 @@ def handle_pr(env, event):
 
     pr_obj = env['runbot_merge.pull_requests']._get_or_schedule(r, pr['number'])
     if not pr_obj:
-        _logger.warn("webhook %s on unknown PR %s:%s, scheduled fetch", event['action'], repo.name, pr['number'])
+        _logger.warning("webhook %s on unknown PR %s:%s, scheduled fetch", event['action'], repo.name, pr['number'])
         return "Unknown PR {}:{}, scheduling fetch".format(repo.name, pr['number'])
     if event['action'] == 'synchronize':
         if pr_obj.head == pr['head']['sha']:
@@ -157,11 +157,19 @@ def handle_pr(env, event):
                 pr_obj.repository.name, pr_obj.number,
                 event['sender']['login']
             )
-        if pr_obj.state != 'error':
-            pr_obj.state = 'opened'
 
-        pr_obj.head = pr['head']['sha']
-        pr_obj.squash = pr['commits'] == 1
+        _logger.info(
+            "PR %s:%s updated to %s by %s, resetting to 'open' and squash=%s",
+            pr_obj.repository.name, pr_obj.number,
+            pr['head']['sha'], event['sender']['login'],
+            pr['commits'] == 1
+        )
+
+        pr_obj.write({
+            'state': 'opened',
+            'head': pr['head']['sha'],
+            'squash': pr['commits'] == 1,
+        })
         return 'Updated {} to {}'.format(pr_obj.id, pr_obj.head)
 
     # don't marked merged PRs as closed (!!!)
@@ -174,6 +182,7 @@ def handle_pr(env, event):
         FOR UPDATE SKIP LOCKED;
         ''', [pr_obj.id])
         res = env.cr.fetchone()
+        # FIXME: store some sort of "try to close it later" if the merge fails?
         if not res:
             return 'Ignored: could not lock rows (probably being merged)'
 
