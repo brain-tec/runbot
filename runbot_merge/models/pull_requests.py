@@ -440,6 +440,24 @@ class PullRequests(models.Model):
                             " PR is linked to an other non-ready PR"
     )
 
+    @property
+    def blocked(self):
+        if self.state not in ('ready', 'merged', 'closed'):
+            return True
+        if not (self.squash or self.merge_method):
+            return True
+
+        # can't be blocked on a co-dependent PR if it's a patch-*
+        if re.search(r':patch-\d+$', self.label):
+            return False
+
+        return bool(self.search_count([
+            ('id', '!=', self.id),
+            ('label', '=', self.label),
+            ('state', '!=', 'ready'),
+            ('priority', '!=', 0),
+        ]))
+
     @api.depends('head')
     def _compute_statuses(self):
         Commits = self.env['runbot_merge.commit']
@@ -720,7 +738,15 @@ class PullRequests(models.Model):
     @api.multi
     def write(self, vals):
         oldstate = { pr: pr._tagstate for pr in self }
+
         w = super().write(vals)
+
+        newhead = vals.get('head')
+        if newhead:
+            c = self.env['runbot_merge.commit'].search([('sha', '=', newhead)])
+            if c.statuses:
+                self._validate(json.loads(c.statuses))
+
         for pr in self:
             before, after = oldstate[pr], pr._tagstate
             if after != before:
