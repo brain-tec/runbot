@@ -692,17 +692,26 @@ class PullRequests(models.Model):
         # targets
         for pr in self:
             required = pr.repository.project_id.required_statuses.split(',')
-            if all(state_(statuses, r) == 'success' for r in required):
+
+            for ci in required:
+                st = state_(statuses, ci) or 'pending'
+                if st == 'success':
+                    continue
+
+                # only report an issue of the PR is already approved (r+'d)
+                if st in ('error', 'failure') and pr.state == 'approved':
+                    self.env['runbot_merge.pull_requests.feedback'].create({
+                        'repository': pr.repository.id,
+                        'pull_request': pr.number,
+                        'message': "%r failed on this reviewed PR." % ci,
+                    })
+                break
+            else: # all success (no break)
                 oldstate = pr.state
                 if oldstate == 'opened':
                     pr.state = 'validated'
                 elif oldstate == 'approved':
                     pr.state = 'ready'
-
-            #     _logger.info("CI+ (%s) for PR %s:%s: %s -> %s",
-            #                  statuses, pr.repository.name, pr.number, oldstate, pr.state)
-            # else:
-            #     _logger.info("CI- (%s) for PR %s:%s", statuses, pr.repository.name, pr.number)
 
     def _auto_init(self):
         res = super(PullRequests, self)._auto_init()
@@ -1016,15 +1025,16 @@ class Commit(models.Model):
 
     sha = fields.Char(required=True)
     statuses = fields.Char(help="json-encoded mapping of status contexts to states", default="{}")
+    to_check = fields.Boolean(default=False)
 
     def create(self, values):
+        values['to_check'] = True
         r = super(Commit, self).create(values)
-        r._notify()
         return r
 
     def write(self, values):
+        values.setdefault('to_check', True)
         r = super(Commit, self).write(values)
-        self._notify()
         return r
 
     # NB: GH recommends doing heavy work asynchronously, may be a good
@@ -1033,7 +1043,8 @@ class Commit(models.Model):
         Stagings = self.env['runbot_merge.stagings']
         PRs = self.env['runbot_merge.pull_requests']
         # chances are low that we'll have more than one commit
-        for c in self:
+        for c in self.search([('to_check', '=', True)]):
+            c.to_check = False
             st = json.loads(c.statuses)
             pr = PRs.search([('head', '=', c.sha)])
             if pr:
@@ -1043,6 +1054,8 @@ class Commit(models.Model):
             stagings = Stagings.search([('heads', 'ilike', c.sha)])
             if stagings:
                 stagings._validate()
+
+            self.env.cr.commit()
 
     _sql_constraints = [
         ('unique_sha', 'unique (sha)', 'no duplicated commit'),
@@ -1054,6 +1067,10 @@ class Commit(models.Model):
             CREATE INDEX IF NOT EXISTS runbot_merge_unique_statuses 
             ON runbot_merge_commit
             USING hash (sha)
+        """)
+        self._cr.execute("""
+            CREATE INDEX IF NOT EXISTS runbot_merge_to_process
+            ON runbot_merge_commit ((1)) WHERE to_check
         """)
         return res
 
@@ -1131,7 +1148,6 @@ class Stagings(models.Model):
                         st = 'pending'
                     else:
                         assert v == 'success'
-
             # mark failure as soon as we find a failed status, but wait until
             # all commits are known & not pending to mark a success
             if st == 'success' and len(commits) < len(heads):
