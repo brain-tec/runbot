@@ -30,6 +30,8 @@ RUN set -x ; \
     xfonts-75dpi \
     zlib1g-dev
 
+RUN apt-get install -y unzip
+
 # Install Google Chrome
 RUN curl -sSL https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && echo "deb https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
