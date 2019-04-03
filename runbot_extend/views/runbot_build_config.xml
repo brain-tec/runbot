@@ -1,0 +1,37 @@
+<odoo>
+  <data>
+    
+    <record id="config_form" model="ir.ui.view">
+        <field name="name">runbot.build.config.form</field>
+        <field name="model">runbot.build.config</field>
+        <field name="inherit_id" ref="runbot.config_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='step_order_ids']" position="replace">
+                <field name="step_order_ids">
+                    <tree string="Step list">
+                        <field name="step_id"/>
+                        <field name="sequence" groups="base.group_no_one"/>
+                        <field name="sequence" widget="handle"/>
+                        <field name="is_custom_parsing"/>
+                    </tree>
+                    <form string="Step list">
+                        <group>
+                          <field name="step_id"/>
+                          <field name="sequence"/>
+                          <field name="is_custom_parsing"/>
+                          <field name="custom_re_error" attrs="{'invisible': [('is_custom_parsing','=',False)]}"/>
+                          <field name="custom_re_warning" attrs="{'invisible': [('is_custom_parsing','=',False)]}"/>
+                          <field name="job_type" invisible="1"/>
+                          <field name="custom_config_template" attrs="{'invisible': [('job_type','!=','upgrade')]}"/>
+                        </group>
+                    </form>
+                </field>
+            </xpath>
+
+        </field>
+    </record>
+
+
+
+  </data>
+</odoo>

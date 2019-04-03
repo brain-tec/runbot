@@ -1,0 +1,22 @@
+<odoo>
+  <data>
+    
+    <record id="repo_form" model="ir.ui.view">
+        <field name="name">runbot.repo.form</field>
+        <field name="model">runbot.repo</field>
+        <field name="inherit_id" ref="runbot.repo_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='hook_time']" position="after">
+                <field name="no_build"/>
+                <field name="restored_db" attrs="{'invisible': [('no_build','=',True)]}" filename="filename" placeholder="Choose a file to restore..."/>
+                <field name="restored_db_filename" invisible="1"/>
+                <field name="force_update_all" attrs="{'invisible': ['|', ('restored_db','=',False), ('no_build','=',True)]}"/>
+                <field name="testenable_restore" attrs="{'invisible': ['|', ('restored_db','=',False), ('no_build','=',True)]}"/>
+                <field name="custom_coverage" attrs="{'invisible': [('no_build','=',True)]}"/>
+            </xpath>
+        </field>
+    </record>
+          
+
+  </data>
+</odoo>

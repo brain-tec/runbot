@@ -52,7 +52,6 @@ class Config(models.Model):
         return [ordered_step.step_id for ordered_step in self.step_order_ids]
 
     def _check_step_ids_order(self):
-        install_job = False
         step_ids = self.step_ids()
         for step in step_ids:
             if step.job_type == 'install_odoo':
@@ -60,8 +59,6 @@ class Config(models.Model):
             if step.job_type == 'run_odoo':
                 if step != step_ids[-1]:
                     raise UserError('Jobs of type run_odoo should be the last one')
-                if not install_job:
-                    raise UserError('Jobs of type run_odoo should be preceded by a job of type install_odoo')
         self._check_recustion()
 
     def _check_recustion(self, visited=None):  # todo test
@@ -227,15 +224,15 @@ class ConfigStep(models.Model):
             # not sure, to avoid old server to check other dbs
             cmd += ["--max-cron-threads", "0"]
 
-        db_name = [step.db_name for step in build.config_id.step_ids() if step.job_type == 'install_odoo'][-1]
-        # we need to have at least one job of type install_odoo to run odoo, take the last one for db_name.
-        cmd += ['-d', '%s-%s' % (build.dest, db_name)]
-
         if grep(build._server("tools/config.py"), "db-filter"):
             if build.repo_id.nginx:
                 cmd += ['--db-filter', '%d.*$']
             else:
                 cmd += ['--db-filter', '%s.*$' % build.dest]
+        else:
+            db_name = [step.db_name for step in build.config_id.step_ids() if step.job_type == 'install_odoo'][-1]
+            # we need to have at least one job of type install_odoo to run odoo, take the last one for db_name.
+            cmd += ['-d', '%s-%s' % (build.dest, db_name)]
         smtp_host = docker_get_gateway_ip()
         if smtp_host:
             cmd += ['--smtp', smtp_host]
@@ -310,7 +307,7 @@ class ConfigStep(models.Model):
                         glob.glob(build._server('addons/*/__manifest__.py')))
         ]
         module_to_omit = set(available_modules) - modules_to_install
-        return ['--omit', ','.join('*addons/%s/*' % m for m in module_to_omit) + ',*__manifest__.py']
+        return ['--omit', ','.join('*addons/%s/*' % m for m in module_to_omit) + '*,__manifest__.py']
 
     def _make_results(self, build):
         build_values = {}
