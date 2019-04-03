@@ -426,7 +426,11 @@ class runbot_build(models.Model):
                 SELECT dest
                   FROM runbot_build
                  WHERE dest IN %s
-                   AND (local_state != 'done' OR job_end > (now() - interval '7 days'))
+                   AND (
+                        local_state != 'done'
+                        OR job_end > (now() - interval '7 days')
+                        OR (job_end is null AND create_date > (now() - interval '7 days'))
+                    )
             """, [tuple(builds)])  # todo xdo not covered by tests
             actives = set(b[0] for b in self.env.cr.fetchall())
 

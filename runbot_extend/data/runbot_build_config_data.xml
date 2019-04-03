@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="runbot_build_config_step_restore" model="runbot.build.config.step">
+        <field name="name">restore</field>
+        <field name="custom_db_name">restored</field>
+        <field name="protected" eval="True"/>
+        <field name="default_sequence">50</field>
+    </record>
+
+    <record id="runbot_build_config_step_upgrade" model="runbot.build.config.step">
+        <field name="name">upgrade</field>
+        <field name="custom_db_name">restored</field>
+        <field name="protected" eval="True"/>
+        <field name="default_sequence">60</field>
+    </record>
+
+    <record id="runbot_build_config_restore" model="runbot.build.config">
+        <field name="name">Restore and Upgrade</field>
+        <field name="update_github_state" eval="False"/>
+        <field name="step_order_ids" eval="[(5,0,0),
+        (0, 0, {'step_id': ref('runbot_build_config_step_restore')}), 
+        (0, 0, {'step_id': ref('runbot_build_config_step_upgrade')}), 
+        ]"/>
+        <field name="protected" eval="False"/>
+    </record>
+
+</odoo>
