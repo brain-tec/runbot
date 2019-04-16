@@ -15,3 +15,86 @@ class Test_Repo(common.TransactionCase):
         self.assertEqual(repo.path, '/tmp/static/repo/bla_example.com_foo_bar')
 
         self.assertEqual(repo.base, 'example.com/foo/bar')
+
+
+class Test_Repo_Scheduler(common.TransactionCase):
+
+    def unlink(self, x):
+        """ database cleanup as the _scheduler method may commit """
+        if type(x) == list:
+            for o in x:
+                o.unlink()
+        else:
+            x.unlink()
+        self.env.cr.commit()
+
+    @patch('odoo.addons.runbot.models.repo.runbot_repo._root')
+    def setUp(self, mock_root):
+        super(Test_Repo_Scheduler, self).setUp()
+
+        mock_root.return_value = '/tmp/static'
+        self.Repo_model = self.env['runbot.repo']
+        self.Branch_model = self.env['runbot.branch']
+        self.foo_repo = self.Repo_model.create({'name': 'bla@example.com:foo/bar'})
+        self.addCleanup(self.unlink, self.foo_repo)
+
+        self.foo_branch = self.Branch_model.create({
+            'repo_id': self.foo_repo.id,
+            'name': 'refs/head/foo'
+        })
+        self.addCleanup(self.unlink, self.foo_branch)
+
+    @patch('odoo.addons.runbot.models.build.runbot_build._reap')
+    @patch('odoo.addons.runbot.models.build.runbot_build._kill')
+    @patch('odoo.addons.runbot.models.build.runbot_build._schedule')
+    @patch('odoo.addons.runbot.models.repo.fqdn')
+    def test_repo_scheduler(self, mock_repo_fqdn, mock_schedule, mock_kill, mock_reap):
+        mock_repo_fqdn.return_value = 'test_host'
+        Build_model = self.env['runbot.build']
+        builds = []
+        # create 6 builds that are testing on the host to verify that
+        # workers are not overfilled
+        for build_name in ['a', 'b', 'c', 'd', 'e', 'f']:
+            build = Build_model.create({
+                'branch_id': self.foo_branch.id,
+                'name': build_name,
+                'port': '1234',
+                'build_type': 'normal',
+                'state': 'testing',
+                'host': 'test_host'
+            })
+            builds.append(build)
+        # now the pending build that should stay unasigned
+        scheduled_build = Build_model.create({
+            'branch_id': self.foo_branch.id,
+            'name': 'sched_build',
+            'port': '1234',
+            'build_type': 'scheduled',
+            'state': 'pending',
+        })
+        builds.append(scheduled_build)
+        # create the build that should be assigned once a slot is available
+        build = Build_model.create({
+            'branch_id': self.foo_branch.id,
+            'name': 'foobuild',
+            'port': '1234',
+            'build_type': 'normal',
+            'state': 'pending',
+        })
+        builds.append(build)
+        self.addCleanup(self.unlink, builds)
+        self.env['runbot.repo']._scheduler(ids=[self.foo_repo.id, ])
+
+        build.invalidate_cache()
+        scheduled_build.invalidate_cache()
+        self.assertFalse(build.host)
+        self.assertFalse(scheduled_build.host)
+
+        # give some room for the pending build
+        Build_model.search([('name', '=', 'a')]).write({'state': 'done'})
+
+        self.env['runbot.repo']._scheduler(ids=[self.foo_repo.id, ])
+        build.invalidate_cache()
+        scheduled_build.invalidate_cache()
+        self.assertEqual(build.host, 'test_host')
+        self.assertFalse(scheduled_build.host)
