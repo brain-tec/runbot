@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from unittest.mock import patch
 from odoo.tests import common
+import odoo
 
 class Test_Repo(common.TransactionCase):
 
@@ -19,30 +20,23 @@ class Test_Repo(common.TransactionCase):
 
 class Test_Repo_Scheduler(common.TransactionCase):
 
-    def unlink(self, x):
-        """ database cleanup as the _scheduler method may commit """
-        if type(x) == list:
-            for o in x:
-                o.unlink()
-        else:
-            x.unlink()
-        self.env.cr.commit()
-
     @patch('odoo.addons.runbot.models.repo.runbot_repo._root')
     def setUp(self, mock_root):
+        # as the _scheduler method commits, we need to protect the database
+        registry = odoo.registry()
+        registry.enter_test_mode()
+        self.addCleanup(registry.leave_test_mode)
         super(Test_Repo_Scheduler, self).setUp()
 
         mock_root.return_value = '/tmp/static'
         self.Repo_model = self.env['runbot.repo']
         self.Branch_model = self.env['runbot.branch']
         self.foo_repo = self.Repo_model.create({'name': 'bla@example.com:foo/bar'})
-        self.addCleanup(self.unlink, self.foo_repo)
 
         self.foo_branch = self.Branch_model.create({
             'repo_id': self.foo_repo.id,
             'name': 'refs/head/foo'
         })
-        self.addCleanup(self.unlink, self.foo_branch)
 
     @patch('odoo.addons.runbot.models.build.runbot_build._reap')
     @patch('odoo.addons.runbot.models.build.runbot_build._kill')
@@ -82,7 +76,6 @@ class Test_Repo_Scheduler(common.TransactionCase):
             'state': 'pending',
         })
         builds.append(build)
-        self.addCleanup(self.unlink, builds)
         self.env['runbot.repo']._scheduler(ids=[self.foo_repo.id, ])
 
         build.invalidate_cache()
