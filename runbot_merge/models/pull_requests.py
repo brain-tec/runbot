@@ -13,7 +13,7 @@ from itertools import takewhile
 from odoo import api, fields, models, tools
 from odoo.exceptions import ValidationError
 
-from .. import github, exceptions, controllers
+from .. import github, exceptions, controllers, utils
 
 STAGING_SLEEP = 20
 "temp hack: add a delay between staging repositories in case there's a race when quickly pushing a repo then its dependency"
@@ -130,7 +130,7 @@ class Project(models.Model):
                     "Error while trying to %s %s:%s (%s)",
                     'close' if f.close else 'send a comment to',
                     repo.name, f.pull_request,
-                    f.message and f.message[:200]
+                    utils.shorten(f.message, 200)
                 )
             else:
                 to_remove.append(f.id)
@@ -148,7 +148,13 @@ class Project(models.Model):
             if not f:
                 return
 
-            f.repository._load_pr(f.number)
+            self.env.cr.execute("SAVEPOINT runbot_merge_before_fetch")
+            try:
+                f.repository._load_pr(f.number)
+            except Exception:
+                self.env.cr.execute("ROLLBACK TO SAVEPOINT runbot_merge_before_fetch")
+                _logger.exception("Failed to load pr %s, skipping it", f.number)
+            self.env.cr.execute("RELEASE SAVEPOINT runbot_merge_before_fetch")
 
             # commit after each fetched PR
             f.active = False
@@ -252,24 +258,7 @@ class Branch(models.Model):
         for b in self:
             b.active_staging_id = b.staging_ids
 
-    def try_staging(self):
-        """ Tries to create a staging if the current branch does not already
-        have one. Returns None if the branch already has a staging or there
-        is nothing to stage, the newly created staging otherwise.
-        """
-        logger = _logger.getChild('cron')
-
-        logger.info(
-            "Checking %s (%s) for staging: %s, skip? %s",
-            self, self.name,
-            self.active_staging_id,
-            bool(self.active_staging_id)
-        )
-        if self.active_staging_id:
-            return
-
-        PRs = self.env['runbot_merge.pull_requests']
-
+    def _stageable(self):
         # noinspection SqlResolve
         self.env.cr.execute("""
         SELECT
@@ -277,7 +266,7 @@ class Branch(models.Model):
           array_agg(pr.id) AS match
         FROM runbot_merge_pull_requests pr
         LEFT JOIN runbot_merge_batch batch ON pr.batch_id = batch.id AND batch.active
-        WHERE pr.target = %s
+        WHERE pr.target = any(%s)
           -- exclude terminal states (so there's no issue when
           -- deleting branches & reusing labels)
           AND pr.state != 'merged'
@@ -296,9 +285,29 @@ class Branch(models.Model):
                 OR bool_and(pr.state = 'ready')
             )
         ORDER BY min(pr.priority), min(pr.id)
-        """, [self.id])
-        # result: [(priority, [(repo_id, pr_id) for repo in repos]
-        rows = self.env.cr.fetchall()
+        """, [self.ids])
+        # result: [(priority, [pr_id for repo in repos])]
+        return self.env.cr.fetchall()
+
+    def try_staging(self):
+        """ Tries to create a staging if the current branch does not already
+        have one. Returns None if the branch already has a staging or there
+        is nothing to stage, the newly created staging otherwise.
+        """
+        logger = _logger.getChild('cron')
+
+        logger.info(
+            "Checking %s (%s) for staging: %s, skip? %s",
+            self, self.name,
+            self.active_staging_id,
+            bool(self.active_staging_id)
+        )
+        if self.active_staging_id:
+            return
+
+        PRs = self.env['runbot_merge.pull_requests']
+
+        rows = self._stageable()
         priority = rows[0][0] if rows else -1
         if priority == 0:
             # p=0 take precedence over all else
@@ -415,6 +424,7 @@ class PullRequests(models.Model):
     ], default=False)
     method_warned = fields.Boolean(default=False)
 
+    reviewed_by = fields.Many2one('res.partner')
     delegates = fields.Many2many('res.partner', help="Delegate reviewers, not intrinsically reviewers but can review this PR")
     priority = fields.Selection([
         (0, 'Urgent'),
@@ -432,6 +442,22 @@ class PullRequests(models.Model):
         default=False, help="Whether we've already warned that this (ready)"
                             " PR is linked to an other non-ready PR"
     )
+
+    blocked = fields.Boolean(
+        compute='_compute_is_blocked',
+        help="PR is not currently stageable for some reason (mostly an issue if status is ready)"
+    )
+
+    # missing link to other PRs
+    @api.depends('priority', 'state', 'squash', 'merge_method', 'batch_id.active', 'label')
+    def _compute_is_blocked(self):
+        stageable = {
+            pr_id
+            for _, pr_ids in self.mapped('target')._stageable()
+            for pr_id in pr_ids
+        }
+        for pr in self:
+            pr.blocked = pr.id not in stageable
 
     @api.depends('head')
     def _compute_statuses(self):
@@ -537,8 +563,8 @@ class PullRequests(models.Model):
         )
 
         if not commands:
-            _logger.info("found no commands in comment of %s (%s) (%s%s)", author.github_login, author.display_name,
-                 comment[:50], '...' if len(comment) > 50 else ''
+            _logger.info("found no commands in comment of %s (%s) (%s)", author.github_login, author.display_name,
+                 utils.shorten(comment, 50)
             )
             return 'ok'
 
@@ -583,6 +609,7 @@ class PullRequests(models.Model):
                     newstate = RPLUS.get(self.state)
                     if newstate:
                         self.state = newstate
+                        self.reviewed_by = author
                         ok = True
                     else:
                         msg = "This PR is already reviewed, reviewing it again is useless."
@@ -666,17 +693,26 @@ class PullRequests(models.Model):
         # targets
         for pr in self:
             required = pr.repository.project_id.required_statuses.split(',')
-            if all(state_(statuses, r) == 'success' for r in required):
+
+            for ci in required:
+                st = state_(statuses, ci) or 'pending'
+                if st == 'success':
+                    continue
+
+                # only report an issue of the PR is already approved (r+'d)
+                if st in ('error', 'failure') and pr.state == 'approved':
+                    self.env['runbot_merge.pull_requests.feedback'].create({
+                        'repository': pr.repository.id,
+                        'pull_request': pr.number,
+                        'message': "%r failed on this reviewed PR." % ci,
+                    })
+                break
+            else: # all success (no break)
                 oldstate = pr.state
                 if oldstate == 'opened':
                     pr.state = 'validated'
                 elif oldstate == 'approved':
                     pr.state = 'ready'
-
-            #     _logger.info("CI+ (%s) for PR %s:%s: %s -> %s",
-            #                  statuses, pr.repository.name, pr.number, oldstate, pr.state)
-            # else:
-            #     _logger.info("CI- (%s) for PR %s:%s", statuses, pr.repository.name, pr.number)
 
     def _auto_init(self):
         res = super(PullRequests, self)._auto_init()
@@ -712,7 +748,15 @@ class PullRequests(models.Model):
     @api.multi
     def write(self, vals):
         oldstate = { pr: pr._tagstate for pr in self }
+
         w = super().write(vals)
+
+        newhead = vals.get('head')
+        if newhead:
+            c = self.env['runbot_merge.commit'].search([('sha', '=', newhead)])
+            if c.statuses:
+                self._validate(json.loads(c.statuses))
+
         for pr in self:
             before, after = oldstate[pr], pr._tagstate
             if after != before:
@@ -807,13 +851,33 @@ class PullRequests(models.Model):
                 self.env.cr.commit()
 
     def _build_merge_message(self, message):
+        # handle co-authored commits (https://help.github.com/articles/creating-a-commit-with-multiple-authors/)
+        lines = message.splitlines()
+        coauthors = []
+        for idx, line in enumerate(reversed(lines)):
+            if line.startswith('Co-authored-by:'):
+                coauthors.append(line)
+                continue
+            if not line.strip():
+                continue
+
+            if idx:
+                del lines[-idx:]
+            break
+
         m = re.search(r'( |{repository})#{pr.number}\b'.format(
             pr=self,
             repository=self.repository.name.replace('/', '\\/')
         ), message)
-        if m:
-            return message
-        return message + '\n\ncloses {pr.repository.name}#{pr.number}'.format(pr=self)
+        if not m:
+            lines.extend(['', 'closes {pr.repository.name}#{pr.number}'.format(pr=self)])
+        if self.reviewed_by:
+            lines.extend(['', 'Signed-off-by: {}'.format(self.reviewed_by.formatted_email)])
+
+        if coauthors:
+            lines.extend(['', ''])
+            lines.extend(reversed(coauthors))
+        return '\n'.join(lines)
 
     def _stage(self, gh, target):
         # nb: pr_commits is oldest to newest so pr.head is pr_commits[-1]
@@ -821,9 +885,15 @@ class PullRequests(models.Model):
         commits = prdict['commits']
         method = self.merge_method or ('rebase-ff' if commits == 1 else None)
         assert commits < 50 or not method.startswith('rebase'), \
-            "rebasing a PR or more than 50 commits is a tad excessive"
+            "rebasing a PR of more than 50 commits is a tad excessive"
         assert commits < 250, "merging PRs of 250+ commits is not supported (https://developer.github.com/v3/pulls/#list-commits-on-a-pull-request)"
         pr_commits = gh.commits(self.number)
+
+        if self.reviewed_by and self.reviewed_by.name == self.reviewed_by.github_login:
+            # XXX: find other trigger(s) to sync github name?
+            gh_name = gh.user(self.reviewed_by.github_login)['name']
+            if gh_name:
+                self.reviewed_by.name = gh_name
 
         # NOTE: lost merge v merge/copy distinction (head being
         #       a merge commit reused instead of being re-merged)
@@ -956,15 +1026,16 @@ class Commit(models.Model):
 
     sha = fields.Char(required=True)
     statuses = fields.Char(help="json-encoded mapping of status contexts to states", default="{}")
+    to_check = fields.Boolean(default=False)
 
     def create(self, values):
+        values['to_check'] = True
         r = super(Commit, self).create(values)
-        r._notify()
         return r
 
     def write(self, values):
+        values.setdefault('to_check', True)
         r = super(Commit, self).write(values)
-        self._notify()
         return r
 
     # NB: GH recommends doing heavy work asynchronously, may be a good
@@ -973,7 +1044,8 @@ class Commit(models.Model):
         Stagings = self.env['runbot_merge.stagings']
         PRs = self.env['runbot_merge.pull_requests']
         # chances are low that we'll have more than one commit
-        for c in self:
+        for c in self.search([('to_check', '=', True)]):
+            c.to_check = False
             st = json.loads(c.statuses)
             pr = PRs.search([('head', '=', c.sha)])
             if pr:
@@ -983,6 +1055,8 @@ class Commit(models.Model):
             stagings = Stagings.search([('heads', 'ilike', c.sha)])
             if stagings:
                 stagings._validate()
+
+            self.env.cr.commit()
 
     _sql_constraints = [
         ('unique_sha', 'unique (sha)', 'no duplicated commit'),
@@ -994,6 +1068,10 @@ class Commit(models.Model):
             CREATE INDEX IF NOT EXISTS runbot_merge_unique_statuses 
             ON runbot_merge_commit
             USING hash (sha)
+        """)
+        self._cr.execute("""
+            CREATE INDEX IF NOT EXISTS runbot_merge_to_process
+            ON runbot_merge_commit ((1)) WHERE to_check
         """)
         return res
 
@@ -1071,7 +1149,6 @@ class Stagings(models.Model):
                         st = 'pending'
                     else:
                         assert v == 'success'
-
             # mark failure as soon as we find a failed status, but wait until
             # all commits are known & not pending to mark a success
             if st == 'success' and len(commits) < len(heads):
@@ -1080,10 +1157,14 @@ class Stagings(models.Model):
 
             s.state = st
 
-    def cancel(self, reason, *args):
+    @api.multi
+    def cancel(self, reason=None, *args):
         if not self:
             return
 
+        if reason is None:
+            reason = "explicitly cancelled by %s"
+            args = [self.env.user.display_name]
         _logger.info("Cancelling staging %s: " + reason, self, *args)
         self.batch_ids.write({'active': False})
         self.write({
@@ -1197,36 +1278,13 @@ class Stagings(models.Model):
             gh = {repo.name: repo.github() for repo in project.repo_ids}
             repo_name = None
             staging_heads = json.loads(self.heads)
+            self.env.cr.execute('''
+            SELECT 1 FROM runbot_merge_pull_requests
+            WHERE id in %s
+            FOR UPDATE
+            ''', [tuple(self.mapped('batch_ids.prs.id'))])
             try:
-                # reverting updates doesn't work if the branches are
-                # protected (because a revert is basically a force
-                # push), instead use the tmp branch as a dry-run
-                tmp_target = 'tmp.' + self.target.name
-                # first force-push the current targets to all tmps
-                for repo_name in staging_heads.keys():
-                    if repo_name.endswith('^'):
-                        continue
-                    g = gh[repo_name]
-                    g.set_ref(tmp_target, g.head(self.target.name))
-
-                # then attempt to FF the tmp to the staging
-                for repo_name, head in staging_heads.items():
-                    if repo_name.endswith('^'):
-                        continue
-                    gh[repo_name].fast_forward(tmp_target, staging_heads.get(repo_name + '^') or head)
-
-                # there is still a race condition here, but it's way
-                # lower than "the entire staging duration"...
-                for repo_name, head in staging_heads.items():
-                    if repo_name.endswith('^'):
-                        continue
-
-                    # if the staging has a $repo^ head, merge that,
-                    # otherwise merge the regular (CI'd) head
-                    gh[repo_name].fast_forward(
-                        self.target.name,
-                        staging_heads.get(repo_name + '^') or head
-                    )
+                repo_name = self._safety_dance(gh, staging_heads)
             except exceptions.FastForwardError as e:
                 logger.warning(
                     "Could not fast-forward successful staging on %s:%s",
@@ -1256,6 +1314,67 @@ class Stagings(models.Model):
                 self.write({'active': False})
         elif self.state == 'failure' or project.is_timed_out(self):
             self.try_splitting()
+
+    def _safety_dance(self, gh, staging_heads):
+        """ Reverting updates doesn't work if the branches are protected
+        (because a revert is basically a force push). So we can update
+        REPO_A, then fail to update REPO_B for some reason, and we're hosed.
+
+        To try and make this issue less likely, do the safety dance:
+
+        * First, perform a dry run using the tmp branches (which can be
+          force-pushed and sacrificed), that way if somebody pushed directly
+          to REPO_B during the staging we catch it. If we're really unlucky
+          they could still push after the dry run but...
+        * An other issue then is that the github call sometimes fails for no
+          noticeable reason (e.g. network failure or whatnot), if it fails
+          on REPO_B when REPO_A has already been updated things get pretty
+          bad. In that case, wait a bit and retry for now. A more complex
+          strategy (including disabling the branch entirely until somebody
+          has looked at and fixed the issue) might be necessary.
+
+        :returns: the last repo it tried to update (probably the one on which
+                  it failed, if it failed)
+        """
+        # FIXME: would make sense for FFE to be richer, and contain the repo name
+        repo_name = None
+        tmp_target = 'tmp.' + self.target.name
+        # first force-push the current targets to all tmps
+        for repo_name in staging_heads.keys():
+            if repo_name.endswith('^'):
+                continue
+            g = gh[repo_name]
+            g.set_ref(tmp_target, g.head(self.target.name))
+        # then attempt to FF the tmp to the staging
+        for repo_name, head in staging_heads.items():
+            if repo_name.endswith('^'):
+                continue
+            gh[repo_name].fast_forward(tmp_target, staging_heads.get(repo_name + '^') or head)
+        # there is still a race condition here, but it's way
+        # lower than "the entire staging duration"...
+        first = True
+        for repo_name, head in staging_heads.items():
+            if repo_name.endswith('^'):
+                continue
+
+            for pause in [0.1, 0.3, 0.5, 0.9, 0]: # last one must be 0/falsy of we lose the exception
+                try:
+                    # if the staging has a $repo^ head, merge that,
+                    # otherwise merge the regular (CI'd) head
+                    gh[repo_name].fast_forward(
+                        self.target.name,
+                        staging_heads.get(repo_name + '^') or head
+                    )
+                except exceptions.FastForwardError:
+                    # The GH API regularly fails us. If the failure does not
+                    # occur on the first repository, retry a few times with a
+                    # little pause.
+                    if not first and pause:
+                        time.sleep(pause)
+                        continue
+                    raise
+            first = False
+        return repo_name
 
 class Split(models.Model):
     _name = 'runbot_merge.split'

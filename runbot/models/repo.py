@@ -4,6 +4,7 @@ import dateutil
 import json
 import logging
 import os
+import random
 import re
 import requests
 import signal
@@ -23,7 +24,7 @@ class runbot_repo(models.Model):
     _name = "runbot.repo"
 
     name = fields.Char('Repository', required=True)
-    # branch_ids = fields.One2many('runbot.branch', inverse_name='repo_id') # keep for next version
+    short_name = fields.Char('Repository', compute='_compute_short_name', store=False, readonly=True)
     sequence = fields.Integer('Sequence')
     path = fields.Char(compute='_get_path', string='Directory', readonly=True)
     base = fields.Char(compute='_get_base_url', string='Base URL', readonly=True)  # Could be renamed to a more explicit name like base_url
@@ -73,12 +74,20 @@ class runbot_repo(models.Model):
             name = name.replace(':', '/')
             repo.base = name
 
+    @api.depends('name', 'base')
+    def _compute_short_name(self):
+        for repo in self:
+            repo.short_name = '/'.join(repo.base.split('/')[-2:])
+
     def _git(self, cmd):
         """Execute a git command 'cmd'"""
         for repo in self:
             cmd = ['git', '--git-dir=%s' % repo.path] + cmd
             _logger.info("git command: %s", ' '.join(cmd))
             return subprocess.check_output(cmd).decode('utf-8')
+
+    def _git_rev_parse(self, branch_name):
+        return self._git(['rev-parse', branch_name]).strip()
 
     def _git_export(self, treeish, dest):
         """Export a git repo to dest"""
@@ -88,6 +97,15 @@ class runbot_repo(models.Model):
         p2 = subprocess.Popen(['tar', '-xmC', dest], stdin=p1.stdout, stdout=subprocess.PIPE)
         p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
         p2.communicate()[0]
+
+    def _hash_exists(self, commit_hash):
+        """ Verify that a commit hash exists in the repo """
+        self.ensure_one()
+        try:
+            self._git(['cat-file', '-e', commit_hash])
+        except subprocess.CalledProcessError:
+            return False
+        return True
 
     def _github(self, url, payload=None, ignore_errors=False):
         """Return a http request to be sent to github"""
@@ -115,39 +133,17 @@ class runbot_repo(models.Model):
                 else:
                     raise
 
-    def _update_git(self):
-        """ Update the git repo on FS """
+    def _find_new_commits(self):
+        """ Find new commits in bare repo """
         self.ensure_one()
-        repo = self
-        _logger.debug('repo %s updating branches', repo.name)
-
+        Branch = self.env['runbot.branch']
+        Build = self.env['runbot.build']
         icp = self.env['ir.config_parameter']
         max_age = int(icp.get_param('runbot.runbot_max_age', default=30))
 
-        Build = self.env['runbot.build']
-        Branch = self.env['runbot.branch']
-
-        if not os.path.isdir(os.path.join(repo.path)):
-            os.makedirs(repo.path)
-        if not os.path.isdir(os.path.join(repo.path, 'refs')):
-            _logger.info("Cloning repository '%s' in '%s'" % (repo.name, repo.path))
-            subprocess.call(['git', 'clone', '--bare', repo.name, repo.path])
-
-        # check for mode == hook
-        fname_fetch_head = os.path.join(repo.path, 'FETCH_HEAD')
-        if os.path.isfile(fname_fetch_head):
-            fetch_time = os.path.getmtime(fname_fetch_head)
-            if repo.mode == 'hook' and repo.hook_time and dt2time(repo.hook_time) < fetch_time:
-                t0 = time.time()
-                _logger.debug('repo %s skip hook fetch fetch_time: %ss ago hook_time: %ss ago',
-                              repo.name, int(t0 - fetch_time), int(t0 - dt2time(repo.hook_time)))
-                return
-
-        repo._git(['fetch', '-p', 'origin', '+refs/heads/*:refs/heads/*', '+refs/pull/*/head:refs/pull/*'])
-
         fields = ['refname', 'objectname', 'committerdate:iso8601', 'authorname', 'authoremail', 'subject', 'committername', 'committeremail']
         fmt = "%00".join(["%(" + field + ")" for field in fields])
-        git_refs = repo._git(['for-each-ref', '--format', fmt, '--sort=-committerdate', 'refs/heads', 'refs/pull'])
+        git_refs = self._git(['for-each-ref', '--format', fmt, '--sort=-committerdate', 'refs/heads', 'refs/pull'])
         git_refs = git_refs.strip()
 
         refs = [[field for field in line.split('\x00')] for line in git_refs.split('\n')]
@@ -157,24 +153,16 @@ class runbot_repo(models.Model):
           SELECT t.branch, b.id
             FROM t LEFT JOIN runbot_branch b ON (b.name = t.branch)
            WHERE b.repo_id = %s;
-        """, ([r[0] for r in refs], repo.id))
+        """, ([r[0] for r in refs], self.id))
         ref_branches = {r[0]: r[1] for r in self.env.cr.fetchall()}
 
         for name, sha, date, author, author_email, subject, committer, committer_email in refs:
             # create or get branch
-            # branch = repo.branch_ids.search([('name', '=', name), ('repo_id', '=', repo.id)])
-            # if not branch:
-            #    _logger.debug('repo %s found new branch %s', repo.name, name)
-            #    branch = self.branch_ids.create({
-            #        'repo_id': repo.id,
-            #        'name': name})
-            # keep for next version with a branch_ids field
-
             if ref_branches.get(name):
                 branch_id = ref_branches[name]
             else:
-                _logger.debug('repo %s found new branch %s', repo.name, name)
-                branch_id = Branch.create({'repo_id': repo.id, 'name': name}).id
+                _logger.debug('repo %s found new branch %s', self.name, name)
+                branch_id = Branch.create({'repo_id': self.id, 'name': name}).id
             branch = Branch.browse([branch_id])[0]
 
             # skip the build for old branches (Could be checked before creating the branch in DB ?)
@@ -223,25 +211,65 @@ class runbot_repo(models.Model):
                         if latest_rev_build:
                             _logger.debug('Reverse dependency build %s forced in repo %s by commit %s', latest_rev_build.dest, rev_repo.name, sha[:6])
                             latest_rev_build.build_type = 'indirect'
-                            new_build.revdep_build_ids += latest_rev_build._force(message='Rebuild from dependency %s commit %s' % (repo.name, sha[:6]))
+                            new_build.revdep_build_ids += latest_rev_build._force(message='Rebuild from dependency %s commit %s' % (self.name, sha[:6]))
 
         # skip old builds (if their sequence number is too low, they will not ever be built)
-        skippable_domain = [('repo_id', '=', repo.id), ('state', '=', 'pending')]
+        skippable_domain = [('repo_id', '=', self.id), ('state', '=', 'pending')]
         icp = self.env['ir.config_parameter']
         running_max = int(icp.get_param('runbot.runbot_running_max', default=75))
         builds_to_be_skipped = Build.search(skippable_domain, order='sequence desc', offset=running_max)
         builds_to_be_skipped._skip()
 
-    def _update(self, repos):
+    def _create_pending_builds(self, repos):
+        """ Find new commits in physical repos"""
+        for repo in repos:
+            try:
+                repo._find_new_commits()
+            except Exception:
+                _logger.exception('Fail to find new commits in repo %s', repo.name)
+
+    def _clone(self):
+        """ Clone the remote repo if needed """
+        self.ensure_one()
+        repo = self
+        if not os.path.isdir(os.path.join(repo.path, 'refs')):
+            _logger.info("Cloning repository '%s' in '%s'" % (repo.name, repo.path))
+            subprocess.call(['git', 'clone', '--bare', repo.name, repo.path])
+
+    def _update_git(self, force):
+        """ Update the git repo on FS """
+        self.ensure_one()
+        repo = self
+        _logger.debug('repo %s updating branches', repo.name)
+
+        if not os.path.isdir(os.path.join(repo.path)):
+            os.makedirs(repo.path)
+        self._clone()
+
+        # check for mode == hook
+        fname_fetch_head = os.path.join(repo.path, 'FETCH_HEAD')
+        if not force and os.path.isfile(fname_fetch_head):
+            fetch_time = os.path.getmtime(fname_fetch_head)
+            if repo.mode == 'hook' and repo.hook_time and dt2time(repo.hook_time) < fetch_time:
+                t0 = time.time()
+                _logger.debug('repo %s skip hook fetch fetch_time: %ss ago hook_time: %ss ago',
+                              repo.name, int(t0 - fetch_time), int(t0 - dt2time(repo.hook_time)))
+                return
+
+        repo._git(['fetch', '-p', 'origin', '+refs/heads/*:refs/heads/*', '+refs/pull/*/head:refs/pull/*'])
+
+    def _update(self, repos, force=True):
         """ Update the physical git reposotories on FS"""
         for repo in repos:
             try:
-                repo._update_git()
+                repo._update_git(force)
             except Exception:
                 _logger.exception('Fail to update repo %s', repo.name)
 
     def _scheduler(self, ids=None):
         """Schedule builds for the repository"""
+        if not ids:
+            return
         icp = self.env['ir.config_parameter']
         workers = int(icp.get_param('runbot.runbot_workers', default=6))
         running_max = int(icp.get_param('runbot.runbot_running_max', default=75))
@@ -256,22 +284,41 @@ class runbot_repo(models.Model):
         build_ids._schedule()
 
         # launch new tests
-        testing = Build.search_count(domain_host + [('state', '=', 'testing')])
-        pending = Build.search_count(domain + [('state', '=', 'pending')])
+        nb_testing = Build.search_count(domain_host + [('state', '=', 'testing')])
+        available_slots = workers - nb_testing
+        if available_slots > 0:
+            # commit transaction to reduce the critical section duration
+            self.env.cr.commit()
+            # self-assign to be sure that another runbot instance cannot self assign the same builds
+            query = """UPDATE
+                            runbot_build
+                        SET
+                            host = %(host)s
+                        WHERE
+                            runbot_build.id IN (
+                                SELECT
+                                    runbot_build.id
+                                FROM
+                                    runbot_build
+                                LEFT JOIN runbot_branch ON runbot_branch.id = runbot_build.branch_id
+                            WHERE
+                                runbot_build.repo_id IN %(repo_ids)s
+                                AND runbot_build.state = 'pending'
+                                AND runbot_branch.job_type != 'none'
+                                AND runbot_build.host IS NULL
+                            ORDER BY
+                                runbot_branch.sticky DESC,
+                                runbot_branch.priority DESC,
+                                array_position(array['normal','rebuild','indirect','scheduled']::varchar[], runbot_build.build_type) ASC,
+                                runbot_build.sequence ASC
+                            FOR UPDATE OF runbot_build SKIP LOCKED
+                        LIMIT %(available_slots)s)"""
 
-        while testing < workers and pending > 0:
-
-            # find sticky / priority pending build if any, otherwise, last pending (by id, not by sequence) will do the job
-
-            pending_ids = Build.search(domain + [('state', '=', 'pending'), '|', ('branch_id.sticky', '=', True), ('branch_id.priority', '=', True)], limit=1)
-            if not pending_ids:
-                pending_ids = Build.search(domain + [('state', '=', 'pending')], order="sequence", limit=1)
-
-            pending_ids._schedule()
-
-            # compute the number of testing and pending jobs again
-            testing = Build.search_count(domain_host + [('state', '=', 'testing')])
-            pending = Build.search_count(domain + [('state', '=', 'pending')])
+            self.env.cr.execute(query, {'repo_ids': tuple(ids), 'host': fqdn(), 'available_slots': available_slots})
+            pending_build = Build.search(domain + domain_host + [('state', '=', 'pending')])
+            if pending_build:
+                pending_build._schedule()
+                self.env.cr.commit()
 
         # terminate and reap doomed build
         build_ids = Build.search(domain_host + [('state', '=', 'running')]).ids
@@ -321,8 +368,49 @@ class runbot_repo(models.Model):
                     else:
                         _logger.debug('failed to start nginx - failed to kill orphan worker - oh well')
 
-    def _cron(self):
-        repos = self.search([('mode', '!=', 'disabled')])
-        self._update(repos)
-        self._scheduler(repos.ids)
-        self._reload_nginx()
+    def _get_cron_period(self, min_margin=120):
+        """ Compute a randomized cron period with a 2 min margin below
+        real cron timeout from config.
+        """
+        cron_limit = config.get('limit_time_real_cron')
+        req_limit = config.get('limit_time_real')
+        cron_timeout = cron_limit if cron_limit > -1 else req_limit
+        return cron_timeout - (min_margin + random.randint(1, 60))
+
+    def _cron_fetch_and_schedule(self, hostname):
+        """This method have to be called from a dedicated cron on a runbot
+        in charge of orchestration.
+        """
+        if hostname != fqdn():
+            return 'Not for me'
+        start_time = time.time()
+        timeout = self._get_cron_period()
+        icp = self.env['ir.config_parameter']
+        update_frequency = int(icp.get_param('runbot.runbot_update_frequency', default=10))
+        while time.time() - start_time < timeout:
+            repos = self.search([('mode', '!=', 'disabled')])
+            self._update(repos, force=False)
+            self._create_pending_builds(repos)
+
+            self.env.cr.commit()
+            self.invalidate_cache()
+            time.sleep(update_frequency)
+
+    def _cron_fetch_and_build(self, hostname):
+        """ This method have to be called from a dedicated cron
+        created on each runbot instance.
+        """
+        if hostname != fqdn():
+            return 'Not for me'
+        start_time = time.time()
+        timeout = self._get_cron_period()
+        icp = self.env['ir.config_parameter']
+        update_frequency = int(icp.get_param('runbot.runbot_update_frequency', default=10))
+        while time.time() - start_time < timeout:
+            repos = self.search([('mode', '!=', 'disabled')])
+            self._scheduler(repos.ids)
+            self.env.cr.commit()
+            self.env.reset()
+            self = self.env()[self._name]
+            self._reload_nginx()
+            time.sleep(update_frequency)

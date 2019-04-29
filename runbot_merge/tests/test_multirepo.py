@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from test_utils import re_matches, run_crons
+from test_utils import re_matches, run_crons, get_partner
 
 @pytest.fixture
 def repo_a(make_repo):
@@ -73,7 +73,7 @@ def test_stage_one(env, project, repo_a, repo_b):
     make_branch(repo_b, 'master', 'initial', {'a': 'b_0'})
     pr_b = make_pr(repo_b, 'B', [{'a': 'b_1'}], label='do-other-thing')
 
-    env['runbot_merge.project']._check_progress()
+    run_crons(env)
 
     assert to_pr(env, pr_a).state == 'ready'
     assert to_pr(env, pr_a).staging_id
@@ -90,7 +90,7 @@ def test_stage_match(env, project, repo_a, repo_b):
     make_branch(repo_b, 'master', 'initial', {'a': 'b_0'})
     pr_b = make_pr(repo_b, 'B', [{'a': 'b_1'}], label='do-a-thing')
 
-    env['runbot_merge.project']._check_progress()
+    run_crons(env)
 
     pr_a = to_pr(env, pr_a)
     pr_b = to_pr(env, pr_b)
@@ -121,7 +121,7 @@ def test_unmatch_patch(env, project, repo_a, repo_b):
     make_branch(repo_b, 'master', 'initial', {'a': 'b_0'})
     pr_b = make_pr(repo_b, 'B', [{'a': 'b_1'}], label='patch-1')
 
-    env['runbot_merge.project']._check_progress()
+    run_crons(env)
 
     pr_a = to_pr(env, pr_a)
     pr_b = to_pr(env, pr_b)
@@ -143,7 +143,7 @@ def test_sub_match(env, project, repo_a, repo_b, repo_c):
     make_branch(repo_c, 'master', 'initial', {'a': 'c_0'})
     pr_c = make_pr(repo_c, 'C', [{'a': 'c_1'}], label='do-a-thing')
 
-    env['runbot_merge.project']._check_progress()
+    run_crons(env)
 
     pr_b = to_pr(env, pr_b)
     pr_c = to_pr(env, pr_c)
@@ -201,13 +201,14 @@ def test_merge_fail(env, project, repo_a, repo_b, users):
         (users['user'], re_matches('^Unable to stage PR')),
     ]
     other = to_pr(env, pr1a)
+    reviewer = get_partner(env, users["reviewer"]).formatted_email
     assert not other.staging_id
     assert [
         c['commit']['message']
         for c in repo_a.log('heads/staging.master')
     ] == [
         re_matches('^force rebuild'),
-        'commit_A2_00\n\ncloses %s#2' % repo_a.name,
+        'commit_A2_00\n\ncloses %s#2\n\nSigned-off-by: %s' % (repo_a.name, reviewer),
         'initial'
     ], "dummy commit + squash-merged PR commit + root commit"
 
@@ -222,7 +223,7 @@ def test_ff_fail(env, project, repo_a, repo_b):
     make_branch(repo_b, 'master', 'initial', {'a': 'b_0'})
     make_pr(repo_b, 'B', [{'a': 'b_1'}], label='do-a-thing')
 
-    env['runbot_merge.project']._check_progress()
+    run_crons(env)
 
     # add second commit blocking FF
     cn = repo_b.make_commit('heads/master', 'second', None, tree={'a': 'b_0', 'b': 'other'})
@@ -259,12 +260,12 @@ class TestCompanionsNotReady:
 
         pr_a = to_pr(env, p_a)
         pr_b = to_pr(env, p_b)
-        assert pr_a.state == 'ready'
-        assert pr_b.state == 'validated'
         assert pr_a.label == pr_b.label == '{}:do-a-thing'.format(owner)
 
         run_crons(env)
 
+        assert pr_a.state == 'ready'
+        assert pr_b.state == 'validated'
         assert not pr_b.staging_id
         assert not pr_a.staging_id, \
             "pr_a should not have been staged as companion is not ready"
@@ -347,7 +348,7 @@ def test_other_failed(env, project, repo_a, repo_b, owner, users):
 
     make_branch(repo_b, 'master', 'initial', {'a': 'b_0'})
 
-    env['runbot_merge.project']._check_progress()
+    run_crons(env)
     pr = to_pr(env, pr_a)
     assert pr.staging_id
 
@@ -381,7 +382,7 @@ class TestMultiBatches:
             for i, (a, b) in enumerate([(1, 1), (0, 1), (1, 1), (1, 1), (1, 0)])
         ]
 
-        env['runbot_merge.project']._check_progress()
+        run_crons(env)
 
         st = env['runbot_merge.stagings'].search([])
         assert st
@@ -410,7 +411,7 @@ class TestMultiBatches:
             for i, (a, b) in enumerate([(1, 1), (0, 1), (1, 1), (1, 1), (1, 0)])
         ]
 
-        env['runbot_merge.project']._check_progress()
+        run_crons(env)
 
         st0 = env['runbot_merge.stagings'].search([])
         assert len(st0.batch_ids) == 5
@@ -421,7 +422,7 @@ class TestMultiBatches:
         repo_b.post_status('heads/staging.master', 'success', 'legal/cla')
         repo_b.post_status('heads/staging.master', 'failure', 'ci/runbot')
 
-        env['runbot_merge.project']._check_progress()
+        run_crons(env)
 
         assert not st0.active
 
@@ -453,7 +454,7 @@ def test_urgent(env, repo_a, repo_b):
     pr_a.post_comment('hansen rebase-merge', 'reviewer')
     pr_b.post_comment('hansen rebase-merge p=0', 'reviewer')
 
-    env['runbot_merge.project']._check_progress()
+    run_crons(env)
     # should have batched pr_a and pr_b despite neither being reviewed or
     # approved
     p_a, p_b = to_pr(env, pr_a), to_pr(env, pr_b)
@@ -461,3 +462,81 @@ def test_urgent(env, repo_a, repo_b):
     assert p_a.batch_id and p_b.batch_id and p_a.batch_id == p_b.batch_id,\
         "a and b should have been recognised as co-dependent"
     assert not p_c.staging_id
+
+class TestBlocked:
+    def test_merge_method(self, env, repo_a):
+        make_branch(repo_a, 'master', 'initial', {'a0': 'a'})
+
+        pr = make_pr(repo_a, 'A', [{'a1': 'a'}, {'a2': 'a'}])
+
+        run_crons(env)
+
+        p = to_pr(env, pr)
+        assert p.state == 'ready'
+        print(p.id, p.squash, p.merge_method)
+        assert p.blocked
+
+        pr.post_comment('hansen rebase-merge', 'reviewer')
+        assert not p.blocked
+
+    def test_linked_closed(self, env, repo_a, repo_b):
+        make_branch(repo_a, 'master', 'initial', {'a0': 'a'})
+        make_branch(repo_b, 'master', 'initial', {'b0': 'b'})
+
+        pr = make_pr(repo_a, 'A', [{'a1': 'a'}], label='xxx')
+        b = make_pr(repo_b, 'B', [{'b1': 'b'}], label='xxx', statuses=[])
+        run_crons(env)
+
+        p = to_pr(env, pr)
+        assert p.blocked
+        b.close()
+        # FIXME: find a way for PR.blocked to depend on linked PR somehow so this isn't needed
+        p.invalidate_cache(['blocked'], [p.id])
+        assert not p.blocked
+
+    def test_linked_merged(self, env, repo_a, repo_b):
+        make_branch(repo_a, 'master', 'initial', {'a0': 'a'})
+        make_branch(repo_b, 'master', 'initial', {'b0': 'b'})
+
+        b = make_pr(repo_b, 'B', [{'b1': 'b'}], label='xxx')
+
+        run_crons(env) # stage b and c
+
+        repo_a.post_status('heads/staging.master', 'success', 'legal/cla')
+        repo_a.post_status('heads/staging.master', 'success', 'ci/runbot')
+        repo_b.post_status('heads/staging.master', 'success', 'legal/cla')
+        repo_b.post_status('heads/staging.master', 'success', 'ci/runbot')
+
+        run_crons(env) # merge b and c
+        assert to_pr(env, b).state == 'merged'
+
+        pr = make_pr(repo_a, 'A', [{'a1': 'a'}], label='xxx')
+        run_crons(env) # merge b and c
+
+        p = to_pr(env, pr)
+        assert not p.blocked
+
+    def test_linked_unready(self, env, repo_a, repo_b):
+        """ Create a PR A linked to a non-ready PR B,
+        * A is blocked by default
+        * A is not blocked if A.p=0
+        * A is not blocked if B.p=0
+        """
+        make_branch(repo_a, 'master', 'initial', {'a0': 'a'})
+        make_branch(repo_b, 'master', 'initial', {'b0': 'b'})
+
+        a = make_pr(repo_a, 'A', [{'a1': 'a'}], label='xxx')
+        b = make_pr(repo_b, 'B', [{'b1': 'b'}], label='xxx', statuses=[])
+        run_crons(env)
+
+        pr_a = to_pr(env, a)
+        assert pr_a.blocked
+
+        a.post_comment('hansen p=0', 'reviewer')
+        assert not pr_a.blocked
+
+        a.post_comment('hansen p=2', 'reviewer')
+        assert pr_a.blocked
+
+        b.post_comment('hansen p=0', 'reviewer')
+        assert not pr_a.blocked

@@ -245,6 +245,17 @@ def make_repo(request, config, project, github, tunnel, users, owner):
     repos = []
     def repomaker(name):
         fullname = '{}/{}'.format(owner, name)
+        repo_url = 'https://api.github.com/repos/{}'.format(fullname)
+        if request.config.getoption('--no-delete'):
+            if github.head(repo_url).ok:
+                pytest.skip("Repository {} already exists".format(fullname))
+        else:
+            # just try to delete the repo, we don't really care
+            if github.delete(repo_url).ok:
+                # if we did delete a repo, wait a bit as gh might need to
+                # propagate the thing?
+                time.sleep(30)
+
         # create repo
         r = github.post(endpoint, json={
             'name': name,
@@ -260,12 +271,12 @@ def make_repo(request, config, project, github, tunnel, users, owner):
         r.raise_for_status()
         repos.append(fullname)
         # unwatch repo
-        github.put('https://api.github.com/repos/{}/subscription'.format(fullname), json={
+        github.put('{}/subscription'.format(repo_url), json={
             'subscribed': False,
             'ignored': True,
         })
         # create webhook
-        github.post('https://api.github.com/repos/{}/hooks'.format(fullname), json={
+        github.post('{}/hooks'.format(repo_url), json={
             'name': 'web',
             'config': {
                 'url': '{}/runbot_merge/hooks'.format(tunnel),
@@ -369,6 +380,10 @@ class Model:
         assert self._model == 'runbot_merge.pull_requests'
         self._run_cron('runbot_merge.check_linked_prs_status')
 
+    def _notify(self):
+        assert self._model == 'runbot_merge.commit'
+        self._run_cron('runbot_merge.process_updated_commits')
+
     def _run_cron(self, xid):
         _, model, cron_id = self._env('ir.model.data', 'xmlid_lookup', xid)
         assert model == 'ir.cron', "Expected {} to be a cron, got {}".format(xid, model)
@@ -422,6 +437,9 @@ class Model:
             return NotImplemented
 
         return Model(self._env, self._model, {*self._ids, *other._ids}, fields=self._fields)
+
+    def invalidate_cache(self, fnames=None, ids=None):
+        pass # not a concern when every access is an RPC call
 
 class Repo:
     __slots__ = ['name', '_session', '_tokens']
