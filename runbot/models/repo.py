@@ -133,21 +133,23 @@ class runbot_repo(models.Model):
                 else:
                     raise
 
-    def _find_new_commits(self):
-        """ Find new commits in bare repo """
+    def _get_refs(self):
+        """Find new refs
+        :return: list of tuples with following refs informations:
+        name, sha, date, author, author_email, subject, committer, committer_email
+        """
         self.ensure_one()
-        Branch = self.env['runbot.branch']
-        Build = self.env['runbot.build']
-        icp = self.env['ir.config_parameter']
-        max_age = int(icp.get_param('runbot.runbot_max_age', default=30))
-
         fields = ['refname', 'objectname', 'committerdate:iso8601', 'authorname', 'authoremail', 'subject', 'committername', 'committeremail']
         fmt = "%00".join(["%(" + field + ")" for field in fields])
         git_refs = self._git(['for-each-ref', '--format', fmt, '--sort=-committerdate', 'refs/heads', 'refs/pull'])
         git_refs = git_refs.strip()
+        return [[field for field in line.split('\x00')] for line in git_refs.split('\n')]
 
-        refs = [[field for field in line.split('\x00')] for line in git_refs.split('\n')]
-
+    def _create_branches(self, refs):
+        """Parse refs and create branches that does not exists yet
+        :param refs: list of tuples returned by _get_refs()
+        """
+        Branch = self.env['runbot.branch']
         self.env.cr.execute("""
             WITH t (branch) AS (SELECT unnest(%s))
           SELECT t.branch, b.id
@@ -158,12 +160,22 @@ class runbot_repo(models.Model):
 
         for name, sha, date, author, author_email, subject, committer, committer_email in refs:
             # create or get branch
-            if ref_branches.get(name):
-                branch_id = ref_branches[name]
-            else:
+            if not ref_branches.get(name):
                 _logger.debug('repo %s found new branch %s', self.name, name)
-                branch_id = Branch.create({'repo_id': self.id, 'name': name}).id
-            branch = Branch.browse([branch_id])[0]
+                Branch.create({'repo_id': self.id, 'name': name}).id
+
+    def _find_new_commits(self, refs):
+        """Find new commits in bare repo
+        :param refs: list of tuples returned by _get_refs()
+        """
+        self.ensure_one()
+        Branch = self.env['runbot.branch']
+        Build = self.env['runbot.build']
+        icp = self.env['ir.config_parameter']
+        max_age = int(icp.get_param('runbot.runbot_max_age', default=30))
+
+        for name, sha, date, author, author_email, subject, committer, committer_email in refs:
+            branch = Branch.search([('name', '=', name), ('repo_id', '=', self.id)], limit=1)
 
             # skip the build for old branches (Could be checked before creating the branch in DB ?)
             if dateutil.parser.parse(date[:19]) + datetime.timedelta(days=max_age) < datetime.datetime.now():
@@ -220,13 +232,19 @@ class runbot_repo(models.Model):
         builds_to_be_skipped = Build.search(skippable_domain, order='sequence desc', offset=running_max)
         builds_to_be_skipped._skip()
 
-    def _create_pending_builds(self, repos):
+    @api.multi
+    def _create_pending_builds(self):
         """ Find new commits in physical repos"""
-        for repo in repos:
+        refs = {}
+        for repo in self:
             try:
-                repo._find_new_commits()
+                refs[repo] = repo._get_refs()
             except Exception:
-                _logger.exception('Fail to find new commits in repo %s', repo.name)
+                _logger.exception('Fail to get refs for repo %s', repo.name)
+
+        for repo in self:
+            repo._create_branches(refs[repo])
+            repo._find_new_commits(refs[repo])
 
     def _clone(self):
         """ Clone the remote repo if needed """

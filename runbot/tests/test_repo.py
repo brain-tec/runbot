@@ -8,6 +8,14 @@ class Test_Repo(common.TransactionCase):
     def setUp(self):
         super(Test_Repo, self).setUp()
         self.Repo = self.env['runbot.repo']
+        self.commit_list = []
+
+    def mock_git_helper(self):
+        """Helper that returns a mock for repo._git()"""
+        def mock_git(repo, cmd):
+            if cmd[0] == 'for-each-ref' and self.commit_list:
+                return '\0'.join(self.commit_list)
+        return mock_git
 
     @patch('odoo.addons.runbot.models.repo.runbot_repo._root')
     def test_base_fields(self, mock_root):
@@ -23,6 +31,87 @@ class Test_Repo(common.TransactionCase):
 
         local_repo = self.Repo.create({'name': '/path/somewhere/rep.git'})
         self.assertEqual(local_repo.short_name, 'somewhere/rep')
+
+    @patch('odoo.addons.runbot.models.repo.runbot_repo._root')
+    def test_repo_create_pending_builds(self, mock_root):
+        """ Test that when finding new refs in a repo, the missing branches
+        are created and new builds are created in pending state
+        """
+        mock_root.return_value = '/tmp/static'
+        repo = self.Repo.create({'name': 'bla@example.com:foo/bar'})
+
+        # create another repo and branch to ensure there is no mismatch
+        other_repo = self.Repo.create({'name': 'bla@example.com:foo/foo'})
+        self.env['runbot.branch'].create({
+            'repo_id': other_repo.id,
+            'name': 'refs/heads/bidon'
+        })
+
+        self.commit_list = ['refs/heads/bidon',
+                            'd0d0caca',
+                            '2019-04-29 13:03:17 +0200',
+                            'Marc Bidule',
+                            '<marc.bidule@somewhere.com>',
+                            'A nice subject',
+                            'Marc Bidule',
+                            '<marc.bidule@somewhere.com>']
+
+        with patch('odoo.addons.runbot.models.repo.runbot_repo._git', new=self.mock_git_helper()):
+            repo._create_pending_builds()
+
+        branch = self.env['runbot.branch'].search([('repo_id', '=', repo.id)])
+        self.assertEqual(branch.name, 'refs/heads/bidon', 'A new branch should have been created')
+
+        build = self.env['runbot.build'].search([('repo_id', '=', repo.id), ('branch_id', '=', branch.id)])
+        self.assertEqual(build.subject, 'A nice subject')
+        self.assertEqual(build.state, 'pending')
+        self.assertFalse(build.result)
+
+        # Simulate that a new commit is found in the other repo
+        self.commit_list = ['refs/heads/bidon',
+                            'deadbeef',
+                            '2019-04-29 13:05:30 +0200',
+                            'Marc Bidule',
+                            '<marc.bidule@somewhere.com>',
+                            'A better subject',
+                            'Marc Bidule',
+                            '<marc.bidule@somewhere.com>']
+
+        with patch('odoo.addons.runbot.models.repo.runbot_repo._git', new=self.mock_git_helper()):
+            other_repo._create_pending_builds()
+
+        branch_count = self.env['runbot.branch'].search_count([('repo_id', '=', repo.id)])
+        self.assertEqual(branch_count, 1, 'No new branch should have been created')
+
+        build = self.env['runbot.build'].search([('repo_id', '=', repo.id), ('branch_id', '=', branch.id)])
+        self.assertEqual(build.subject, 'A nice subject')
+        self.assertEqual(build.state, 'pending')
+        self.assertFalse(build.result)
+
+        # A new commit is found in the first repo, the previous pending build should be skipped
+        self.commit_list = ['refs/heads/bidon',
+                            'b00b',
+                            '2019-04-29 13:07:30 +0200',
+                            'Marc Bidule',
+                            '<marc.bidule@somewhere.com>',
+                            'Another subject',
+                            'Marc Bidule',
+                            '<marc.bidule@somewhere.com>']
+
+        with patch('odoo.addons.runbot.models.repo.runbot_repo._git', new=self.mock_git_helper()):
+            repo._create_pending_builds()
+
+        branch_count = self.env['runbot.branch'].search_count([('repo_id', '=', repo.id)])
+        self.assertEqual(branch_count, 1, 'No new branch should have been created')
+
+        build = self.env['runbot.build'].search([('repo_id', '=', repo.id), ('branch_id', '=', branch.id), ('name', '=', 'b00b')])
+        self.assertEqual(build.subject, 'Another subject')
+        self.assertEqual(build.state, 'pending')
+        self.assertFalse(build.result)
+
+        previous_build = self.env['runbot.build'].search([('repo_id', '=', repo.id), ('branch_id', '=', branch.id), ('name', '=', 'd0d0caca')])
+        self.assertEqual(previous_build.state, 'done', 'Previous pending build should be done')
+        self.assertEqual(previous_build.result, 'skipped', 'Previous pending build result should be skipped')
 
 
 class Test_Repo_Scheduler(common.TransactionCase):
