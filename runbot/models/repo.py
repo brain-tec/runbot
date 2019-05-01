@@ -246,8 +246,9 @@ class runbot_repo(models.Model):
                 _logger.exception('Fail to get refs for repo %s', repo.name)
 
         for repo in self:
-            repo._create_branches(refs[repo])
-            repo._find_new_commits(refs[repo])
+            if repo in refs:
+                repo._create_branches(refs[repo])
+                repo._find_new_commits(refs[repo])
 
     def _clone(self):
         """ Clone the remote repo if needed """
