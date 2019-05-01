@@ -174,8 +174,11 @@ class runbot_repo(models.Model):
         icp = self.env['ir.config_parameter']
         max_age = int(icp.get_param('runbot.runbot_max_age', default=30))
 
+        refs_branch_names = list({r[0] for r in refs})
+        branches = Branch.search([('name', 'in', refs_branch_names), ('repo_id', '=', self.id)])
+
         for name, sha, date, author, author_email, subject, committer, committer_email in refs:
-            branch = Branch.search([('name', '=', name), ('repo_id', '=', self.id)], limit=1)
+            branch = branches.filtered(lambda rec: rec.name == name)
 
             # skip the build for old branches (Could be checked before creating the branch in DB ?)
             if dateutil.parser.parse(date[:19]) + datetime.timedelta(days=max_age) < datetime.datetime.now():
