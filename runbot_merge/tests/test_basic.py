@@ -220,10 +220,13 @@ class TestCommitMessage:
 
     def test_commit_coauthored(self, env, repo, users):
         """ verify 'closes ...' and 'Signed-off-by' are added before co-authored-by tags.
+
+        Also checks that all co-authored-by are moved at the end of the
+        message
         """
         c1 = repo.make_commit(None, 'first!', None, tree={'f': 'm1'})
         repo.make_ref('heads/master', c1)
-        c2 = repo.make_commit(c1, 'simple commit message\n\n\nCo-authored-by: Bob <bob@example.com>', None, tree={'f': 'm2'})
+        c2 = repo.make_commit(c1, 'simple commit message\n\n\nCo-authored-by: Bob <bob@example.com>\n\nFixes a thing', None, tree={'f': 'm2'})
 
         prx = repo.make_pr('title', 'body', target='master', ctid=c2, user='user')
         repo.post_status(prx.head, 'success', 'ci/runbot')
@@ -237,7 +240,7 @@ class TestCommitMessage:
         run_crons(env)
 
         master = repo.commit('heads/master')
-        assert master.message == "simple commit message\n\ncloses {repo.name}#1"\
+        assert master.message == "simple commit message\n\nFixes a thing\n\ncloses {repo.name}#1"\
                                  "\n\nSigned-off-by: {reviewer.formatted_email}"\
                                  "\n\n\nCo-authored-by: Bob <bob@example.com>"\
                                  .format(repo=repo, reviewer=get_partner(env, users['reviewer']))
@@ -777,6 +780,33 @@ def test_ci_failure_after_review(env, repo, users):
         (users['reviewer'], 'hansen r+'),
         (users['user'], "'ci/runbot' failed on this reviewed PR.".format_map(users)),
     ]
+
+def test_reopen_state(env, repo):
+    """ The PR should be validated on opening and reopening in case there's
+    already a CI+ stored (as the CI might never trigger unless explicitly
+    re-requested)
+    """
+    m = repo.make_commit(None, 'initial', None, tree={'m': 'm'})
+    repo.make_ref('heads/master', m)
+
+    c = repo.make_commit(m, 'fist', None, tree={'m': 'c1'})
+    repo.post_status(c, 'success', 'legal/cla')
+    repo.post_status(c, 'success', 'ci/runbot')
+    prx = repo.make_pr('title', 'body', target='master', ctid=c, user='user')
+
+    pr = env['runbot_merge.pull_requests'].search([
+        ('repository.name', '=', repo.name),
+        ('number', '=', prx.number),
+    ])
+    assert pr.state == 'validated', \
+        "if a PR is created on a CI'd commit, it should be validated immediately"
+
+    prx.close()
+    assert pr.state == 'closed'
+
+    prx.open()
+    assert pr.state == 'validated', \
+        "if a PR is reopened and had a CI'd head, it should be validated immediately"
 
 class TestRetry:
     @pytest.mark.xfail(reason="This may not be a good idea as it could lead to tons of rebuild spam")
