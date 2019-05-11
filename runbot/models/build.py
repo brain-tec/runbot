@@ -1,22 +1,19 @@
 # -*- coding: utf-8 -*-
 import glob
 import logging
-import operator
 import os
+import pwd
 import re
-import resource
 import shlex
 import shutil
-import signal
 import subprocess
 import time
-from subprocess import CalledProcessError
 from ..common import dt2time, fqdn, now, grep, time2str, rfind, uniq_list, local_pgadmin_cursor, get_py_version
 from ..container import docker_build, docker_run, docker_stop, docker_is_running, docker_get_gateway_ip, build_odoo_cmd
 from odoo import models, fields, api
 from odoo.exceptions import UserError
 from odoo.http import request
-from odoo.tools import config, appdirs
+from odoo.tools import appdirs
 
 _re_error = r'^(?:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ (?:ERROR|CRITICAL) )|(?:Traceback \(most recent call last\):)$'
 _re_warning = r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ WARNING '
@@ -354,7 +351,7 @@ class runbot_build(models.Model):
 
         icp = self.env['ir.config_parameter']
         # For retro-compatibility, keep this parameter in seconds
-        default_timeout = int(icp.get_param('runbot.runbot_timeout', default=1800)) / 60
+        default_timeout = int(icp.get_param('runbot.runbot_timeout', default=3600)) / 60
 
         for build in self:
             if build.state == 'deathrow':
@@ -378,7 +375,7 @@ class runbot_build(models.Model):
                     # kill if overpassed
                     timeout = (build.branch_id.job_timeout or default_timeout) * 60 * ( build.coverage and 1.5 or 1)
                     if build.job != jobs[-1] and build.job_time > timeout:
-                        build._logger('%s time exceded (%ss)', build.job, build.job_time)
+                        build._log('schedule', '%s time exceeded (%ss)', build.job, build.job_time)
                         build.write({'job_end': now()})
                         build._kill(result='killed')
                     else:
@@ -674,8 +671,8 @@ class runbot_build(models.Model):
                 os.mkdir(datadir)
             cmd += ["--data-dir", '/data/build/datadir']
 
-        # if build.branch_id.test_tags:
-        #    cmd.extend(['--test_tags', "'%s'" % build.branch_id.test_tags])  # keep for next version
+        # use the username of the runbot host to connect to the databases
+        cmd += ['-r %s' % pwd.getpwuid(os.getuid()).pw_name]
 
         return cmd, build.modules
 
@@ -742,7 +739,7 @@ class runbot_build(models.Model):
     @runbot_job('testing', 'running')
     def _job_20_test_all(self, build, log_path):
 
-        cpu_limit = 2400
+        cpu_limit = self.env['ir.config_parameter'].get_param('runbot.runbot_timeout', default=3600)
         self._local_pg_createdb("%s-all" % build.dest)
         cmd, mods = build._cmd()
         build._log('test_all', 'Start test all modules')
@@ -805,9 +802,13 @@ class runbot_build(models.Model):
                 v['result'] = "ko"
             elif rfind(log_all, _re_warning):
                 v['result'] = "warn"
-            elif not grep(build._server("test/common.py"), "post_install") or grep(log_all, "Initiating shutdown."):
+            elif not grep(log_all, "Initiating shutdown"):
+                v['result'] = "ko"
+                build._log('run', "Seems that the build was stopped too early. The cpu_limit could have been reached")
+            elif not build.result:
                 v['result'] = "ok"
         else:
+            build._log('run', "Modules not loaded")
             v['result'] = "ko"
         build.write(v)
         build._github_status()
