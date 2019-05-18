@@ -11,6 +11,7 @@ import signal
 import subprocess
 import time
 
+from odoo.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT
 from odoo import models, fields, api
 from odoo.modules.module import get_module_resource
 from odoo.tools import config
@@ -35,12 +36,13 @@ class runbot_repo(models.Model):
                             default='poll',
                             string="Mode", required=True, help="hook: Wait for webhook on /runbot/hook/<id> i.e. github push event")
     hook_time = fields.Datetime('Last hook time')
+    get_ref_time = fields.Datetime('Last refs db update')
     duplicate_id = fields.Many2one('runbot.repo', 'Duplicate repo', help='Repository for finding duplicate builds')
     modules = fields.Char("Modules to install", help="Comma-separated list of modules to install and test.")
     modules_auto = fields.Selection([('none', 'None (only explicit modules list)'),
                                      ('repo', 'Repository modules (excluding dependencies)'),
                                      ('all', 'All modules (including dependencies)')],
-                                    default='repo',
+                                    default='all',
                                     string="Other modules to install automatically")
 
     dependency_ids = fields.Many2many(
@@ -49,6 +51,20 @@ class runbot_repo(models.Model):
         help="Community addon repos which need to be present to run tests.")
     token = fields.Char("Github token", groups="runbot.group_runbot_admin")
     group_ids = fields.Many2many('res.groups', string='Limited to groups')
+
+    repo_config_id = fields.Many2one('runbot.build.config', 'Run Config')
+    config_id = fields.Many2one('runbot.build.config', 'Run Config', compute='_compute_config_id', inverse='_inverse_config_id')
+
+    def _compute_config_id(self):
+        for repo in self:
+            if repo.repo_config_id:
+                repo.config_id = repo.repo_config_id
+            else:
+                repo.config_id = self.env.ref('runbot.runbot_build_config_default')
+
+    def _inverse_config_id(self):
+        for repo in self:
+            repo.repo_config_id = repo.config_id
 
     def _root(self):
         """Return root directory of repository"""
@@ -83,7 +99,7 @@ class runbot_repo(models.Model):
         """Execute a git command 'cmd'"""
         for repo in self:
             cmd = ['git', '--git-dir=%s' % repo.path] + cmd
-            _logger.info("git command: %s", ' '.join(cmd))
+            _logger.debug("git command: %s", ' '.join(cmd))
             return subprocess.check_output(cmd).decode('utf-8')
 
     def _git_rev_parse(self, branch_name):
@@ -133,17 +149,29 @@ class runbot_repo(models.Model):
                 else:
                     raise
 
+    def _get_fetch_head_time(self):
+        self.ensure_one()
+        fname_fetch_head = os.path.join(self.path, 'FETCH_HEAD')
+        if os.path.exists(fname_fetch_head):
+            return os.path.getmtime(fname_fetch_head)
+
     def _get_refs(self):
         """Find new refs
         :return: list of tuples with following refs informations:
         name, sha, date, author, author_email, subject, committer, committer_email
         """
         self.ensure_one()
-        fields = ['refname', 'objectname', 'committerdate:iso8601', 'authorname', 'authoremail', 'subject', 'committername', 'committeremail']
-        fmt = "%00".join(["%(" + field + ")" for field in fields])
-        git_refs = self._git(['for-each-ref', '--format', fmt, '--sort=-committerdate', 'refs/heads', 'refs/pull'])
-        git_refs = git_refs.strip()
-        return [tuple(field for field in line.split('\x00')) for line in git_refs.split('\n')]
+
+        get_ref_time = self._get_fetch_head_time()
+        if not self.get_ref_time or get_ref_time > dt2time(self.get_ref_time):
+            self.get_ref_time = datetime.datetime.fromtimestamp(get_ref_time).strftime(DEFAULT_SERVER_DATETIME_FORMAT)
+            fields = ['refname', 'objectname', 'committerdate:iso8601', 'authorname', 'authoremail', 'subject', 'committername', 'committeremail']
+            fmt = "%00".join(["%(" + field + ")" for field in fields])
+            git_refs = self._git(['for-each-ref', '--format', fmt, '--sort=-committerdate', 'refs/heads', 'refs/pull'])
+            git_refs = git_refs.strip()
+            return [tuple(field for field in line.split('\x00')) for line in git_refs.split('\n')]
+        else:
+            return []
 
     def _find_or_create_branches(self, refs):
         """Parse refs and create branches that does not exists yet
@@ -197,6 +225,8 @@ class runbot_repo(models.Model):
 
             # create build (and mark previous builds as skipped) if not found
             if not (branch.id, sha) in builds_candidates:
+                if branch.no_auto_build or branch.no_build:
+                    continue
                 _logger.debug('repo %s branch %s new build found revno %s', self.name, branch.name, sha)
                 build_info = {
                     'branch_id': branch.id,
@@ -207,12 +237,11 @@ class runbot_repo(models.Model):
                     'committer_email': committer_email,
                     'subject': subject,
                     'date': dateutil.parser.parse(date[:19]),
-                    'coverage': branch.coverage,
                 }
                 if not branch.sticky:
                     # pending builds are skipped as we have a new ref
                     builds_to_skip = Build.search(
-                        [('branch_id', '=', branch.id), ('state', '=', 'pending')],
+                        [('branch_id', '=', branch.id), ('local_state', '=', 'pending')],
                         order='sequence asc')
                     builds_to_skip._skip(reason='New ref found')
                     if builds_to_skip:
@@ -220,12 +249,12 @@ class runbot_repo(models.Model):
                     # testing builds are killed
                     builds_to_kill = Build.search([
                         ('branch_id', '=', branch.id),
-                        ('state', '=', 'testing'),
+                        ('local_state', '=', 'testing'),
                         ('committer', '=', committer)
                     ])
-                    builds_to_kill.write({'state': 'deathrow'})
                     for btk in builds_to_kill:
-                        btk._log('repo._update_git', 'Build automatically killed, newer build found.')
+                        btk._log('repo._update_git', 'Build automatically killed, newer build found.', level='WARNING')
+                    builds_to_kill.write({'local_state': 'deathrow'})
 
                 new_build = Build.create(build_info)
                 # create a reverse dependency build if needed
@@ -239,7 +268,7 @@ class runbot_repo(models.Model):
                             new_build.revdep_build_ids += latest_rev_build._force(message='Rebuild from dependency %s commit %s' % (self.name, sha[:6]))
 
         # skip old builds (if their sequence number is too low, they will not ever be built)
-        skippable_domain = [('repo_id', '=', self.id), ('state', '=', 'pending')]
+        skippable_domain = [('repo_id', '=', self.id), ('local_state', '=', 'pending')]
         icp = self.env['ir.config_parameter']
         running_max = int(icp.get_param('runbot.runbot_running_max', default=75))
         builds_to_be_skipped = Build.search(skippable_domain, order='sequence desc', offset=running_max)
@@ -286,11 +315,12 @@ class runbot_repo(models.Model):
         fname_fetch_head = os.path.join(repo.path, 'FETCH_HEAD')
         if not force and os.path.isfile(fname_fetch_head):
             fetch_time = os.path.getmtime(fname_fetch_head)
-            if repo.mode == 'hook' and repo.hook_time and dt2time(repo.hook_time) < fetch_time:
+            if repo.mode == 'hook' and (not repo.hook_time or dt2time(repo.hook_time) < fetch_time):
                 t0 = time.time()
                 _logger.debug('repo %s skip hook fetch fetch_time: %ss ago hook_time: %ss ago',
-                              repo.name, int(t0 - fetch_time), int(t0 - dt2time(repo.hook_time)))
+                            repo.name, int(t0 - fetch_time), int(t0 - dt2time(repo.hook_time)) if repo.hook_time else 'never')
                 return
+
         self._update_fetch_cmd()
 
     def _update_fetch_cmd(self):
@@ -320,52 +350,55 @@ class runbot_repo(models.Model):
         host = fqdn()
 
         Build = self.env['runbot.build']
-        domain = [('repo_id', 'in', ids), ('branch_id.job_type', '!=', 'none')]
+        domain = [('repo_id', 'in', ids)]
         domain_host = domain + [('host', '=', host)]
 
         # schedule jobs (transitions testing -> running, kill jobs, ...)
-        build_ids = Build.search(domain_host + [('state', 'in', ['testing', 'running', 'deathrow'])])
+        build_ids = Build.search(domain_host + [('local_state', 'in', ['testing', 'running', 'deathrow'])])
         build_ids._schedule()
 
         # launch new tests
-        nb_testing = Build.search_count(domain_host + [('state', '=', 'testing')])
-        available_slots = workers - nb_testing
-        if available_slots > 0:
-            # commit transaction to reduce the critical section duration
-            self.env.cr.commit()
-            # self-assign to be sure that another runbot instance cannot self assign the same builds
-            query = """UPDATE
-                            runbot_build
-                        SET
-                            host = %(host)s
-                        WHERE
-                            runbot_build.id IN (
-                                SELECT
-                                    runbot_build.id
-                                FROM
-                                    runbot_build
-                                LEFT JOIN runbot_branch ON runbot_branch.id = runbot_build.branch_id
-                            WHERE
-                                runbot_build.repo_id IN %(repo_ids)s
-                                AND runbot_build.state = 'pending'
-                                AND runbot_branch.job_type != 'none'
-                                AND runbot_build.host IS NULL
-                            ORDER BY
-                                runbot_branch.sticky DESC,
-                                runbot_branch.priority DESC,
-                                array_position(array['normal','rebuild','indirect','scheduled']::varchar[], runbot_build.build_type) ASC,
-                                runbot_build.sequence ASC
-                            FOR UPDATE OF runbot_build SKIP LOCKED
-                        LIMIT %(available_slots)s)"""
 
-            self.env.cr.execute(query, {'repo_ids': tuple(ids), 'host': fqdn(), 'available_slots': available_slots})
-            pending_build = Build.search(domain + domain_host + [('state', '=', 'pending')])
+        nb_testing = Build.search_count(domain_host + [('local_state', '=', 'testing')])
+        available_slots = workers - nb_testing
+        reserved_slots = Build.search_count(domain_host + [('local_state', '=', 'pending')])
+        assignable_slots = available_slots - reserved_slots
+        if available_slots > 0: 
+            if assignable_slots > 0:  # note: slots have been addapt to be able to force host on pending build. Normally there is no pending with host.
+                # commit transaction to reduce the critical section duration
+                self.env.cr.commit()
+                # self-assign to be sure that another runbot instance cannot self assign the same builds
+                query = """UPDATE
+                                runbot_build
+                            SET
+                                host = %(host)s
+                            WHERE
+                                runbot_build.id IN (
+                                    SELECT
+                                        runbot_build.id
+                                    FROM
+                                        runbot_build
+                                    LEFT JOIN runbot_branch ON runbot_branch.id = runbot_build.branch_id
+                                WHERE
+                                    runbot_build.repo_id IN %(repo_ids)s
+                                    AND runbot_build.local_state = 'pending'
+                                    AND runbot_build.host IS NULL
+                                ORDER BY
+                                    runbot_branch.sticky DESC,
+                                    runbot_branch.priority DESC,
+                                    array_position(array['normal','rebuild','indirect','scheduled']::varchar[], runbot_build.build_type) ASC,
+                                    runbot_build.sequence ASC
+                                FOR UPDATE OF runbot_build SKIP LOCKED
+                            LIMIT %(assignable_slots)s)"""
+
+            self.env.cr.execute(query, {'repo_ids': tuple(ids), 'host': fqdn(), 'assignable_slots': assignable_slots})
+            pending_build = Build.search(domain_host + [('local_state', '=', 'pending')], limit=available_slots)
             if pending_build:
                 pending_build._schedule()
                 self.env.cr.commit()
 
         # terminate and reap doomed build
-        build_ids = Build.search(domain_host + [('state', '=', 'running')]).ids
+        build_ids = Build.search(domain_host + [('local_state', '=', 'running')]).ids
         # sort builds: the last build of each sticky branch then the rest
         sticky = {}
         non_sticky = []
@@ -393,7 +426,7 @@ class runbot_repo(models.Model):
         settings['fqdn'] = fqdn()
         nginx_repos = self.search([('nginx', '=', True)], order='id')
         if nginx_repos:
-            settings['builds'] = self.env['runbot.build'].search([('repo_id', 'in', nginx_repos.ids), ('state', '=', 'running'), ('host', '=', fqdn())])
+            settings['builds'] = self.env['runbot.build'].search([('repo_id', 'in', nginx_repos.ids), ('local_state', '=', 'running'), ('host', '=', fqdn())])
 
             nginx_config = self.env['ir.ui.view'].render_template("runbot.nginx_config", settings)
             os.makedirs(nginx_dir, exist_ok=True)
