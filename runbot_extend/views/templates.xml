@@ -11,10 +11,5 @@
     <xpath expr="//t[@name='signin_reference_list']" position="inside">
         <li t-if="bu['restored_db_name']"><a t-attf-href="http://{{bu['domain']}}/?db={{bu['real_dest']}}-restored">Connect restored db<i class="fa fa-sign-in"></i></a></li>
     </xpath>
-    <xpath expr="//t[@name='coverage_log_list_item']" position="before">
-        <t t-foreach="bu['log_access_job_ids']" t-as='job_logs'>
-            <li t-if="bu['host']"><a t-attf-href="http://{{bu['host']}}/runbot/static/build/#{bu['real_dest']}/{{job_logs.logs_location}}" target="_blank"><t t-esc="job_logs.logs_name"/> <i class="fa fa-file-text-o"/></a></li>
-        </t>
-    </xpath>
 </template>
 </odoo>
