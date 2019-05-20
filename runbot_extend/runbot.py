@@ -9,7 +9,7 @@ import os
 import datetime
 import shlex
 
-from odoo.addons.runbot.models.build import runbot_job, _re_error, _re_warning, re_job
+# from odoo.addons.runbot.models.build import runbot_job, _re_error, _re_warning, re_job
 from odoo import models, fields, api, _
 from odoo.addons.runbot.container import docker_build, docker_run, build_odoo_cmd
 from odoo.addons.runbot.common import dt2time, fqdn, now, grep, time2str, rfind, uniq_list, local_pgadmin_cursor, get_py_version
@@ -240,34 +240,34 @@ class runbot_build(models.Model):
     #     build._github_status()
     #     return -2
 
-    @runbot_job('testing', 'running')
-    def _job_19_custom_config(self, build, log_path):
-        if not build.repo_id.is_custom_config:
-            return
-        cpu_limit = 2400
-        self._local_pg_createdb("%s-custom_config" % build.dest)
-        cmd, mods = build._cmd()
-        build._log('custom_config', 'Start custom config')
-        if build.repo_id.custom_config:
-            rbc = self.env['runbot.build.configuration'].create({
-                'name': 'custom config build %s' % build.id,
-                'model': 'runbot.build',
-                'type': 'qweb',
-                'arch': "<?xml version='1.0'?><t t-name='runbot.build_config_%s'>%s</t>" % (build.id, build.repo_id.custom_config),
-            })
-            settings = {'build': build}
-            build_config = rbc.render(settings)
-            with open("%s/build.cfg" % build._path(), 'w+') as cfg:
-                cfg.write("[options]\n")
-                cfg.write(build_config)
-            cmd += ['-d', '%s-custom_config' % build.dest, '-c', '%s/build.cfg' % build._path()]
-        if build.coverage:
-            cpu_limit *= 1.5
-            cmd = [get_py_version(build), '-m', 'coverage', 'run',
-                   '--branch', '--source', '/data/build'] + cmd
-        # reset job_start to an accurate job_19 job_time
-        build.write({'job_start': now()})
-        return docker_run(build_odoo_cmd(cmd), log_path, build._path(), build._get_docker_name(), cpu_limit=cpu_limit)
+    # @runbot_job('testing', 'running')
+    # def _job_19_custom_config(self, build, log_path):
+    #     if not build.repo_id.is_custom_config:
+    #         return
+    #     cpu_limit = 2400
+    #     self._local_pg_createdb("%s-custom_config" % build.dest)
+    #     cmd, mods = build._cmd()
+    #     build._log('custom_config', 'Start custom config')
+    #     if build.repo_id.custom_config:
+    #         rbc = self.env['runbot.build.configuration'].create({
+    #             'name': 'custom config build %s' % build.id,
+    #             'model': 'runbot.build',
+    #             'type': 'qweb',
+    #             'arch': "<?xml version='1.0'?><t t-name='runbot.build_config_%s'>%s</t>" % (build.id, build.repo_id.custom_config),
+    #         })
+    #         settings = {'build': build}
+    #         build_config = rbc.render(settings)
+    #         with open("%s/build.cfg" % build._path(), 'w+') as cfg:
+    #             cfg.write("[options]\n")
+    #             cfg.write(build_config)
+    #         cmd += ['-d', '%s-custom_config' % build.dest, '-c', '%s/build.cfg' % build._path()]
+    #     if build.coverage:
+    #         cpu_limit *= 1.5
+    #         cmd = [get_py_version(build), '-m', 'coverage', 'run',
+    #                '--branch', '--source', '/data/build'] + cmd
+    #     # reset job_start to an accurate job_19 job_time
+    #     build.write({'job_start': now()})
+    #     return docker_run(build_odoo_cmd(cmd), log_path, build._path(), build._get_docker_name(), cpu_limit=cpu_limit)
 
 
     @api.model
