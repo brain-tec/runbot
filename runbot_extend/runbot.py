@@ -35,11 +35,21 @@ class ConfigStep(models.Model):
             return self._upgrade_db(build, log_path)
         return super(ConfigStep, self)._run_step(build, log_path)
 
-    def _coverage_params(self, build, modules_to_install):
-        res = super(ConfigStep, self)._coverage_params(build, modules_to_install)
-        if build.repo_id.custom_coverage and res:
-            res.append('--include %s' % build.repo_id.custom_coverage)
-        return res
+    def _post_install_command(self, build, modules_to_install):
+        if not build.repo_id.custom_coverage:
+            return super(ConfigStep, self)._post_install_command(build, modules_to_install)
+        if self.coverage:
+            py_version = get_py_version(build)
+            # prepare coverage result
+            cov_path = build._path('coverage')
+            os.makedirs(cov_path, exist_ok=True)
+            cmd = [
+                '&&', py_version, "-m", "coverage", "html", "-d", "/data/build/coverage", "--include", build.repo_id.custom_coverage,
+                "--omit", "*__openerp__.py,*__manifest__.py"
+                "--ignore-errors"
+            ]
+            return cmd
+        return []
 
     def _restore_db(self, build, log_path):
         if not build.restored_db_name:

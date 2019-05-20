@@ -269,7 +269,7 @@ class ConfigStep(models.Model):
             build.coverage = True
             coverage_extra_params = self._coverage_params(build, modules_to_install)
             py_version = get_py_version(build)
-            cmd = [py_version, '-m', 'coverage', 'run', '--branch'] + coverage_extra_params + cmd
+            cmd = [py_version, '-m', 'coverage', 'run', '--branch', '--source', '/data/build'] + coverage_extra_params + cmd
 
         cmd += self._post_install_command(build, modules_to_install)  # coverage post, extra-checks, ...
 
