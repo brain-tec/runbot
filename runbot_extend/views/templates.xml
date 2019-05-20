@@ -2,14 +2,11 @@
 
 <template id="build_button" inherit_id="runbot.build_button">
     <xpath expr="//a[@name='quick_signin_reference']" position="replace">
-        <a t-if="bu['state']=='running' and not bu['restored_db_name']" t-attf-href="http://{{bu['domain']}}/?db={{bu['real_dest']}}-all" class="btn btn-primary" title="Sign in on this build" aria-label="Sign in on this build"><i class="fa fa-sign-in"/></a>
-        <a t-if="bu['state']=='running' and bu['restored_db_name']" t-attf-href="http://{{bu['domain']}}/?db={{bu['real_dest']}}-custom" class="btn btn-primary" title="Sign in on this build" aria-label="Sign in on this build"><i class="fa fa-sign-in"/></a>
+        <a t-if="bu['global_state']=='running' and not bu['real_build'].restored_db_name" t-attf-href="http://{{bu['domain']}}/?db={{bu['real_build'].dest}}-all" class="btn btn-primary" title="Sign in on this build" aria-label="Sign in on this build"><i class="fa fa-sign-in"/></a>
+        <a t-if="bu['global_state']=='running' and bu['real_build'].restored_db_name" t-attf-href="http://{{bu['domain']}}/?db={{bu['real_build'].dest}}-custom" class="btn btn-primary" title="Sign in on this build" aria-label="Sign in on this build"><i class="fa fa-sign-in"/></a>
     </xpath>
     <xpath expr="//t[@name='signin_reference_list']" position="inside">
-        <li t-if="bu['restored_db_name']"><a t-attf-href="http://{{bu['domain']}}/?db={{bu['real_dest']}}-restored">Connect restored db<i class="fa fa-sign-in"></i></a></li>
-    </xpath>
-    <xpath expr="//t[@name='signin_reference_list']" position="inside">
-        <li t-if="bu['restored_db_name']"><a t-attf-href="http://{{bu['domain']}}/?db={{bu['real_dest']}}-restored">Connect restored db<i class="fa fa-sign-in"></i></a></li>
+        <li t-if="bu['real_build'].restored_db_name"><a t-attf-href="http://{{bu['domain']}}/?db={{bu['real_build'].dest}}-restored">Connect restored db<i class="fa fa-sign-in"/></a></li>
     </xpath>
 </template>
 </odoo>

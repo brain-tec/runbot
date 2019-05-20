@@ -282,7 +282,7 @@ class runbot_build(models.Model):
         branch_ids = self.env['runbot.branch'].search([
             ('sticky', '=', True),
             ('repo_id.no_build', '=', False),
-            ('repo_id.force_coverage', '=', True)], order='id')
+            ], order='id')
         for branch_id in branch_ids:
             for last_build in self.search([('branch_id', '=', branch_id.id)], limit=1, order='sequence desc'):
                 last_build.with_context(force_rebuild=True).create({
