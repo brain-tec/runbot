@@ -21,8 +21,10 @@
         <field name="step_order_ids" eval="[(5,0,0),
         (0, 0, {'step_id': ref('runbot_build_config_step_restore')}), 
         (0, 0, {'step_id': ref('runbot_build_config_step_upgrade')}), 
+        (0, 0, {'step_id': ref('runbot.runbot_build_config_step_run')}), 
         ]"/>
         <field name="protected" eval="False"/>
     </record>
 
 </odoo>
+

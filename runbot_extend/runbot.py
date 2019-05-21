@@ -36,18 +36,22 @@ class ConfigStep(models.Model):
         return super(ConfigStep, self)._run_step(build, log_path)
 
     def _post_install_command(self, build, modules_to_install):
+        build._log('coverage_result', 'Start _post_install_command')
         if not build.repo_id.custom_coverage:
+            build._log('coverage_result', 'Start parent _post_install_command')
             return super(ConfigStep, self)._post_install_command(build, modules_to_install)
         if self.coverage:
+            build._log('coverage_result', 'Start custom _post_install_command')
             py_version = get_py_version(build)
             # prepare coverage result
             cov_path = build._path('coverage')
             os.makedirs(cov_path, exist_ok=True)
             cmd = [
-                '&&', py_version, "-m", "coverage", "html", "-d", "/data/build/coverage", "--include", build.repo_id.custom_coverage,
+                '&&', py_version, "-m", "coverage", "html", "-d", "/data/build/coverage", "--include %s" % build.repo_id.custom_coverage,
                 "--omit", "*__openerp__.py,*__manifest__.py"
                 "--ignore-errors"
             ]
+            build._log('coverage_result', '_post_install_command %s' % cmd)
             return cmd
         return []
 
