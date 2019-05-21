@@ -12,8 +12,8 @@ import shlex
 # from odoo.addons.runbot.models.build import runbot_job, _re_error, _re_warning, re_job
 from odoo import models, fields, api, _
 from odoo.addons.runbot.container import docker_build, docker_run, build_odoo_cmd
+from odoo.addons.runbot.models.build_config import _re_error, _re_warning
 from odoo.addons.runbot.common import dt2time, fqdn, now, grep, time2str, rfind, uniq_list, local_pgadmin_cursor, get_py_version
-
 
 
 _logger = logging.getLogger(__name__)
@@ -75,6 +75,48 @@ class ConfigStep(models.Model):
         if self.extra_params:
             cmd.extend(shlex.split(self.extra_params))
         return docker_run(build_odoo_cmd(cmd), log_path, build._path(), build._get_docker_name())
+
+    def _make_results(self, build):
+        build_values = {}
+        if self.job_type == 'upgrade':
+            build_values.update(self._make_upgrade_results(build))
+        if self.job_type == 'restore':
+            build_values.update(self._make_restore_results(build))
+        return build_values
+
+    def _make_restore_results(self, build):
+        return {}
+
+    def _make_upgrade_results(self, build):
+        build_values = {}
+        build._log('run', 'Getting results for build %s' % build.dest)
+        log_file = build._path('logs', '%s.txt' % build.active_step.name)
+        if not os.path.isfile(log_file):
+            build_values['local_result'] = 'ko'
+            build._log('_checkout', "Log file not found at the end of test job", level="ERROR")
+        else:
+            log_time = time.localtime(os.path.getmtime(log_file))
+            build_values['job_end'] = time2str(log_time),
+            if not build.local_result or build.local_result in ['ok', "warn"]:
+                if grep(log_file, ".modules.loading: Modules loaded."):
+                    local_result = False
+                    if rfind(log_file, _re_error):
+                        local_result = 'ko'
+                        build._log('_checkout', 'Error or traceback found in logs', level="ERROR")
+                    elif rfind(log_file, _re_warning):
+                        local_result = 'warn'
+                        build._log('_checkout', 'Warning found in logs', level="WARNING")
+                    elif not grep(log_file, "Initiating shutdown"):
+                        local_result = 'ko'
+                        build._log('_checkout', 'No "Initiating shutdown" found in logs, maybe because of cpu limit.', level="ERROR")
+                    else:
+                        local_result = 'ok'
+                    build_values['local_result'] = build._get_worst_result([build.local_result, local_result])
+                else:
+                    build_values['local_result'] = 'ko'
+                    build._log('_checkout', "Module loaded not found in logs", level="ERROR")
+        return build_values
+
 
 class RunbotJob(models.Model):
     _name = "runbot.job"
