@@ -224,15 +224,15 @@ class ConfigStep(models.Model):
             # not sure, to avoid old server to check other dbs
             cmd += ["--max-cron-threads", "0"]
 
-        db_name = [step.db_name for step in build.config_id.step_ids() if step.job_type == 'install_odoo'][-1]
-        # we need to have at least one job of type install_odoo to run odoo, take the last one for db_name.
-        cmd += ['-d', '%s-%s' % (build.dest, db_name)]
-
         if grep(build._server("tools/config.py"), "db-filter"):
             if build.repo_id.nginx:
                 cmd += ['--db-filter', '%d.*$']
             else:
                 cmd += ['--db-filter', '%s.*$' % build.dest]
+        else:
+            db_name = [step.db_name for step in build.config_id.step_ids() if step.job_type == 'install_odoo'][-1]
+            # we need to have at least one job of type install_odoo to run odoo, take the last one for db_name.
+            cmd += ['-d', '%s-%s' % (build.dest, db_name)]
         smtp_host = docker_get_gateway_ip()
         if smtp_host:
             cmd += ['--smtp', smtp_host]

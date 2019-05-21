@@ -4,6 +4,7 @@
     <record id="runbot_build_config_step_restore" model="runbot.build.config.step">
         <field name="name">restore</field>
         <field name="custom_db_name">restored</field>
+        <field name="job_type">restore</field>
         <field name="protected" eval="True"/>
         <field name="default_sequence">50</field>
     </record>
@@ -11,6 +12,7 @@
     <record id="runbot_build_config_step_upgrade" model="runbot.build.config.step">
         <field name="name">upgrade</field>
         <field name="custom_db_name">restored</field>
+        <field name="job_type">upgrade</field>
         <field name="protected" eval="True"/>
         <field name="default_sequence">60</field>
     </record>

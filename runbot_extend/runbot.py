@@ -29,12 +29,9 @@ class ConfigStep(models.Model):
             ])
 
     def _run_step(self, build, log_path):
-        _logger.info('restore-------HERE %s' % (self.job_type))
         if self.job_type == 'restore':
-            _logger.info('restore------- HERE 0')
             return self._restore_db(build, log_path)
         elif self.job_type == 'upgrade':
-            _logger.info('restore------- HERE 1')
             return self._upgrade_db(build, log_path)
         return super(ConfigStep, self)._run_step(build, log_path)
 
@@ -55,10 +52,8 @@ class ConfigStep(models.Model):
         return []
 
     def _restore_db(self, build, log_path):
-        _logger.info('restore------- HERE 2')
         if not build.restored_db_name:
             return
-        _logger.info('restore------- HERE 3')
         build._log(
             'restore', 'Restoring %s on %s-%s' % (build.restored_db_name, build.dest, self.db_name))
         cmd = "createdb -T %s %s-%s" % (build.restored_db_name, build.dest, self.db_name)
@@ -70,7 +65,7 @@ class ConfigStep(models.Model):
         to_test = build.modules if build.modules and not build.repo_id.force_update_all else 'all'
         cmd, mods = build._cmd()
         db_name = "%s-%s" % (build.dest, self.db_name)
-        build._log('upgrade', 'Start Upgrading %s modules on %s-custom' % (to_test, build.dest))
+        build._log('upgrade', 'Start Upgrading %s modules on %s' % (to_test, db_name))
         cmd += ['-d', db_name, '-u', to_test, '--stop-after-init', '--log-level=info']
         if build.repo_id.testenable_restore:
             cmd.append("--test-enable")
@@ -179,7 +174,7 @@ class runbot_branch(models.Model):
         self.ensure_one()
         if self.repo_id.restored_db_name:
             r = {}
-            r[self.id] = "http://%s/web/login?db=%s-custom&login=admin&redirect=/web?debug=1" % (
+            r[self.id] = "http://%s/web/login?db=%s-restored&login=admin&redirect=/web?debug=1" % (
                 fqdn, dest)
         else:
             r = super(runbot_branch, self)._get_branch_quickconnect_url(
