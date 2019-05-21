@@ -48,7 +48,7 @@ class ConfigStep(models.Model):
             os.makedirs(cov_path, exist_ok=True)
             cmd = [
                 '&&', py_version, "-m", "coverage", "html", "-d", "/data/build/coverage", "--include %s" % build.repo_id.custom_coverage,
-                "--omit", "*__openerp__.py,*__manifest__.py"
+                "--omit *__openerp__.py,*__manifest__.py",
                 "--ignore-errors"
             ]
             build._log('coverage_result', '_post_install_command %s' % cmd)
