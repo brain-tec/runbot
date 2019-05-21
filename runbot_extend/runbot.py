@@ -29,7 +29,7 @@ class ConfigStep(models.Model):
             ])
 
     def _run_step(self, build, log_path):
-        _logger.log('restore-------HERE %s' % self.job_type)
+        _logger.log('restore-------HERE %s' % (self.job_type))
         if self.job_type == 'restore':
             _logger.log('restore------- HERE 0')
             return self._restore_db(build, log_path)
