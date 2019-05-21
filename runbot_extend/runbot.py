@@ -30,18 +30,17 @@ class ConfigStep(models.Model):
 
     def _run_step(self, build, log_path):
         if self.job_type == 'restore':
+            build._log('restore', 'HERE 0')
             return self._restore_db(build, log_path)
         elif self.job_type == 'upgrade':
+            build._log('restore', 'HERE 1')
             return self._upgrade_db(build, log_path)
         return super(ConfigStep, self)._run_step(build, log_path)
 
     def _post_install_command(self, build, modules_to_install):
-        build._log('coverage_result', 'Start _post_install_command')
         if not build.repo_id.custom_coverage:
-            build._log('coverage_result', 'Start parent _post_install_command')
             return super(ConfigStep, self)._post_install_command(build, modules_to_install)
         if self.coverage:
-            build._log('coverage_result', 'Start custom _post_install_command')
             py_version = get_py_version(build)
             # prepare coverage result
             cov_path = build._path('coverage')
@@ -51,13 +50,14 @@ class ConfigStep(models.Model):
                 "--omit *__openerp__.py,*__manifest__.py",
                 "--ignore-errors"
             ]
-            build._log('coverage_result', '_post_install_command %s' % cmd)
             return cmd
         return []
 
     def _restore_db(self, build, log_path):
+        build._log('restore', 'HERE 2')
         if not build.restored_db_name:
             return
+        build._log('restore', 'HERE 3')
         build._log(
             'restore', 'Restoring %s on %s-%s' % (build.restored_db_name, build.dest, self.db_name))
         cmd = "createdb -T %s %s-%s" % (build.restored_db_name, build.dest, self.db_name)
