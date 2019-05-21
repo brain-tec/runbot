@@ -29,11 +29,12 @@ class ConfigStep(models.Model):
             ])
 
     def _run_step(self, build, log_path):
+        _logger.log('restore-------HERE %s', % self.job_type)
         if self.job_type == 'restore':
-            build._log('restore', 'HERE 0')
+            _logger.log('restore------- HERE 0')
             return self._restore_db(build, log_path)
         elif self.job_type == 'upgrade':
-            build._log('restore', 'HERE 1')
+            _logger.log('restore------- HERE 1')
             return self._upgrade_db(build, log_path)
         return super(ConfigStep, self)._run_step(build, log_path)
 
@@ -54,10 +55,10 @@ class ConfigStep(models.Model):
         return []
 
     def _restore_db(self, build, log_path):
-        build._log('restore', 'HERE 2')
+        _logger.log('restore------- HERE 2')
         if not build.restored_db_name:
             return
-        build._log('restore', 'HERE 3')
+        _logger.log('restore------- HERE 3')
         build._log(
             'restore', 'Restoring %s on %s-%s' % (build.restored_db_name, build.dest, self.db_name))
         cmd = "createdb -T %s %s-%s" % (build.restored_db_name, build.dest, self.db_name)
