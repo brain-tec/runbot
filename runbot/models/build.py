@@ -281,9 +281,11 @@ class runbot_build(models.Model):
         # some validation to ensure db consistency
         assert 'state' not in values
         local_result = values.get('local_result')
-        assert not local_result or local_result == self._get_worst_result([self.local_result, local_result])  # dont write ok on a warn/error build
+        for rec in self:
+            assert not local_result or local_result == rec._get_worst_result([rec.local_result, local_result])  # dont write ok on a warn/error build
         res = super(runbot_build, self).write(values)
-        assert bool(not self.duplicate_id) ^ (self.local_state == 'duplicate')  # don't change duplicate state without removing duplicate id.
+        for rec in self:
+            assert bool(not rec.duplicate_id) ^ (rec.local_state == 'duplicate')  # don't change duplicate state without removing duplicate id.
         return res
 
     def _end_test(self):
