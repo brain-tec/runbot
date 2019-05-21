@@ -51,7 +51,6 @@ class Config(models.Model):
         return [ordered_step.step_id for ordered_step in self.step_order_ids]
 
     def _check_step_ids_order(self):
-        install_job = False
         step_ids = self.step_ids()
         for step in step_ids:
             if step.job_type == 'install_odoo':
@@ -59,8 +58,6 @@ class Config(models.Model):
             if step.job_type == 'run_odoo':
                 if step != step_ids[-1]:
                     raise UserError('Jobs of type run_odoo should be the last one')
-                if not install_job:
-                    raise UserError('Jobs of type run_odoo should be preceded by a job of type install_odoo')
         self._check_recustion()
 
     def _check_recustion(self, visited=None):  # todo test
