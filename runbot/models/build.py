@@ -283,9 +283,11 @@ class runbot_build(models.Model):
         # some validation to ensure db consistency
         assert 'state' not in values
         local_result = values.get('local_result')
-        assert not local_result or local_result == self._get_worst_result([self.local_result, local_result])  # dont write ok on a warn/error build
+        for build in self:
+            assert not local_result or local_result == self._get_worst_result([build.local_result, local_result])  # dont write ok on a warn/error build
         res = super(runbot_build, self).write(values)
-        assert bool(not self.duplicate_id) ^ (self.local_state == 'duplicate')  # don't change duplicate state without removing duplicate id.
+        for build in self:
+            assert bool(not build.duplicate_id) ^ (build.local_state == 'duplicate')  # don't change duplicate state without removing duplicate id.
         return res
 
     def _end_test(self):
@@ -486,6 +488,7 @@ class runbot_build(models.Model):
         # For retro-compatibility, keep this parameter in seconds
 
         for build in self:
+            self.env.cr.commit()  # commit between each build to minimise transactionnal errors due to state computations
             if build.local_state == 'deathrow':
                 build._kill(result='manually_killed')
                 continue
@@ -528,7 +531,7 @@ class runbot_build(models.Model):
                 if docker_is_running(build._get_docker_name()):
                     timeout = min(build.active_step.cpu_limit, int(icp.get_param('runbot.runbot_timeout', default=10000)))
                     if build.local_state != 'running' and build.job_time > timeout:
-                        build._log('_schedule', '%s time exceeded (%ss)', build.active_step.name if build.active_step else "?", build.job_time)
+                        build._log('_schedule', '%s time exceeded (%ss)' % (build.active_step.name if build.active_step else "?", build.job_time))
                         build.write({'job_end': now()})
                         build._kill(result='killed')
                     continue
