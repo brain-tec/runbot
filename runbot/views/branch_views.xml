@@ -16,6 +16,7 @@
                 <field name="pull_head_name"/>
                 <field name="target_branch_name"/>
                 <field name="sticky"/>
+                <field name="dump"/>
                 <field name="priority"/>
                 <field name="state"/>
                 <field name="modules"/>
@@ -35,6 +36,7 @@
                 <field name="repo_id"/>
                 <field name="name"/>
                 <field name="sticky"/>
+                <field name="dump"/>
                 <field name="priority"/>
                 <field name="config_id"/>
                 <field name="state"/>

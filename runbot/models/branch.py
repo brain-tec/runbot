@@ -27,6 +27,7 @@ class runbot_branch(models.Model):
     priority = fields.Boolean('Build priority', default=False)
     no_build = fields.Boolean("Forbid creation of build on this branch", default=False)
     no_auto_build = fields.Boolean("Don't automatically build commit on this branch", default=False)
+    dump =fields.Boolean("Dump database after step all", default=False)
 
     branch_config_id = fields.Many2one('runbot.build.config', 'Run Config')
     config_id = fields.Many2one('runbot.build.config', 'Run Config', compute='_compute_config_id', inverse='_inverse_config_id')
