@@ -17,6 +17,20 @@
         <field name="default_sequence">20</field>
     </record>
 
+    <record id="runbot_build_config_step_dump" model="runbot.build.config.step">
+        <field name="name">dump</field>
+        <field name="job_type">python</field>
+        <field name="python_code">
+if build.branch_id.dump:
+    previous_db_name = 'all'
+    db_name = "%s-%s" % (build.dest, previous_db_name)
+    cmd = 'mkdir -p /data/build/dump ; pg_dump -d %s | gzip > /data/build/dump/%s.sql.gz' % (db_name, db_name)
+    docker_run(cmd, log_path, build._path(), build._get_docker_name())
+        </field>
+        <field name="protected" eval="True"/>
+        <field name="default_sequence">20</field>
+    </record>
+
     <record id="runbot_build_config_step_run" model="runbot.build.config.step">
         <field name="name">run</field>
         <field name="job_type">run_odoo</field>
