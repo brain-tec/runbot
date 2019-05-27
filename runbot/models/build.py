@@ -913,3 +913,12 @@ class runbot_build(models.Model):
 
     def sorted_revdep_build_ids(self):
         return sorted(self.revdep_build_ids, key=lambda build: build.repo_id.name)
+
+    def _save_dump(self):
+        """ If a dump exists in the build dump dir, save it on the branch """
+        self.ensure_one()
+        dumps = glob.glob(self._path('dump/%s-*.sql.gz' % self.dest))
+        if dumps:
+            with open(dumps[0], 'rb') as dump_file:
+                data = dump_file.read()
+                self.branch_id._save_lastdb(data, os.path.basename(dumps[0]))
