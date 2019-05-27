@@ -245,4 +245,6 @@ class runbot_branch(models.Model):
             'name': filename,
             'datas_fname': filename
         })
+        if self.dump_id:
+            self.dump_id.unlink()
         self.dump_id = attachment

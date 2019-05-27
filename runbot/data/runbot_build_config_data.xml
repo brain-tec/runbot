@@ -35,7 +35,7 @@ if build.branch_id.dump:
     <record id="runbot_build_config_step_save_dump" model="runbot.build.config.step">
         <field name="name">save_dump</field>
         <field name="job_type">python</field>
-        <field name="python_code">build.save_dump()</field>
+        <field name="python_code">build._save_dump()</field>
         <field name="protected" eval="True"/>
         <field name="default_sequence">30</field>
     </record>
