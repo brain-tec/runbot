@@ -69,11 +69,14 @@ class ConfigStep(models.Model):
             ('res_field', '=', 'restored_db'),
             ('res_id', 'in', build.repo_id.ids),
         ], limit=1)
-        shutil.copyfile(attachment._full_path(attachment.store_fname), build._path('dump.zip'))
+        folder, filename = attachment.store_fname.split('/')
+        folder_to_add = os.path.join(attachment._filestore(), folder)
+
+        # shutil.copyfile(attachment._full_path(attachment.store_fname), build._path('dump.zip'))
         cmd = ['createdb %s' % db_name]
-        cmd += ['&&', 'unzip %s -d %s' % ('data/build/dump.zip', 'data/build/datadir')]
+        cmd += ['&&', 'unzip %s/%s -d %s' % ('data/build/additional_volume', filename, 'data/build/datadir')]
         cmd += ['&&', 'psql -a %s < %s' % (db_name, 'data/build/datadir/dump.sql')]
-        return docker_run(' '.join(cmd), log_path, build._path(), build._get_docker_name())
+        return docker_run(' '.join(cmd), log_path, build._path(), build._get_docker_name(), folder_to_add)
 
     def _upgrade_db(self, build, log_path):
         if not build.db_to_restore:
