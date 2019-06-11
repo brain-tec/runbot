@@ -899,6 +899,17 @@ class runbot_build(models.Model):
             self._log('readfile', 'exception: %s' % e)
             return False
 
+    def write_file(self, file, data, mode='w'):
+        file_path = self._path(file)
+        file_dir = os.path.split(file_path)[0]
+        os.makedirs(file_dir, exist_ok=True)
+        try:
+            with open(file_path, mode) as f:
+                f.write(data)
+        except Exception as e:
+            self._log('write_file', 'exception: %s' % e)
+            return False
+
     def build_type_label(self):
         self.ensure_one()
         return dict(self.fields_get('build_type', 'selection')['build_type']['selection']).get(self.build_type, self.build_type)
