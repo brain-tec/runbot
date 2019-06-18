@@ -199,6 +199,7 @@ class runbot_build(models.Model):
         dep_create_vals = []
         nb_deps = len(repo.dependency_ids)
         params = build_id._get_params()
+        build_id._log('create', 'Build created') # mainly usefull to log creation time
         if not vals.get('dependency_ids'):
             for extra_repo in repo.dependency_ids:
                 repo_name = extra_repo.short_name
@@ -366,7 +367,7 @@ class runbot_build(models.Model):
                 params['dep'][result[0]] = result[1]
         return params
 
-    def _force(self, message=None):
+    def _force(self, message=None, exact=False):
         """Force a rebuild and return a recordset of forced builds"""
         forced_builds = self.env['runbot.build']
         for build in self:
@@ -376,15 +377,12 @@ class runbot_build(models.Model):
             else:
                 sequence = self.search([], order='id desc', limit=1)[0].id
             # Force it now
-            rebuild = True
-            if build.local_state == 'done' and build.local_result == 'skipped':
-                build.write({'local_state': 'pending', 'sequence': sequence, 'local_result': ''})
-            # or duplicate it
-            elif build.local_state in ['running', 'done', 'duplicate', 'deathrow']:
-                new_build = build.with_context(force_rebuild=True).create({
+            if build.local_state in ['running', 'done', 'duplicate', 'deathrow']:
+                values = {
                     'sequence': sequence,
                     'branch_id': build.branch_id.id,
                     'name': build.name,
+                    'date': build.date,
                     'author': build.author,
                     'author_email': build.author_email,
                     'committer': build.committer,
@@ -392,19 +390,29 @@ class runbot_build(models.Model):
                     'subject': build.subject,
                     'modules': build.modules,
                     'build_type': 'rebuild',
-                    # 'config_id': build.config_id.id,
-                    # we use the branch config for now since we are recomputing dependencies,
-                    # we may introduce an 'exact rebuild' later
-                })
-                build = new_build
-            else:
-                rebuild = False
-            if rebuild:
-                forced_builds |= build
+                }
+                if exact:
+                    values.update({
+                        'config_id': build.config_id.id,
+                        'extra_params': build.extra_params,
+                        'dependency_ids': build.dependency_ids,
+                        'server_match': build.server_match,
+                        'orphan_result': build.orphan_result,
+                    })
+                    #if replace: ?
+                    if build.parent_id:
+                        values.update({
+                            'parent_id': build.parent_id.id,  # attach it to parent
+                            'hidden': build.hidden,
+                        })
+                        build.orphan_result = True  # set result of build as orphan
+
+                new_build = build.with_context(force_rebuild=True).create(values)
+                forced_builds |= new_build
                 user = request.env.user if request else self.env.user
-                build._log('rebuild', 'Rebuild initiated by %s' % user.name)
+                new_build._log('rebuild', 'Rebuild initiated by %s' % user.name)
                 if message:
-                    build._log('rebuild', message)
+                    new_build._log('rebuild', new_build)
         return forced_builds
 
     def _skip(self, reason=None):
@@ -511,7 +519,6 @@ class runbot_build(models.Model):
                 build.write(values)
                 if not build.active_step:
                     build._log('_schedule', 'No job in config, doing nothing')
-                    #build._end_test()
                     continue
                 try:
                     build._log('_schedule', 'Init build environment with config %s ' % build.config_id.name)
@@ -536,7 +543,6 @@ class runbot_build(models.Model):
                     timeout = min(build.active_step.cpu_limit, int(icp.get_param('runbot.runbot_timeout', default=10000)))
                     if build.local_state != 'running' and build.job_time > timeout:
                         build._log('_schedule', '%s time exceeded (%ss)' % (build.active_step.name if build.active_step else "?", build.job_time))
-                        build.write({'job_end': now()})
                         build._kill(result='killed')
                     continue
                 # No job running, make result and select nex job
@@ -772,7 +778,9 @@ class runbot_build(models.Model):
                 continue
             build._log('kill', 'Kill build %s' % build.dest)
             docker_stop(build._get_docker_name())
-            v = {'local_state': 'done', 'active_step': False, 'duplicate': False}  # what if duplicate? state done?
+            v = {'local_state': 'done', 'active_step': False, 'duplicate': False, 'build_end': now()}  # what if duplicate? state done?
+            if not build.job_end:
+                v['job_end'] = now()
             if result:
                 v['local_result'] = result
             build.write(v)
@@ -798,6 +806,9 @@ class runbot_build(models.Model):
         elif build.local_state in ['testing', 'running']:
             build.write({'local_state': 'deathrow'})
             build._log('_ask_kill', 'Killing build %s, requested by %s (user #%s)' % (build.dest, user.name, uid))
+        for child in build.children_ids:  # should we filter build that are target of a duplicate_id?
+            if not build.duplicate_id and build.local_state != 'done':
+                child._ask_kill()
 
     def _cmd(self):  # why not remove build.modules output ?
         """Return a tuple describing the command to start the build
@@ -890,12 +901,32 @@ class runbot_build(models.Model):
         new_step = step_ids[next_index]  # job to do, state is job_state (testing or running)
         return {'active_step': new_step.id, 'local_state': new_step._step_state()}
 
-    def read_file(self, file):
+    def read_file(self, file, mode='r'):
         file_path = self._path(file)
         try:
-            with open(file_path, 'r') as f:
+            with open(file_path, mode) as f:
                 return f.read()
-        except:
+        except Exception as e:
+            self._log('readfile', 'exception: %s' % e)
+            return False
+
+    def write_file(self, file, data, mode='w'):
+        file_path = self._path(file)
+        file_dir = os.path.split(file_path)[0]
+        os.makedirs(file_dir, exist_ok=True)
+        try:
+            with open(file_path, mode) as f:
+                f.write(data)
+        except Exception as e:
+            self._log('write_file', 'exception: %s' % e)
+            return False
+
+    def make_dirs(self, dir_path):
+        full_path = self._path(dir_path)
+        try:
+            os.makedirs(full_path, exist_ok=True)
+        except Exception as e:
+            self._log('make_dirs', 'exception: %s' % e)
             return False
 
     def build_type_label(self):
