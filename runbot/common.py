@@ -83,8 +83,8 @@ def rfind(filename, pattern):
 
 def s2human(time):
     """Convert a time in second into an human readable string"""
-    for delay, desc in [(86400, 'd'),(3600, 'h'),(60, 'm')]:
-        if time >= delay:
+    for delay, desc in [(7 * 86400, "w"), (86400, "d"), (3600, "h"), (60, "m")]:
+        if time >= delay * 2:  # at least 2 unit before display
             return str(int(time / delay)) + desc
     return str(int(time)) + "s"
 
