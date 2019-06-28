@@ -11,6 +11,9 @@ import socket
 import time
 
 from collections import OrderedDict
+from datetime import timedelta
+
+from babel.dates import format_timedelta
 
 from odoo.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT
 
@@ -83,11 +86,12 @@ def rfind(filename, pattern):
 
 def s2human(time):
     """Convert a time in second into an human readable string"""
-    for delay, desc in [(7 * 86400, "w"), (86400, "d"), (3600, "h"), (60, "m")]:
-        if time >= delay * 2:  # at least 2 unit before display
-            return str(int(time / delay)) + desc
-    return str(int(time)) + "s"
-
+    return format_timedelta(
+        timedelta(seconds=time),
+        granularity="minute",
+        format="narrow",
+        threshold=2.1,
+    )
 
 @contextlib.contextmanager
 def local_pgadmin_cursor():
