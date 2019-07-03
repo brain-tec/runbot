@@ -400,10 +400,16 @@ class runbot_build(models.Model):
                     'build_type': 'rebuild',
                 }
                 if exact:
+                    if build.dependency_ids:
+                        values['dependency_ids'] = [(0, 0, {
+                            'match_type': dep.match_type,
+                            'closest_branch_id': dep.closest_branch_id.id,
+                            'dependency_hash': dep.dependency_hash,
+                            'dependecy_repo_id': dep.dependecy_repo_id.id,
+                        }) for dep in build.dependency_ids]
                     values.update({
                         'config_id': build.config_id.id,
                         'extra_params': build.extra_params,
-                        'dependency_ids': build.dependency_ids,
                         'server_match': build.server_match,
                         'orphan_result': build.orphan_result,
                     })
@@ -418,7 +424,7 @@ class runbot_build(models.Model):
                 new_build = build.with_context(force_rebuild=True).create(values)
                 forced_builds |= new_build
                 user = request.env.user if request else self.env.user
-                new_build._log('rebuild', 'Rebuild initiated by %s' % user.name)
+                new_build._log('rebuild', 'Rebuild initiated by %s (%s)' % (user.name, 'exact' if exact else 'default'))
                 if message:
                     new_build._log('rebuild', new_build)
         return forced_builds
@@ -700,9 +706,12 @@ class runbot_build(models.Model):
                 if not repo._hash_exists(latest_commit):
                     repo._update(force=True)
                 if not repo._hash_exists(latest_commit):
-                    repo._git(['fetch', 'origin', latest_commit])
+                    try:
+                        repo._git(['fetch', 'origin', latest_commit])
+                    except:
+                        pass
                 if not repo._hash_exists(latest_commit):
-                    build._log('_checkout', "Dependency commit %s in repo %s is unreachable" % (latest_commit, repo.name))
+                    build._log('_checkout', "Dependency commit %s in repo %s is unreachable. Did you force push the branch since build creation?" % (latest_commit, repo.name))
                     raise Exception
 
                 repo._git_export(latest_commit, build._path())
@@ -793,7 +802,7 @@ class runbot_build(models.Model):
                 continue
             build._log('kill', 'Kill build %s' % build.dest)
             docker_stop(build._get_docker_name())
-            v = {'local_state': 'done', 'active_step': False, 'duplicate': False, 'build_end': now()}  # what if duplicate? state done?
+            v = {'local_state': 'done', 'active_step': False, 'duplicate_id': False, 'build_end': now()}  # what if duplicate? state done?
             if not build.job_end:
                 v['job_end'] = now()
             if result:
