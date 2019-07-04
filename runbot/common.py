@@ -36,9 +36,12 @@ def now():
 
 def grep(filename, string):
     if os.path.isfile(filename):
-        return open(filename).read().find(string) != -1
+        content = open(filename).read()
+        found = content.find(string) != -1
+        if not found and 'Modules' in string:
+            _logger.debug('FAILED TO GREP Modules in %s' "\n".join(content.split('\n')[:-10]))
+        return found
     return False
-
 
 def uniq_list(l):
     return OrderedDict.fromkeys(l).keys()
