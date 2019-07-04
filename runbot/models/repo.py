@@ -35,7 +35,7 @@ class runbot_repo(models.Model):
                              ('hook', 'Hook')],
                             default='poll',
                             string="Mode", required=True, help="hook: Wait for webhook on /runbot/hook/<id> i.e. github push event")
-    hook_time = fields.Datetime('Last hook time')
+    hook_time = fields.Float('Last hook time')
     get_ref_time = fields.Float('Last refs db update')
     duplicate_id = fields.Many2one('runbot.repo', 'Duplicate repo', help='Repository for finding duplicate builds')
     modules = fields.Char("Modules to install", help="Comma-separated list of modules to install and test.")
@@ -327,10 +327,10 @@ class runbot_repo(models.Model):
         fname_fetch_head = os.path.join(repo.path, 'FETCH_HEAD')
         if not force and os.path.isfile(fname_fetch_head):
             fetch_time = os.path.getmtime(fname_fetch_head)
-            if repo.mode == 'hook' and (not repo.hook_time or dt2time(repo.hook_time) < fetch_time):
+            if repo.mode == 'hook' and (not repo.hook_time or repo.hook_time < fetch_time):
                 t0 = time.time()
                 _logger.debug('repo %s skip hook fetch fetch_time: %ss ago hook_time: %ss ago',
-                            repo.name, int(t0 - fetch_time), int(t0 - dt2time(repo.hook_time)) if repo.hook_time else 'never')
+                            repo.name, int(t0 - fetch_time), int(t0 - repo.hook_time) if repo.hook_time else 'never')
                 return
 
         self._update_fetch_cmd()
@@ -344,7 +344,7 @@ class runbot_repo(models.Model):
     @api.multi
     def _update(self, force=True):
         """ Update the physical git reposotories on FS"""
-        for repo in self:
+        for repo in reversed(self):
             try:
                 repo._update_git(force)
             except Exception:
@@ -361,6 +361,7 @@ class runbot_repo(models.Model):
         settings_workers = int(icp.get_param('runbot.runbot_workers', default=6))
         workers = int(icp.get_param('%s.workers' % host, default=settings_workers))
         running_max = int(icp.get_param('runbot.runbot_running_max', default=75))
+        assigned_only = int(icp.get_param('%s.assigned_only' % host, default=False))
 
         Build = self.env['runbot.build']
         domain = [('repo_id', 'in', ids)]
@@ -377,7 +378,7 @@ class runbot_repo(models.Model):
         nb_testing = Build.search_count(domain_host + [('local_state', '=', 'testing')])
         available_slots = workers - nb_testing
         reserved_slots = Build.search_count(domain_host + [('local_state', '=', 'pending')])
-        assignable_slots = available_slots - reserved_slots
+        assignable_slots = (available_slots - reserved_slots) if not assigned_only else 0
         if available_slots > 0:
             if assignable_slots > 0:  # note: slots have been addapt to be able to force host on pending build. Normally there is no pending with host.
                 # commit transaction to reduce the critical section duration

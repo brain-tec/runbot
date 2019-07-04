@@ -442,7 +442,7 @@ class runbot_build(models.Model):
         def cleanup(dest_list, func, max_days, label):
             dest_by_builds_ids = defaultdict(list)
             ignored = set()
-            dest_reg = re.compile(r'^\d{5,}-.{1,32}-[\da-f]{6}(-.*)*$')
+            dest_reg = re.compile(r'^\d{5,}-.{1,32}-[\da-f]{6}(.*)*$')
             for dest in dest_list:
                 try:
                     if not dest_reg.match(dest):
@@ -577,7 +577,7 @@ class runbot_build(models.Model):
                 except:
                     _logger.exception('An error occured while computing results')
                     build._log('_make_results', 'An error occured while computing results', level='ERROR')
-                    results = {'local_state': 'ko'}
+                    results = {'local_result': 'ko'}
                 build_values.update(results)
 
                 # Non running build in
@@ -831,7 +831,7 @@ class runbot_build(models.Model):
             build.write({'local_state': 'deathrow'})
             build._log('_ask_kill', 'Killing build %s, requested by %s (user #%s)' % (build.dest, user.name, uid))
         for child in build.children_ids:  # should we filter build that are target of a duplicate_id?
-            if not build.duplicate_id and build.local_state != 'done':
+            if not child.duplicate_id:
                 child._ask_kill()
 
     def _cmd(self):  # why not remove build.modules output ?
