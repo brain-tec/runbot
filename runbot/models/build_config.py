@@ -384,7 +384,7 @@ class ConfigStep(models.Model):
                         build_values['local_result'] = build._get_worst_result([build.local_result, local_result])
                     else:
                         build_values['local_result'] = 'ko'
-                        build._log('_checkout', "Module loaded not found in logs", level="ERROR")
+                        build._log('_checkout', "Modules loaded not found in logs", level="ERROR")
         return build_values
 
     def _step_state(self):
