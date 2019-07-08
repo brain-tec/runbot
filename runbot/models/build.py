@@ -10,6 +10,7 @@ import time
 import datetime
 from ..common import dt2time, fqdn, now, grep, uniq_list, local_pgadmin_cursor, s2human
 from ..container import docker_build, docker_stop, docker_is_running
+from odoo.addons.runbot.models.build_error import clean, digest
 from odoo import models, fields, api
 from odoo.exceptions import UserError
 from odoo.http import request
@@ -918,6 +919,42 @@ class runbot_build(models.Model):
 
         new_step = step_ids[next_index]  # job to do, state is job_state (testing or running)
         return {'active_step': new_step.id, 'local_state': new_step._step_state()}
+
+    def _parse_logs(self):
+        """ Parse build logs to classify errors """
+        BuildError = self.env['runbot.build.error']
+
+        query = """
+        SELECT build_id, name, message
+            FROM ir_logging
+            WHERE
+                type='server'
+                AND level='ERROR'
+                AND length(message) > 50
+                AND build_id NOT IN (SELECT DISTINCT build_id FROM runbot_build_error_ids_runbot_build_rel)
+                AND build_id IN %s
+        """
+        self.env.cr.execute(query, (tuple(self.ids), ))
+        ir_logs = self.env.cr.fetchall()
+        _logger.info('Logs found: %s', len(ir_logs))
+
+        hash_dict = defaultdict(list)
+        for log in ir_logs:
+            hash = digest(clean(log[2]))
+            hash_dict[hash].append(log)
+
+        # add build ids to already detected errors
+        for build_error in BuildError.search([('hash', 'in', list(hash_dict.keys()))]):
+            build_error.write({'build_ids': [(0, False, hash_dict[build_error.hash]['build_id'])]})
+            del hash_dict[build_error.hash]
+
+        # create an error for the remaining entries
+        for hash, rows in hash_dict.items():
+            BuildError.create({
+                'content': rows[0][2],
+                'module_name': rows[0][1],
+                'build_ids': [(6, False, [int(r[0]) for r in rows])]
+            })
 
     def read_file(self, file, mode='r'):
         file_path = self._path(file)

@@ -8,7 +8,7 @@ from odoo import models, fields, api
 _logger = logging.getLogger(__name__)
 
 CLEANING_REGS = (
-    re.compile(r', line \d+,'),
+    re.compile(r', line \d+,'),  # simply remove line numbers
 )
 
 
@@ -37,12 +37,14 @@ class RunbotBuildError(models.Model):
     cleaned_content = fields.Text('Cleaned error message')
     module_name = fields.Char('Module name')  # name in ir_logging
     hash = fields.Char('Error fingerprint', index=True)
+    random = fields.Boolean('underterministic error')
     responsible = fields.Char('Fixer')  # many2one to res.user ?
     fixing_commit = fields.Char('Commit that should fix the problem')
     build_ids = fields.Many2many('runbot.build', 'runbot_build_error_ids_runbot_build_rel',
                                  column1='build_error_id', column2='build_id',
                                  string='Affected builds')
     active = fields.Boolean('Error is not fixed', default=True)
+    tag_ids = fields.Many2many('runbot.build.error.tag', 'Tags')
 
     @api.multi
     def create(self, vals):
@@ -51,3 +53,10 @@ class RunbotBuildError(models.Model):
         vals.update({'cleaned_content': cleaned_content})
         vals.update({'hash': digest(cleaned_content)})
         return super().create(vals)
+
+
+class RunbotBuildErrorTag(models.Model):
+
+    _name = "runbot.build.error.tag"
+
+    name = fields.Char('Tag')

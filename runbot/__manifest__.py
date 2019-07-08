@@ -26,6 +26,5 @@
         'templates/badge.xml',
         'templates/branch.xml',
         'data/runbot_build_config_data.xml',
-        'data/runbot_parse_log_cron.xml'
     ],
 }
