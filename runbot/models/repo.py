@@ -23,6 +23,7 @@ _logger = logging.getLogger(__name__)
 class runbot_repo(models.Model):
 
     _name = "runbot.repo"
+    _order = 'sequence, id'
 
     name = fields.Char('Repository', required=True)
     short_name = fields.Char('Repository', compute='_compute_short_name', store=False, readonly=True)
