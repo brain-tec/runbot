@@ -546,7 +546,11 @@ class runbot_build(models.Model):
                     log_path = build._path('logs', 'wake_up.txt')
                     build.write({'job_start': now(), 'job_end': False, 'active_step': False, 'requested_action': False, 'local_state': 'running'})
                     build._log('wake_up', 'Waking up build', level='SEPARATOR')
-                    self.env['runbot.build.config.step']._run_odoo_run(build, log_path)
+                    try:
+                        self.env['runbot.build.config.step']._run_odoo_run(build, log_path)
+                    except:
+                        build.write({'job_end': now(), 'active_step': False, 'requested_action': False, 'local_state': 'done'})
+                        build._log('wake_up', 'An error occured while waking up build. The build may be too old', level='WARNING')
                 continue
 
             if build.local_state == 'pending':
