@@ -535,7 +535,10 @@ class runbot_build(models.Model):
             self.env.cr.commit()  # commit between each build to minimise transactionnal errors due to state computations
             self.invalidate_cache()
             if build.requested_action == 'deathrow':
-                build._kill(result='manually_killed')
+                result = None
+                if build.local_state != 'running' and build.global_result not in ('warn', 'ko'):
+                    result = 'manually_killed'
+                build._kill(result=result)
                 continue
 
             if build.requested_action == 'wake_up':
@@ -593,7 +596,7 @@ class runbot_build(models.Model):
                         build._log('_schedule', '%s time exceeded (%ss)' % (build.active_step.name if build.active_step else "?", build.job_time))
                         build._kill(result='killed')
                     continue
-                elif build.job_time < 15:
+                elif build.active_step._is_docker_step() and build.job_time < 15:
                     _logger.debug('container "%s" seems too take a while to start', build._get_docker_name())
                     continue
                 # No job running, make result and select nex job
@@ -939,18 +942,19 @@ class runbot_build(models.Model):
             elif build.config_id.update_github_state:
                 runbot_domain = self.env['runbot.repo']._domain()
                 desc = "runbot build %s" % (build.dest,)
-                if build.global_state == 'testing':
+
+                if build.global_result in ('ko', 'warn'):
+                    state = 'failure'
+                elif build.global_state == 'testing':
                     state = 'pending'
                 elif build.global_state in ('running', 'done'):
                     state = 'error'
                     if build.global_result == 'ok':
                         state = 'success'
                 else:
+                    _logger.debug("skipping github status for build %s ", build.id)
                     continue
                 desc += " (runtime %ss)" % (build.job_time,)
-
-                if build.global_result in ('ko', 'warn'):
-                    state = 'failure'
 
                 status = {
                     "state": state,
