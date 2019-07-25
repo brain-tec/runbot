@@ -940,11 +940,10 @@ class runbot_build(models.Model):
                 runbot_domain = self.env['runbot.repo']._domain()
                 desc = "runbot build %s" % (build.dest,)
 
-                if build.global_state == 'testing':
-                    state = 'pending'
-
                 if build.global_result in ('ko', 'warn'):
                     state = 'failure'
+                elif build.global_state == 'testing':
+                    state = 'pending'
                 elif build.global_state in ('running', 'done'):
                     state = 'error'
                     if build.global_result == 'ok':
