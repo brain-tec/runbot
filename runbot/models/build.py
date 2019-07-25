@@ -939,18 +939,20 @@ class runbot_build(models.Model):
             elif build.config_id.update_github_state:
                 runbot_domain = self.env['runbot.repo']._domain()
                 desc = "runbot build %s" % (build.dest,)
+
                 if build.global_state == 'testing':
                     state = 'pending'
+
+                if build.global_result in ('ko', 'warn'):
+                    state = 'failure'
                 elif build.global_state in ('running', 'done'):
                     state = 'error'
                     if build.global_result == 'ok':
                         state = 'success'
                 else:
+                    _logger.debug("skipping github status for build %s ", build.id)
                     continue
                 desc += " (runtime %ss)" % (build.job_time,)
-
-                if build.global_result in ('ko', 'warn'):
-                    state = 'failure'
 
                 status = {
                     "state": state,
