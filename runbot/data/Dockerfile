@@ -30,7 +30,7 @@ RUN set -x ; \
     xfonts-75dpi \
     zlib1g-dev
 
-RUN apt-get install -y unzip
+RUN apt-get install -y --no-install-recommends unzip libmagic1 libzbar0
 
 # Install Google Chrome
 RUN curl -sSL https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
