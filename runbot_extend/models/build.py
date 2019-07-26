@@ -40,6 +40,7 @@ class runbot_build(models.Model):
             return '%s%s' % (prefix, m)
         branch_ids = self.env['runbot.branch'].search([
             ('sticky', '=', True),
+            ('coverage', '=', True),
             ('repo_id.no_build', '=', False),
             ], order='id')
         for branch_id in branch_ids:

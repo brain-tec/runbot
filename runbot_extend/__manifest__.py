@@ -10,6 +10,7 @@
         'data/runbot_build_config_data.xml',
         'data/cron.xml',
         'views/repo.xml',
+        'views/branch.xml',
         'views/runbot_build_config.xml',
         'views/res_config_settings_views.xml',
         'views/templates.xml',

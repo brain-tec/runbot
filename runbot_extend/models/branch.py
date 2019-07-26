@@ -23,6 +23,8 @@ _logger = logging.getLogger(__name__)
 class runbot_branch(models.Model):
     _inherit = "runbot.branch"
 
+    coverage = fields.Boolean("Coverage can be done on this branch", default=True)
+
     def create(self, vals):
         branch_id = super(runbot_branch, self).create(vals)
         if branch_id.repo_id.no_build:
