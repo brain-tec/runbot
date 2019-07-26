@@ -20,6 +20,29 @@ from odoo.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT
 _logger = logging.getLogger(__name__)
 
 
+class Commit():
+    def __init__(self, repo, sha):
+        self.repo = repo
+        self.sha = sha
+
+    def _source_path(self, *path):
+        return self.repo._source_path(self.sha, *path)
+
+    def export(self):
+        return self.repo._git_export(self.sha)
+
+    def read_source(self, file, mode='r'):
+        file_path = self._source_path(file)
+        try:
+            with open(file_path, mode) as f:
+                return f.read()
+        except:
+            return False
+
+    def __str__(self):
+        return '%s:%s' % (self.repo.short_name, self.sha)
+
+
 def fqdn():
     return socket.getfqdn()
 
@@ -80,13 +103,3 @@ def local_pgadmin_cursor():
     finally:
         if cnx:
             cnx.close()
-
-def get_py_version(build):
-    """return the python name to use from build instance"""
-    executables = [ 'odoo-bin', 'openerp-server' ]
-    for server_path in map(build._path, executables):
-        if os.path.exists(server_path):
-            with open(server_path, 'r') as f:
-                if f.readline().strip().endswith('python3'):
-                    return 'python3'
-    return 'python'

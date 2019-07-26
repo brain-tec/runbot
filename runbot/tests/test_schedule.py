@@ -42,9 +42,12 @@ class TestSchedule(common.TransactionCase):
         })
         domain = [('repo_id', 'in', (self.repo.id, ))]
         domain_host = domain + [('host', '=', 'runbotxx')]
-        build_ids = self.Build.search(domain_host + [('local_state', 'in', ['testing', 'running', 'deathrow'])])
+        build_ids = self.Build.search(domain_host + [('local_state', 'in', ['testing', 'running'])])
         mock_running.return_value = False
         self.assertEqual(build.local_state, 'testing')
+        build_ids._schedule()  # too fast, docker not started
+        self.assertEqual(build.local_state, 'testing')
+        build_ids.write({'job_start': datetime.datetime.now() - datetime.timedelta(seconds=20)})  # job is now a little older
         build_ids._schedule()
         self.assertEqual(build.local_state, 'done')
         self.assertEqual(build.local_result, 'ok')

@@ -11,14 +11,17 @@ import signal
 import subprocess
 import time
 
+from odoo.exceptions import UserError, ValidationError
 from odoo.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT
 from odoo import models, fields, api
 from odoo.modules.module import get_module_resource
 from odoo.tools import config
-from ..common import fqdn, dt2time
-
+from ..common import fqdn, dt2time, Commit
+from psycopg2.extensions import TransactionRollbackError
 _logger = logging.getLogger(__name__)
 
+class HashMissingException(Exception):
+    pass
 
 class runbot_repo(models.Model):
 
@@ -35,7 +38,7 @@ class runbot_repo(models.Model):
                              ('hook', 'Hook')],
                             default='poll',
                             string="Mode", required=True, help="hook: Wait for webhook on /runbot/hook/<id> i.e. github push event")
-    hook_time = fields.Datetime('Last hook time')
+    hook_time = fields.Float('Last hook time')
     get_ref_time = fields.Float('Last refs db update')
     duplicate_id = fields.Many2one('runbot.repo', 'Duplicate repo', help='Repository for finding duplicate builds')
     modules = fields.Char("Modules to install", help="Comma-separated list of modules to install and test.")
@@ -55,6 +58,10 @@ class runbot_repo(models.Model):
     repo_config_id = fields.Many2one('runbot.build.config', 'Run Config')
     config_id = fields.Many2one('runbot.build.config', 'Run Config', compute='_compute_config_id', inverse='_inverse_config_id')
 
+    server_files = fields.Char('Server files', help='Comma separated list of possible server files')  # odoo-bin,openerp-server,openerp-server.py
+    manifest_files = fields.Char('Addons files', help='Comma separated list of possible addons files', default='__manifest__.py')
+    addons_paths = fields.Char('Addons files', help='Comma separated list of possible addons path', default='')
+
     def _compute_config_id(self):
         for repo in self:
             if repo.repo_config_id:
@@ -71,15 +78,25 @@ class runbot_repo(models.Model):
         default = os.path.join(os.path.dirname(__file__), '../static')
         return os.path.abspath(default)
 
+    def _source_path(self, sha, *path):
+        """
+        returns the absolute path to the source folder of the repo (adding option *path)
+        """
+        self.ensure_one()
+        return os.path.join(self._root(), 'sources', self._get_repo_name_part(), sha, *path)
+
     @api.depends('name')
     def _get_path(self):
         """compute the server path of repo from the name"""
         root = self._root()
         for repo in self:
-            name = repo.name
-            for i in '@:/':
-                name = name.replace(i, '_')
-            repo.path = os.path.join(root, 'repo', name)
+            repo.path = os.path.join(root, 'repo', repo._sanitized_name(repo.name))
+
+    @api.model
+    def _sanitized_name(self, name):
+        for i in '@:/':
+            name = name.replace(i, '_')
+        return name
 
     @api.depends('name')
     def _get_base_url(self):
@@ -95,24 +112,48 @@ class runbot_repo(models.Model):
         for repo in self:
             repo.short_name = '/'.join(repo.base.split('/')[-2:])
 
+    def _get_repo_name_part(self):
+        self.ensure_one
+        return self._sanitized_name(self.name.split('/')[-1])
+
     def _git(self, cmd):
         """Execute a git command 'cmd'"""
-        for repo in self:
-            cmd = ['git', '--git-dir=%s' % repo.path] + cmd
-            _logger.debug("git command: %s", ' '.join(cmd))
-            return subprocess.check_output(cmd).decode('utf-8')
+        self.ensure_one()
+        cmd = ['git', '--git-dir=%s' % self.path] + cmd
+        _logger.debug("git command: %s", ' '.join(cmd))
+        return subprocess.check_output(cmd).decode('utf-8')
 
     def _git_rev_parse(self, branch_name):
         return self._git(['rev-parse', branch_name]).strip()
 
-    def _git_export(self, treeish, dest):
-        """Export a git repo to dest"""
+    def _git_export(self, sha):
+        """Export a git repo into a sources"""
+        # TODO add automated tests
         self.ensure_one()
-        _logger.debug('checkout %s %s %s', self.name, treeish, dest)
-        p1 = subprocess.Popen(['git', '--git-dir=%s' % self.path, 'archive', treeish], stdout=subprocess.PIPE)
-        p2 = subprocess.Popen(['tar', '-xmC', dest], stdin=p1.stdout, stdout=subprocess.PIPE)
+        export_path = self._source_path(sha)
+
+        if os.path.isdir(export_path):
+            _logger.info('git export: checkouting to %s (already exists)' % export_path)
+            return export_path
+
+        if not self._hash_exists(sha):
+            self._update(force=True)
+        if not self._hash_exists(sha):
+            try:
+                self._git(['fetch', 'origin', sha])
+            except:
+                pass
+        if not self._hash_exists(sha):
+            raise HashMissingException()
+
+        _logger.info('git export: checkouting to %s (new)' % export_path)
+        os.makedirs(export_path)
+        p1 = subprocess.Popen(['git', '--git-dir=%s' % self.path, 'archive', sha], stdout=subprocess.PIPE)
+        p2 = subprocess.Popen(['tar', '-xmC', export_path], stdin=p1.stdout, stdout=subprocess.PIPE)
         p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
         p2.communicate()[0]
+        # TODO get result and fallback on cleaing in case of problem
+        return export_path
 
     def _hash_exists(self, commit_hash):
         """ Verify that a commit hash exists in the repo """
@@ -262,7 +303,7 @@ class runbot_repo(models.Model):
                     ])
                     for btk in builds_to_kill:
                         btk._log('repo._update_git', 'Build automatically killed, newer build found.', level='WARNING')
-                    builds_to_kill.write({'local_state': 'deathrow'})
+                    builds_to_kill.write({'requested_action': 'deathrow'})
 
                 new_build = Build.create(build_info)
                 # create a reverse dependency build if needed
@@ -327,10 +368,10 @@ class runbot_repo(models.Model):
         fname_fetch_head = os.path.join(repo.path, 'FETCH_HEAD')
         if not force and os.path.isfile(fname_fetch_head):
             fetch_time = os.path.getmtime(fname_fetch_head)
-            if repo.mode == 'hook' and (not repo.hook_time or dt2time(repo.hook_time) < fetch_time):
+            if repo.mode == 'hook' and (not repo.hook_time or repo.hook_time < fetch_time):
                 t0 = time.time()
                 _logger.debug('repo %s skip hook fetch fetch_time: %ss ago hook_time: %ss ago',
-                            repo.name, int(t0 - fetch_time), int(t0 - dt2time(repo.hook_time)) if repo.hook_time else 'never')
+                            repo.name, int(t0 - fetch_time), int(t0 - repo.hook_time) if repo.hook_time else 'never')
                 return
 
         self._update_fetch_cmd()
@@ -344,7 +385,7 @@ class runbot_repo(models.Model):
     @api.multi
     def _update(self, force=True):
         """ Update the physical git reposotories on FS"""
-        for repo in self:
+        for repo in reversed(self):
             try:
                 repo._update_git(force)
             except Exception:
@@ -361,13 +402,14 @@ class runbot_repo(models.Model):
         settings_workers = int(icp.get_param('runbot.runbot_workers', default=6))
         workers = int(icp.get_param('%s.workers' % host, default=settings_workers))
         running_max = int(icp.get_param('runbot.runbot_running_max', default=75))
+        assigned_only = int(icp.get_param('%s.assigned_only' % host, default=False))
 
         Build = self.env['runbot.build']
         domain = [('repo_id', 'in', ids)]
         domain_host = domain + [('host', '=', host)]
 
         # schedule jobs (transitions testing -> running, kill jobs, ...)
-        build_ids = Build.search(domain_host + [('local_state', 'in', ['testing', 'running', 'deathrow'])])
+        build_ids = Build.search(domain_host + ['|', ('local_state', 'in', ['testing', 'running']), ('requested_action', 'in', ['wake_up', 'deathrow'])])
         build_ids._schedule()
         self.env.cr.commit()
         self.invalidate_cache()
@@ -377,7 +419,7 @@ class runbot_repo(models.Model):
         nb_testing = Build.search_count(domain_host + [('local_state', '=', 'testing')])
         available_slots = workers - nb_testing
         reserved_slots = Build.search_count(domain_host + [('local_state', '=', 'pending')])
-        assignable_slots = available_slots - reserved_slots
+        assignable_slots = (available_slots - reserved_slots) if not assigned_only else 0
         if available_slots > 0:
             if assignable_slots > 0:  # note: slots have been addapt to be able to force host on pending build. Normally there is no pending with host.
                 # commit transaction to reduce the critical section duration
@@ -425,7 +467,7 @@ class runbot_repo(models.Model):
                 pending_build._schedule()
 
         # terminate and reap doomed build
-        build_ids = Build.search(domain_host + [('local_state', '=', 'running')]).ids
+        build_ids = Build.search(domain_host + [('local_state', '=', 'running')], order='job_start desc').ids
         # sort builds: the last build of each sticky branch then the rest
         sticky = {}
         non_sticky = []
@@ -457,7 +499,8 @@ class runbot_repo(models.Model):
 
             nginx_config = self.env['ir.ui.view'].render_template("runbot.nginx_config", settings)
             os.makedirs(nginx_dir, exist_ok=True)
-            open(os.path.join(nginx_dir, 'nginx.conf'), 'wb').write(nginx_config)
+            with open(os.path.join(nginx_dir, 'nginx.conf'), 'wb') as nginx_file:
+                nginx_file.write(nginx_config)
             try:
                 _logger.debug('reload nginx')
                 pid = int(open(os.path.join(nginx_dir, 'nginx.pid')).read().strip(' \n'))
@@ -512,10 +555,16 @@ class runbot_repo(models.Model):
         update_frequency = int(icp.get_param('runbot.runbot_update_frequency', default=10))
         while time.time() - start_time < timeout:
             repos = self.search([('mode', '!=', 'disabled')])
-            repos._scheduler()
-            self.env.cr.commit()
-            self.env.reset()
-            self = self.env()[self._name]
-            self._reload_nginx()
-            time.sleep(update_frequency)
+            try:
+                repos._scheduler()
+                self.env.cr.commit()
+                self.env.reset()
+                self = self.env()[self._name]
+                self._reload_nginx()
+                time.sleep(update_frequency)
+            except TransactionRollbackError:
+                _logger.exception('Trying to rollback')
+                self.env.cr.rollback()
+                self.env.reset()
+                time.sleep(random.uniform(0, 1))
         self.env['runbot.build']._local_cleanup()
