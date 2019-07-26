@@ -44,7 +44,8 @@ class runbot_repo(models.Model):
             os.remove(previous_path)
             os.remove(current_path)
             shutil.move(tmp_path, current_path)
-        shutil.copy(current_path, previous_path)
+        if os.path.isfile(current_path):
+            shutil.copy(current_path, previous_path)
         return res
 
 
