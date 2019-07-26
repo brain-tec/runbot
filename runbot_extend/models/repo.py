@@ -48,11 +48,13 @@ class runbot_repo(models.Model):
             shutil.copy(current_path, previous_path)
         return res
 
-
 class runbot_forced_branch(models.Model):
     _name = "runbot.forced.branch"
+    _order = 'sequence, id'
 
     repo_id = fields.Many2one('runbot.repo', 'Repository', required=True, ondelete='cascade')
-    dep_repo_id = fields.Many2one('runbot.repo', required=True, string="For dep. repo")
+    dep_repo_id = fields.Many2one('runbot.repo', required=True, string="For dep. repo",
+        help="The target dependency repository for which we want to force branch matching")
+    sequence = fields.Integer('Sequence')
     name = fields.Char('Branch name to replace', required=True)
     forced_name = fields.Char('Replacing branch name', required=True)

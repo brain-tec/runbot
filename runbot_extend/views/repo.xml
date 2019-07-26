@@ -14,7 +14,8 @@
                 <field name="testenable_restore" attrs="{'invisible': ['|', ('restored_db','=',False), ('no_build','=',True)]}"/>
                 <field name="custom_coverage" attrs="{'invisible': [('no_build','=',True)]}"/>
                 <field name="forced_branch_ids" attrs="{'invisible': [('no_build','=',True)]}">
-                  <tree>
+                  <tree editable="bottom">
+                    <field name="sequence"/>
                     <field name="dep_repo_id"/>
                     <field name="name"/>
                     <field name="forced_name"/>

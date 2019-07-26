@@ -11,6 +11,7 @@ import datetime
 import shlex
 import subprocess
 import shutil
+import fnmatch
 
 from odoo import models, fields, api, _
 from odoo.addons.runbot.container import docker_build, docker_run, build_odoo_cmd
@@ -43,9 +44,15 @@ class runbot_branch(models.Model):
     def _get_closest_branch(self, target_repo_id):
         self.ensure_one()
         # 0. force branch name
+        name = self.pull_head_name or self.branch_name
+        if ':' in name:
+            # remove org from pull_head_name (ex: odoo:11.0-opw...)
+            name = name.split(':', 1)[1]
         target = self.env['runbot.branch'].browse(target_repo_id)
-        forced_branch = self.repo_id.forced_branch_ids.filtered(lambda r: r.name == target.branch_name)[:1]
-        if forced_branch:
+        for forced_branch in self.repo_id.forced_branch_ids:
+            if not (forced_branch.dep_repo_id.id == target_repo_id
+                    and fnmatch.fnmatch(name, forced_branch.name)):
+                continue
             domain = [
                 ('repo_id', '=', target_repo_id),
                 ('branch_name', '=', forced_branch.forced_name),
