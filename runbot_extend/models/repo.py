@@ -24,6 +24,9 @@ class runbot_repo(models.Model):
     no_build = fields.Boolean(default=False)
     restored_db = fields.Binary(string='Database to restore (zip)', help='Zip file containing an sql dump and a filestore', attachment=True)
     restored_db_filename = fields.Char()
+    use_requirements_txt = fields.Boolean('Use requirements.txt', default=True,
+        help=("If checked, merge content of repo requirements.txt into main one"
+              "(allows installing those dependencies before build)"))
     force_update_all = fields.Boolean('Force Update ALL', help='Force update all on restore otherwise it will update only the modules in the repository', default=False)
     testenable_restore = fields.Boolean('Test enable on upgrade', help='test enabled on update of the restored database', default=False)
     custom_coverage = fields.Char(string='Custom coverage repository',
@@ -32,6 +35,9 @@ class runbot_repo(models.Model):
 
     def _git_export(self, treeish, dest):
         res =  super(runbot_repo, self)._git_export(treeish, dest)
+        if not self.use_requirements_txt:
+            return res
+
         previous_path = '%s/%s' % (dest, 'previous_requirements.txt')
         current_path = '%s/%s' % (dest, 'requirements.txt')
         tmp_path = '%s/%s' % (dest, 'requirements_tmp.txt')

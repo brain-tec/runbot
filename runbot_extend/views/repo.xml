@@ -10,6 +10,7 @@
                 <field name="no_build"/>
                 <field name="restored_db" attrs="{'invisible': [('no_build','=',True)]}" filename="filename" placeholder="Choose a file to restore..."/>
                 <field name="restored_db_filename" invisible="1"/>
+                <field name="use_requirements_txt" attrs="{'invisible': [('no_build','=',True)]}"/>
                 <field name="force_update_all" attrs="{'invisible': ['|', ('restored_db','=',False), ('no_build','=',True)]}"/>
                 <field name="testenable_restore" attrs="{'invisible': ['|', ('restored_db','=',False), ('no_build','=',True)]}"/>
                 <field name="custom_coverage" attrs="{'invisible': [('no_build','=',True)]}"/>
