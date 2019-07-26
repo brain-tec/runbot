@@ -121,7 +121,7 @@ class ConfigStep(models.Model):
         return docker_run(build_odoo_cmd(cmd), log_path, build._path(), build._get_docker_name())
 
     def _make_results(self, build):
-        if self._get_ordered_step(build).is_custom_parsing:
+        if self and self._get_ordered_step(build).is_custom_parsing:
             return self._make_customized_results(build)
         else:
             return super(ConfigStep, self)._make_results(build)
