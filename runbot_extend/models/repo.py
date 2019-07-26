@@ -28,7 +28,7 @@ class runbot_repo(models.Model):
     testenable_restore = fields.Boolean('Test enable on upgrade', help='test enabled on update of the restored database', default=False)
     custom_coverage = fields.Char(string='Custom coverage repository',
                                   help='Use --include arg on coverage: list of file name patterns, for example *addons/module1*,*addons/module2*. It only works on sticky branches on nightly coverage builds.')
-
+    forced_branch_ids =  fields.One2many('runbot.forced.branch', 'repo_id', string='Replacing branch names')
 
     def _git_export(self, treeish, dest):
         res =  super(runbot_repo, self)._git_export(treeish, dest)
@@ -46,3 +46,12 @@ class runbot_repo(models.Model):
             shutil.move(tmp_path, current_path)
         shutil.copy(current_path, previous_path)
         return res
+
+
+class runbot_forced_branch(models.Model):
+    _name = "runbot.forced.branch"
+
+    repo_id = fields.Many2one('runbot.repo', 'Repository', required=True, ondelete='cascade')
+    dep_repo_id = fields.Many2one('runbot.repo', required=True, string="For dep. repo")
+    name = fields.Char('Branch name to replace', required=True)
+    forced_name = fields.Char('Replacing branch name', required=True)

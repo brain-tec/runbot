@@ -13,6 +13,13 @@
                 <field name="force_update_all" attrs="{'invisible': ['|', ('restored_db','=',False), ('no_build','=',True)]}"/>
                 <field name="testenable_restore" attrs="{'invisible': ['|', ('restored_db','=',False), ('no_build','=',True)]}"/>
                 <field name="custom_coverage" attrs="{'invisible': [('no_build','=',True)]}"/>
+                <field name="forced_branch_ids" attrs="{'invisible': [('no_build','=',True)]}">
+                  <tree>
+                    <field name="dep_repo_id"/>
+                    <field name="name"/>
+                    <field name="forced_name"/>
+                  </tree>
+                </field>
             </xpath>
         </field>
     </record>
