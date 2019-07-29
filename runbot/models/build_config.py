@@ -238,6 +238,8 @@ class ConfigStep(models.Model):
         return safe_eval(self.sudo().python_code.strip(), eval_ctx, mode="exec", nocopy=True)
 
     def _is_docker_step(self):
+        if not self:
+            return False
         self.ensure_one()
         return self.job_type in ('install_odoo', 'run_odoo') or (self.job_type == 'python' and 'docker_run(' in self.python_code)
 
