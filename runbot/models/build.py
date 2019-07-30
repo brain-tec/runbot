@@ -381,7 +381,7 @@ class runbot_build(models.Model):
             pass  # todo remove this try catch and make correct patch for _git
         params = defaultdict(lambda: defaultdict(str))
         if message:
-            regex = re.compile(r'^[\t ]*dep=([A-Za-z0-9\-_]+/[A-Za-z0-9\-_]+):([0-9A-Fa-f\-]*) *(#.*)?$', re.M)  # dep:repo:hash #comment
+            regex = re.compile(r'^[\t ]*Runbot-dependency: ([A-Za-z0-9\-_]+/[A-Za-z0-9\-_]+):([0-9A-Fa-f\-]*) *(#.*)?$', re.M)  # Runbot-dependency: repo:hash #comment
             for result in re.findall(regex, message):
                 params['dep'][result[0]] = result[1]
         return params
