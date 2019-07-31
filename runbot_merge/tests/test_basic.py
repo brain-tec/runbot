@@ -975,11 +975,16 @@ class TestMergeMethod:
         repo.post_status(staging.id, 'success', 'legal/cla')
         repo.post_status(staging.id, 'success', 'ci/runbot')
         run_crons(env)
-        assert env['runbot_merge.pull_requests'].search([
+        pr = env['runbot_merge.pull_requests'].search([
             ('repository.name', '=', repo.name),
             ('number', '=', prx.number)
-        ]).state == 'merged'
+        ])
+        assert pr.state == 'merged'
         assert prx.state == 'closed'
+        assert json.loads(pr.commits_map) == {
+            c1: actual_sha,
+            '': actual_sha,
+        }, "for a squash, the one PR commit should be mapped to the one rebased commit"
 
     def test_pr_update_to_many_commits(self, repo, env):
         """
@@ -1157,16 +1162,26 @@ class TestMergeMethod:
         repo.post_status('heads/staging.master', 'success', 'ci/runbot')
         run_crons(env)
 
-        assert env['runbot_merge.pull_requests'].search([
+        pr = env['runbot_merge.pull_requests'].search([
             ('repository.name', '=', repo.name),
             ('number', '=', prx.number),
-        ]).state == 'merged'
+        ])
+        assert pr.state == 'merged'
 
         # check that the dummy commit is not in the final master
         master = log_to_node(repo.log('heads/master'))
         assert master == merge_head
-        final_tree = repo.read_tree(repo.commit('heads/master'))
+        head = repo.commit('heads/master')
+        final_tree = repo.read_tree(head)
         assert final_tree == {'m': b'2', 'b': b'1'}, "sanity check of final tree"
+        r1 = repo.commit(head.parents[1])
+        r0 = repo.commit(r1.parents[0])
+        assert json.loads(pr.commits_map) == {
+            b0: r0.id,
+            b1: r1.id,
+            '': head.id,
+        }
+        assert r0.parents == [m2]
 
     def test_pr_rebase_ff(self, repo, env, users):
         """ test result on rebase-merge
@@ -1220,16 +1235,27 @@ class TestMergeMethod:
         repo.post_status('heads/staging.master', 'success', 'ci/runbot')
         run_crons(env)
 
-        assert env['runbot_merge.pull_requests'].search([
+        pr = env['runbot_merge.pull_requests'].search([
             ('repository.name', '=', repo.name),
             ('number', '=', prx.number),
-        ]).state == 'merged'
+        ])
+        assert pr.state == 'merged'
 
         # check that the dummy commit is not in the final master
         master = log_to_node(repo.log('heads/master'))
         assert master == nb1
-        final_tree = repo.read_tree(repo.commit('heads/master'))
+        head = repo.commit('heads/master')
+        final_tree = repo.read_tree(head)
         assert final_tree == {'m': b'2', 'b': b'1'}, "sanity check of final tree"
+
+        m1 = head
+        m0 = repo.commit(m1.parents[0])
+        assert json.loads(pr.commits_map) == {
+            '': m1.id, # merge commit
+            b1: m1.id, # second PR's commit
+            b0: m0.id, # first PR's commit
+        }
+        assert m0.parents == [m2], "can't hurt to check the parent of our root commit"
 
     @pytest.mark.skip(reason="what do if the PR contains merge commits???")
     def test_pr_contains_merges(self, repo, env):
@@ -1272,6 +1298,14 @@ class TestMergeMethod:
         expected = node('gibberish\n\nblahblah\n\ncloses {}#{}'
                         '\n\nSigned-off-by: {}'.format(repo.name, prx.number, reviewer), m, c0)
         assert log_to_node(repo.log('heads/master')), expected
+        pr = env['runbot_merge.pull_requests'].search([
+            ('repository.name', '=', repo.name),
+            ('number', '=', prx.number),
+        ])
+        assert json.loads(pr.commits_map) == {
+            prx.head: prx.head,
+            '': master.id
+        }
 
     def test_unrebase_emptymessage(self, repo, env, users):
         """ When merging between master branches (e.g. forward port), the PR
@@ -1598,6 +1632,49 @@ class TestPRUpdate(object):
         assert pr.state == 'opened'
         assert not pr.staging_id
         assert not env['runbot_merge.stagings'].search([])
+
+    def test_split(self, env, repo):
+        """ Should remove the PR from its split, and possibly delete the split
+        entirely.
+        """
+        m = repo.make_commit(None, 'initial', None, tree={'m': 'm'})
+        repo.make_ref('heads/master', m)
+
+        c = repo.make_commit(m, 'first', None, tree={'m': 'm', '1': '1'})
+        prx1 = repo.make_pr('t1', 'b1', target='master', ctid=c, user='user', label='p1')
+        repo.post_status(prx1.head, 'success', 'legal/cla')
+        repo.post_status(prx1.head, 'success', 'ci/runbot')
+        prx1.post_comment('hansen r+', user='reviewer')
+
+        c = repo.make_commit(m, 'first', None, tree={'m': 'm', '2': '2'})
+        prx2 = repo.make_pr('t2', 'b2', target='master', ctid=c, user='user', label='p2')
+        repo.post_status(prx2.head, 'success', 'legal/cla')
+        repo.post_status(prx2.head, 'success', 'ci/runbot')
+        prx2.post_comment('hansen r+', user='reviewer')
+
+        run_crons(env)
+
+        pr1, pr2 = env['runbot_merge.pull_requests'].search([], order='number')
+        assert pr1.number == prx1.number
+        assert pr2.number == prx2.number
+        assert pr1.staging_id == pr2.staging_id
+        s0 = pr1.staging_id
+
+        repo.post_status('heads/staging.master', 'failure', 'ci/runbot')
+        run_crons(env)
+
+        assert pr1.staging_id and pr1.staging_id != s0, "pr1 should have been re-staged"
+        assert not pr2.staging_id, "pr2 should not"
+        # TODO: remote doesn't currently handle env context so can't mess
+        #       around using active_test=False
+        assert env['runbot_merge.split'].search([])
+
+        prx2.push(repo.make_commit(c, 'second', None, tree={'m': 'm', '2': '22'}))
+        # probably not necessary ATM but...
+        run_crons(env)
+
+        assert pr2.state == 'opened', "state should have been reset"
+        assert not env['runbot_merge.split'].search([]), "there should be no split left"
 
     def test_update_error(self, env, repo):
         m = repo.make_commit(None, 'initial', None, tree={'m': 'm'})
@@ -2370,6 +2447,49 @@ class TestRMinus:
         assert pr.staging_id == st
         assert pr.state == 'ready'
 
+    def test_split(self, env, repo):
+        """ Should remove the PR from its split, and possibly delete the split
+        entirely.
+        """
+        m = repo.make_commit(None, 'initial', None, tree={'m': 'm'})
+        repo.make_ref('heads/master', m)
+
+        c = repo.make_commit(m, 'first', None, tree={'m': 'm', '1': '1'})
+        prx1 = repo.make_pr('t1', 'b1', target='master', ctid=c, user='user', label='p1')
+        repo.post_status(prx1.head, 'success', 'legal/cla')
+        repo.post_status(prx1.head, 'success', 'ci/runbot')
+        prx1.post_comment('hansen r+', user='reviewer')
+
+        c = repo.make_commit(m, 'first', None, tree={'m': 'm', '2': '2'})
+        prx2 = repo.make_pr('t2', 'b2', target='master', ctid=c, user='user', label='p2')
+        repo.post_status(prx2.head, 'success', 'legal/cla')
+        repo.post_status(prx2.head, 'success', 'ci/runbot')
+        prx2.post_comment('hansen r+', user='reviewer')
+
+        run_crons(env)
+
+        pr1, pr2 = env['runbot_merge.pull_requests'].search([], order='number')
+        assert pr1.number == prx1.number
+        assert pr2.number == prx2.number
+        assert pr1.staging_id == pr2.staging_id
+        s0 = pr1.staging_id
+
+        repo.post_status('heads/staging.master', 'failure', 'ci/runbot')
+        run_crons(env)
+
+        assert pr1.staging_id and pr1.staging_id != s0, "pr1 should have been re-staged"
+        assert not pr2.staging_id, "pr2 should not"
+        # TODO: remote doesn't currently handle env context so can't mess
+        #       around using active_test=False
+        assert env['runbot_merge.split'].search([])
+
+        # prx2 was actually a terrible idea!
+        prx2.post_comment('hansen r-', user='reviewer')
+        # probably not necessary ATM but...
+        run_crons(env)
+
+        assert pr2.state == 'validated', "state should have been reset"
+        assert not env['runbot_merge.split'].search([]), "there should be no split left"
 
 class TestComments:
     def test_address_method(self, repo, env):
@@ -2435,6 +2555,55 @@ class TestComments:
         # check that PR is still unreviewed
         assert pr.state == 'opened'
 
+class TestFeedback:
+    def test_ci_approved(self, repo, env, users):
+        """CI failing on an r+'d PR sends feedback"""
+        m = repo.make_commit(None, 'initial', None, tree={'m': 'm'})
+        repo.make_ref('heads/master', m)
+
+        c1 = repo.make_commit(m, 'first', None, tree={'m': 'c1'})
+        prx = repo.make_pr('title', 'body', target='master', ctid=c1, user='user')
+        pr = env['runbot_merge.pull_requests'].search([
+            ('repository.name', '=', repo.name),
+            ('number', '=', prx.number)
+        ])
+
+        prx.post_comment('hansen r+', user='reviewer')
+        assert pr.state == 'approved'
+
+        repo.post_status(prx.head, 'failure', 'ci/runbot')
+        run_crons(env)
+
+        assert prx.comments == [
+            (users['reviewer'], 'hansen r+'),
+            (users['user'], "'ci/runbot' failed on this reviewed PR.")
+        ]
+
+    def test_review_unvalidated(self, repo, env, users):
+        """r+-ing a PR with failed CI sends feedback"""
+        m = repo.make_commit(None, 'initial', None, tree={'m': 'm'})
+        repo.make_ref('heads/master', m)
+
+        c1 = repo.make_commit(m, 'first', None, tree={'m': 'c1'})
+        prx = repo.make_pr('title', 'body', target='master', ctid=c1, user='user')
+        pr = env['runbot_merge.pull_requests'].search([
+            ('repository.name', '=', repo.name),
+            ('number', '=', prx.number)
+        ])
+
+        repo.post_status(prx.head, 'failure', 'ci/runbot')
+        run_crons(env)
+        assert pr.state == 'opened'
+
+        prx.post_comment('hansen r+', user='reviewer')
+        assert pr.state == 'approved'
+
+        run_crons(env)
+
+        assert prx.comments == [
+            (users['reviewer'], 'hansen r+'),
+            (users['user'], "You may want to rebuild or fix this PR as it has failed CI.")
+        ]
 class TestInfrastructure:
     def test_protection(self, repo):
         """ force-pushing on a protected ref should fail
