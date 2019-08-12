@@ -316,18 +316,21 @@ class Branch(models.Model):
 
         rows = self._stageable()
         priority = rows[0][0] if rows else -1
-        if priority == 0:
+        if priority == 0 or priority == 1:
             # p=0 take precedence over all else
+            # p=1 allows merging a fix inside / ahead of a split (e.g. branch
+            # is broken or widespread false positive) without having to cancel
+            # the existing staging
             batched_prs = [PRs.browse(pr_ids) for _, pr_ids in takewhile(lambda r: r[0] == priority, rows)]
         elif self.split_ids:
             split_ids = self.split_ids[0]
             logger.info("Found split of PRs %s, re-staging", split_ids.mapped('batch_ids.prs'))
             batched_prs = [batch.prs for batch in split_ids.batch_ids]
             split_ids.unlink()
-        elif rows:
-            # p=1 or p=2
+        else: # p=2
             batched_prs = [PRs.browse(pr_ids) for _, pr_ids in takewhile(lambda r: r[0] == priority, rows)]
-        else:
+
+        if not batched_prs:
             return
 
         Batch = self.env['runbot_merge.batch']
@@ -354,8 +357,15 @@ class Branch(models.Model):
             # ensures staging branches are unique and always
             # rebuilt
             r = base64.b64encode(os.urandom(12)).decode('ascii')
+            trailer = ''
+            if heads:
+                trailer = '\n' + '\n'.join(
+                    'Runbot-dependency: %s:%s' % (repo, h)
+                    for repo, h in heads.items()
+                    if not repo.endswith('^')
+                )
             dummy_head = it['gh']('post', 'git/commits', json={
-                'message': 'force rebuild\n\nuniquifier: %s' % r,
+                'message': 'force rebuild\n\nuniquifier: %s%s' % (r, trailer),
                 'tree': tree['sha'],
                 'parents': [it['head']],
             }).json()
@@ -487,10 +497,12 @@ class PullRequests(models.Model):
     ], default=2, index=True)
 
     statuses = fields.Text(compute='_compute_statuses')
+    status = fields.Char(compute='_compute_statuses')
 
     batch_id = fields.Many2one('runbot_merge.batch',compute='_compute_active_batch', store=True)
     batch_ids = fields.Many2many('runbot_merge.batch')
     staging_id = fields.Many2one(related='batch_id.staging_id', store=True)
+    commits_map = fields.Char(help="JSON-encoded mapping of PR commits to actually integrated commits. The integration head (either a merge commit or the PR's topmost) is mapped from the 'empty' pr commit (the key is an empty string, because you can't put a null key in json maps).", default='{}')
 
     link_warned = fields.Boolean(
         default=False, help="Whether we've already warned that this (ready)"
@@ -513,13 +525,26 @@ class PullRequests(models.Model):
         for pr in self:
             pr.blocked = pr.id not in stageable
 
-    @api.depends('head')
+    @api.depends('head', 'repository.project_id.required_statuses')
     def _compute_statuses(self):
         Commits = self.env['runbot_merge.commit']
         for s in self:
             c = Commits.search([('sha', '=', s.head)])
-            if c and c.statuses:
-                s.statuses = pprint.pformat(json.loads(c.statuses))
+            if not (c and c.statuses):
+                continue
+
+            statuses = json.loads(c.statuses)
+            s.statuses = pprint.pformat(statuses)
+
+            st = 'success'
+            for ci in s.repository.project_id.required_statuses.split(','):
+                v = state_(statuses, ci) or 'pending'
+                if v in ('error', 'failure'):
+                    st = 'failure'
+                    break
+                if v == 'pending':
+                    st = 'pending'
+            s.status = st
 
     @api.depends('batch_ids.active')
     def _compute_active_batch(self):
@@ -661,21 +686,26 @@ class PullRequests(models.Model):
             elif command == 'review':
                 if param and is_reviewer:
                     newstate = RPLUS.get(self.state)
+                    print('r+', self.state, self.status)
                     if newstate:
                         self.state = newstate
                         self.reviewed_by = author
                         ok = True
+                        if self.status == 'failure':
+                            # the normal infrastructure is for failure and
+                            # prefixes messages with "I'm sorry"
+                            Feedback.create({
+                                'repository': self.repository.id,
+                                'pull_request': self.number,
+                                'message': "You may want to rebuild or fix this PR as it has failed CI.",
+                            })
                     else:
                         msg = "This PR is already reviewed, reviewing it again is useless."
                 elif not param and is_author:
                     newstate = RMINUS.get(self.state)
                     if newstate:
                         self.state = newstate
-                        if self.staging_id:
-                            self.staging_id.cancel(
-                                "unreview (r-) by %s",
-                                author.github_login
-                            )
+                        self.unstage("unreview (r-) by %s", author.github_login)
                         ok = True
                     else:
                         msg = "r- makes no sense in the current PR state."
@@ -748,11 +778,13 @@ class PullRequests(models.Model):
         for pr in self:
             required = pr.repository.project_id.required_statuses.split(',')
 
+            success = True
             for ci in required:
                 st = state_(statuses, ci) or 'pending'
                 if st == 'success':
                     continue
 
+                success = False
                 # only report an issue of the PR is already approved (r+'d)
                 if st in ('error', 'failure') and pr.state == 'approved':
                     self.env['runbot_merge.pull_requests.feedback'].create({
@@ -760,8 +792,8 @@ class PullRequests(models.Model):
                         'pull_request': pr.number,
                         'message': "%r failed on this reviewed PR." % ci,
                     })
-                break
-            else: # all success (no break)
+
+            if success:
                 oldstate = pr.state
                 if oldstate == 'opened':
                     pr.state = 'validated'
@@ -958,12 +990,16 @@ class PullRequests(models.Model):
         # on top of target
         msg = self._build_merge_message(commits[-1]['commit']['message'])
         commits[-1]['commit']['message'] = msg
-        return gh.rebase(self.number, target, commits=commits)
+        head, mapping = gh.rebase(self.number, target, commits=commits)
+        self.commits_map = json.dumps({**mapping, '': head})
+        return head
 
     def _stage_rebase_merge(self, gh, target, commits):
         msg = self._build_merge_message(self.message)
-        h = gh.rebase(self.number, target, reset=True, commits=commits)
-        return gh.merge(h, target, msg)['sha']
+        h, mapping = gh.rebase(self.number, target, reset=True, commits=commits)
+        merge_head = gh.merge(h, target, msg)['sha']
+        self.commits_map = json.dumps({**mapping, '': merge_head})
+        return merge_head
 
     def _stage_merge(self, gh, target, commits):
         pr_head = commits[-1] # oldest to newest
@@ -978,6 +1014,7 @@ class PullRequests(models.Model):
             if len(merge) == 1:
                 [base_commit] = merge
 
+        commits_map = {c['sha']: c['sha'] for c in commits}
         if base_commit:
             # replicate pr_head with base_commit replaced by
             # the current head
@@ -993,11 +1030,35 @@ class PullRequests(models.Model):
                 'parents': new_parents,
             }).json()
             gh.set_ref(target, copy['sha'])
+            # merge commit *and old PR head* map to the pr head replica
+            commits_map[''] = commits_map[pr_head['sha']] = copy['sha']
+            self.commits_map = json.dumps(commits_map)
             return copy['sha']
         else:
             # otherwise do a regular merge
             msg = self._build_merge_message(self.message)
-            return gh.merge(self.head, target, msg)['sha']
+            merge_head = gh.merge(self.head, target, msg)['sha']
+            # and the merge commit is the normal merge head
+            commits_map[''] = merge_head
+            self.commits_map = json.dumps(commits_map)
+            return merge_head
+
+    def unstage(self, reason, *args):
+        """ If the PR is staged, cancel the staging. If the PR is split and
+        waiting, remove it from the split (possibly delete the split entirely)
+        """
+        split_batches = self.with_context(active_test=False).mapped('batch_ids').filtered('split_id')
+        if len(split_batches) > 1:
+            _logger.warn("Found a PR linked with more than one split batch: %s (%s)", self, split_batches)
+        for b in split_batches:
+            if len(b.split_id.batch_ids) == 1:
+                # only the batch of this PR -> delete split
+                b.split_id.unlink()
+            else:
+                # else remove this batch from the split
+                b.split_id = False
+
+        self.staging_id.cancel(reason, *args)
 
 # state changes on reviews
 RPLUS = {
@@ -1360,7 +1421,7 @@ class Stagings(models.Model):
                     self.env['runbot_merge.pull_requests.feedback'].create({
                         'repository': pr.repository.id,
                         'pull_request': pr.number,
-                        'message': "Merged, thanks!",
+                        'message': "Merged at %s, thanks!" % json.loads(pr.commits_map)[''],
                         'close': True,
                     })
             finally:

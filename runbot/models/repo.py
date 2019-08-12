@@ -459,7 +459,8 @@ class runbot_repo(models.Model):
                     return self.env.cr.fetchall()
 
                 allocated = allocate_builds("""AND runbot_build.build_type != 'scheduled'""", assignable_slots)
-                _logger.debug('Normal builds %s where allocated to runbot' % allocated)
+                if allocated:
+                    _logger.debug('Normal builds %s where allocated to runbot' % allocated)
                 weak_slot = assignable_slots - len(allocated) - 1
                 if weak_slot > 0:
                     allocated = allocate_builds('', weak_slot)
