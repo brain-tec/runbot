@@ -10,6 +10,8 @@ import requests
 import signal
 import subprocess
 import time
+import glob
+import shutil
 
 from odoo.exceptions import UserError, ValidationError
 from odoo.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT
@@ -113,7 +115,7 @@ class runbot_repo(models.Model):
             repo.short_name = '/'.join(repo.base.split('/')[-2:])
 
     def _get_repo_name_part(self):
-        self.ensure_one
+        self.ensure_one()
         return self._sanitized_name(self.name.split('/')[-1])
 
     def _git(self, cmd):
@@ -310,11 +312,12 @@ class runbot_repo(models.Model):
                 if branch.sticky:
                     for rev_repo in self.search([('dependency_ids', 'in', self.id)]):
                         # find the latest build with the same branch name
-                        latest_rev_build = Build.search([('repo_id.id', '=', rev_repo.id), ('branch_id.branch_name', '=', branch.branch_name)], order='id desc', limit=1)
+                        latest_rev_build = Build.search([('build_type', '=', 'normal'), ('hidden', '=', 'False'), ('repo_id.id', '=', rev_repo.id), ('branch_id.branch_name', '=', branch.branch_name)], order='id desc', limit=1)
                         if latest_rev_build:
                             _logger.debug('Reverse dependency build %s forced in repo %s by commit %s', latest_rev_build.dest, rev_repo.name, sha[:6])
-                            latest_rev_build.build_type = 'indirect'
-                            new_build.revdep_build_ids += latest_rev_build._force(message='Rebuild from dependency %s commit %s' % (self.name, sha[:6]))
+                            indirect = latest_rev_build._force(message='Rebuild from dependency %s commit %s' % (self.name, sha[:6]))
+                            indirect.build_type = 'indirect'
+                            new_build.revdep_build_ids += indirect
 
         # skip old builds (if their sequence number is too low, they will not ever be built)
         skippable_domain = [('repo_id', '=', self.id), ('local_state', '=', 'pending')]
@@ -456,11 +459,13 @@ class runbot_repo(models.Model):
                     return self.env.cr.fetchall()
 
                 allocated = allocate_builds("""AND runbot_build.build_type != 'scheduled'""", assignable_slots)
-                _logger.debug('Normal builds %s where allocated to runbot' % allocated)
+                if allocated:
+                    _logger.debug('Normal builds %s where allocated to runbot' % allocated)
                 weak_slot = assignable_slots - len(allocated) - 1
                 if weak_slot > 0:
                     allocated = allocate_builds('', weak_slot)
-                    _logger.debug('Scheduled builds %s where allocated to runbot' % allocated)
+                    if allocated:
+                        _logger.debug('Scheduled builds %s where allocated to runbot' % allocated)
 
             pending_build = Build.search(domain_host + [('local_state', '=', 'pending')], limit=available_slots)
             if pending_build:
@@ -499,21 +504,25 @@ class runbot_repo(models.Model):
 
             nginx_config = self.env['ir.ui.view'].render_template("runbot.nginx_config", settings)
             os.makedirs(nginx_dir, exist_ok=True)
-            with open(os.path.join(nginx_dir, 'nginx.conf'), 'wb') as nginx_file:
-                nginx_file.write(nginx_config)
-            try:
+            content = None
+            with open(os.path.join(nginx_dir, 'nginx.conf'), 'rb') as f:
+                content = f.read()
+            if content != nginx_config:
                 _logger.debug('reload nginx')
-                pid = int(open(os.path.join(nginx_dir, 'nginx.pid')).read().strip(' \n'))
-                os.kill(pid, signal.SIGHUP)
-            except Exception:
-                _logger.debug('start nginx')
-                if subprocess.call(['/usr/sbin/nginx', '-p', nginx_dir, '-c', 'nginx.conf']):
-                    # obscure nginx bug leaving orphan worker listening on nginx port
-                    if not subprocess.call(['pkill', '-f', '-P1', 'nginx: worker']):
-                        _logger.debug('failed to start nginx - orphan worker killed, retrying')
-                        subprocess.call(['/usr/sbin/nginx', '-p', nginx_dir, '-c', 'nginx.conf'])
-                    else:
-                        _logger.debug('failed to start nginx - failed to kill orphan worker - oh well')
+                with open(os.path.join(nginx_dir, 'nginx.conf'), 'wb') as f:
+                    f.write(nginx_config)
+                try:
+                    pid = int(open(os.path.join(nginx_dir, 'nginx.pid')).read().strip(' \n'))
+                    os.kill(pid, signal.SIGHUP)
+                except Exception:
+                    _logger.debug('start nginx')
+                    if subprocess.call(['/usr/sbin/nginx', '-p', nginx_dir, '-c', 'nginx.conf']):
+                        # obscure nginx bug leaving orphan worker listening on nginx port
+                        if not subprocess.call(['pkill', '-f', '-P1', 'nginx: worker']):
+                            _logger.debug('failed to start nginx - orphan worker killed, retrying')
+                            subprocess.call(['/usr/sbin/nginx', '-p', nginx_dir, '-c', 'nginx.conf'])
+                        else:
+                            _logger.debug('failed to start nginx - failed to kill orphan worker - oh well')
 
     def _get_cron_period(self, min_margin=120):
         """ Compute a randomized cron period with a 2 min margin below
@@ -550,6 +559,14 @@ class runbot_repo(models.Model):
         if hostname != fqdn():
             return 'Not for me'
         start_time = time.time()
+        # 1. source cleanup
+        # -> Remove sources when no build is using them
+        # (could be usefull to keep them for wakeup but we can checkout them again if not forced push)
+        self.env['runbot.repo']._source_cleanup()
+        # 2. db and log cleanup
+        # -> Keep them as long as possible
+        self.env['runbot.build']._local_cleanup()
+
         timeout = self._get_cron_period()
         icp = self.env['ir.config_parameter']
         update_frequency = int(icp.get_param('runbot.runbot_update_frequency', default=10))
@@ -567,4 +584,45 @@ class runbot_repo(models.Model):
                 self.env.cr.rollback()
                 self.env.reset()
                 time.sleep(random.uniform(0, 1))
-        self.env['runbot.build']._local_cleanup()
+
+    def _source_cleanup(self):
+        try:
+            if self.pool._init:
+                return
+            _logger.info('Source cleaning')
+            # we can remove a source only if no build are using them as name or rependency_ids aka as commit
+            cannot_be_deleted_builds = self.env['runbot.build'].search([('host', '=', fqdn()), ('local_state', 'not in', ('done', 'duplicate'))])
+            cannot_be_deleted_path = set()
+            for build in cannot_be_deleted_builds:
+                for commit in build._get_all_commit():
+                    cannot_be_deleted_path.add(commit._source_path())
+
+            to_delete = set()
+            to_keep = set()
+            repos = self.search([('mode', '!=', 'disabled')])
+            for repo in repos:
+                repo_source = os.path.join(repo._root(), 'sources', repo._get_repo_name_part(), '*')
+                for source_dir in glob.glob(repo_source):
+                    if source_dir not in cannot_be_deleted_path:
+                        to_delete.add(source_dir)
+                    else:
+                        to_keep.add(source_dir)
+
+            # we are comparing cannot_be_deleted_path with to keep to sensure that the algorithm is working, we want to avoid to erase file by mistake
+            # note: it is possible that a parent_build is in testing without checkouting sources, but it should be exceptions
+            if to_delete:
+                if cannot_be_deleted_path == to_keep:
+                    to_delete = list(to_delete)
+                    to_keep = list(to_keep)
+                    cannot_be_deleted_path = list(cannot_be_deleted_path)
+                    for source_dir in to_delete:
+                        _logger.info('Deleting source: %s' % source_dir)
+                        assert 'static' in source_dir
+                        shutil.rmtree(source_dir)
+                    _logger.info('%s/%s source folder where deleted (%s kept)' % (len(to_delete), len(to_delete+to_keep), len(to_keep)))
+                else:
+                    _logger.warning('Inconsistency between sources and database: \n%s \n%s' % (cannot_be_deleted_path-to_keep, to_keep-cannot_be_deleted_path))
+
+        except:
+            _logger.error('An exception occured while cleaning sources')
+            pass

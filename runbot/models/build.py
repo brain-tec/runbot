@@ -211,12 +211,12 @@ class runbot_build(models.Model):
                 last_commit = params['dep'][repo_name]  # not name
                 if last_commit:
                     match_type = 'params'
-                    build_closets_branch = False
+                    build_closet_branch = False
                     message = 'Dependency for repo %s defined in commit message' % (repo_name)
                 else:
-                    (build_closets_branch, match_type) = build_id.branch_id._get_closest_branch(extra_repo.id)
-                    closest_name = build_closets_branch.name
-                    closest_branch_repo = build_closets_branch.repo_id
+                    (build_closet_branch, match_type) = build_id.branch_id._get_closest_branch(extra_repo.id)
+                    closest_name = build_closet_branch.name
+                    closest_branch_repo = build_closet_branch.repo_id
                     last_commit = closest_branch_repo._git_rev_parse(closest_name)
                     message = 'Dependency for repo %s defined from closest branch %s' % (repo_name, closest_name)
                 try:
@@ -230,7 +230,7 @@ class runbot_build(models.Model):
                 dep_create_vals.append({
                     'build_id': build_id.id,
                     'dependecy_repo_id': extra_repo.id,
-                    'closest_branch_id': build_closets_branch.id,
+                    'closest_branch_id': build_closet_branch and build_closet_branch.id,
                     'dependency_hash': last_commit,
                     'match_type': match_type,
                 })
@@ -265,7 +265,6 @@ class runbot_build(models.Model):
                     FROM runbot_build_dependency as DUPLIDEPS
                     JOIN runbot_build_dependency as BUILDDEPS
                     ON BUILDDEPS.dependency_hash = DUPLIDEPS.dependency_hash
-                    --AND BUILDDEPS.closest_branch_id = DUPLIDEPS.closest_branch_id -- only usefull if we are affraid of hash collision in different branches
                     AND BUILDDEPS.build_id = %s
                     AND DUPLIDEPS.build_id in %s
                     GROUP BY DUPLIDEPS.build_id
@@ -293,7 +292,7 @@ class runbot_build(models.Model):
                 docker_source_folders.add(docker_source_folder)
 
         build_id.write(extra_info)
-        if build_id.local_state == 'duplicate' and build_id.duplicate_id.global_state in ('running', 'done'):  # and not build_id.parent_id:
+        if build_id.local_state == 'duplicate' and build_id.duplicate_id.global_state in ('running', 'done'):
             build_id._github_status()
         return build_id
 
@@ -381,7 +380,7 @@ class runbot_build(models.Model):
             pass  # todo remove this try catch and make correct patch for _git
         params = defaultdict(lambda: defaultdict(str))
         if message:
-            regex = re.compile(r'^[\t ]*dep=([A-Za-z0-9\-_]+/[A-Za-z0-9\-_]+):([0-9A-Fa-f\-]*) *(#.*)?$', re.M)  # dep:repo:hash #comment
+            regex = re.compile(r'^[\t ]*Runbot-dependency: ([A-Za-z0-9\-_]+/[A-Za-z0-9\-_]+):([0-9A-Fa-f\-]*) *(#.*)?$', re.M)  # dep:repo:hash #comment
             for result in re.findall(regex, message):
                 params['dep'][result[0]] = result[1]
         return params
@@ -389,7 +388,7 @@ class runbot_build(models.Model):
     def _copy_dependency_ids(self):
         return [(0, 0, {
             'match_type': dep.match_type,
-            'closest_branch_id': dep.closest_branch_id.id,
+            'closest_branch_id': dep.closest_branch_id and dep.closest_branch_id.id,
             'dependency_hash': dep.dependency_hash,
             'dependecy_repo_id': dep.dependecy_repo_id.id,
         }) for dep in self.dependency_ids]
@@ -449,7 +448,6 @@ class runbot_build(models.Model):
     def _local_cleanup(self):
         if self.pool._init:
             return
-
         _logger.debug('Local cleaning')
 
         def cleanup(dest_list, func, max_days, label):
@@ -473,7 +471,7 @@ class runbot_build(models.Model):
                 dest_list = [dest for sublist in [dest_by_builds_ids[rem_id] for rem_id in remaining.ids] for dest in sublist]
                 _logger.debug('(%s) (%s) not deleted because no corresponding build found' % (label, " ".join(dest_list)))
             for build in existing:
-                if fields.Datetime.from_string(build.create_date) + datetime.timedelta(days=max_days) < datetime.datetime.now():
+                if fields.Datetime.from_string(build.job_end or build.create_date) + datetime.timedelta(days=max_days) < datetime.datetime.now():
                     if build.local_state == 'done':
                         for db in dest_by_builds_ids[build.id]:
                             func(db)
@@ -536,7 +534,10 @@ class runbot_build(models.Model):
             self.env.cr.commit()  # commit between each build to minimise transactionnal errors due to state computations
             self.invalidate_cache()
             if build.requested_action == 'deathrow':
-                build._kill(result='manually_killed')
+                result = None
+                if build.local_state != 'running' and build.global_result not in ('warn', 'ko'):
+                    result = 'manually_killed'
+                build._kill(result=result)
                 continue
 
             if build.requested_action == 'wake_up':
@@ -593,7 +594,7 @@ class runbot_build(models.Model):
                         build._log('_schedule', '%s time exceeded (%ss)' % (build.active_step.name if build.active_step else "?", build.job_time))
                         build._kill(result='killed')
                     continue
-                elif build.job_time < 15:
+                elif build.active_step._is_docker_step() and build.job_time < 15:
                     _logger.debug('container "%s" seems too take a while to start', build._get_docker_name())
                     continue
                 # No job running, make result and select nex job
@@ -715,7 +716,7 @@ class runbot_build(models.Model):
                 exports[build_export_path] = commit.export()
             except HashMissingException:
                 self._log('_checkout', "Commit %s is unreachable. Did you force push the branch since build creation?" % commit, level='ERROR')
-                self.kill(result='ko')
+                self._kill(result='ko')
         return exports
 
     def _get_modules_to_test(self, commits=None):
@@ -934,20 +935,25 @@ class runbot_build(models.Model):
     def _github_status(self):
         """Notify github of failed/successful builds"""
         for build in self:
-            if build.config_id.update_github_state:
+            if build.parent_id:
+                build.parent_id._github_status()
+            elif build.config_id.update_github_state:
                 runbot_domain = self.env['runbot.repo']._domain()
                 desc = "runbot build %s" % (build.dest,)
-                if build.local_state == 'testing':
+
+                if build.global_result in ('ko', 'warn'):
+                    state = 'failure'
+                elif build.global_state == 'testing':
                     state = 'pending'
-                elif build.local_state in ('running', 'done'):
+                elif build.global_state in ('running', 'done'):
                     state = 'error'
+                    if build.global_result == 'ok':
+                        state = 'success'
                 else:
+                    _logger.debug("skipping github status for build %s ", build.id)
                     continue
                 desc += " (runtime %ss)" % (build.job_time,)
-                if build.local_result == 'ok':
-                    state = 'success'
-                if build.local_result in ('ko', 'warn'):
-                    state = 'failure'
+
                 status = {
                     "state": state,
                     "target_url": "http://%s/runbot/build/%s" % (runbot_domain, build.id),
