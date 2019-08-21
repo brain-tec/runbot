@@ -15,7 +15,7 @@ import shutil
 
 from odoo.exceptions import UserError, ValidationError
 from odoo.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT
-from odoo import models, fields, api
+from odoo import models, fields, api, registry
 from odoo.modules.module import get_module_resource
 from odoo.tools import config
 from ..common import fqdn, dt2time, Commit
@@ -562,6 +562,7 @@ class runbot_repo(models.Model):
             return 'Not for me'
         host = self.env['runbot.host']._get_current()
         host.last_start_loop = fields.Datetime.now()
+        self.env.cr.commit()
         start_time = time.time()
         # 1. source cleanup
         # -> Remove sources when no build is using them
@@ -578,18 +579,31 @@ class runbot_repo(models.Model):
             repos = self.search([('mode', '!=', 'disabled')])
             try:
                 repos._scheduler(host)
+                host.last_success = fields.Datetime.now()
                 self.env.cr.commit()
                 self.env.reset()
                 self = self.env()[self._name]
                 self._reload_nginx()
                 time.sleep(update_frequency)
-                host.last_success = fields.Datetime.now()
             except TransactionRollbackError:
                 _logger.exception('Trying to rollback')
                 self.env.cr.rollback()
                 self.env.reset()
                 time.sleep(random.uniform(0, 1))
+            except Exception as e:
+                with registry(self._cr.dbname).cursor() as cr:  # user another cursor since transaction will be rollbacked
+                    message = str(e)
+                    chost = host.with_env(self.env(cr=cr))
+                    if chost.last_exception == message:
+                        chost.exception_count += 1
+                    else:
+                        chost.with_env(self.env(cr=cr)).last_exception = str(e)
+                        chost.exception_count = 1
+                raise
 
+        if host.last_exception:
+            host.last_exception = ""
+            host.exception_count = 0
         host.last_end_loop = fields.Datetime.now()
 
     def _source_cleanup(self):

@@ -21,6 +21,7 @@ class RunbotBuildError(models.Model):
     content = fields.Text('Error message', required=True)
     cleaned_content = fields.Text('Cleaned error message')
     module_name = fields.Char('Module name')  # name in ir_logging
+    function = fields.Char('Function name')  # func name in ir logging
     fingerprint = fields.Char('Error fingerprint', index=True)
     random = fields.Boolean('underterministic error', track_visibility='onchange')
     responsible = fields.Many2one('res.users', 'Assigned fixer', track_visibility='onchange')
@@ -65,7 +66,7 @@ class RunbotBuildError(models.Model):
         Replacing the regex with a space
         """
         for r in CLEANING_REGS:
-            s = r.sub(' ', s)
+            s = r.sub('%', s)
         return s
 
     @api.model
@@ -94,6 +95,7 @@ class RunbotBuildError(models.Model):
             self.env['runbot.build.error'].create({
                 'content': logs[0].message,
                 'module_name': logs[0].name,
+                'function': logs[0].func,
                 'build_ids': [(6, False, [r.build_id.id for r in logs])],
             })
 
