@@ -10,7 +10,7 @@ import time
 import datetime
 from ..common import dt2time, fqdn, now, grep, uniq_list, local_pgadmin_cursor, s2human, Commit
 from ..container import docker_build, docker_stop, docker_is_running, Command
-from odoo.addons.runbot.models.repo import HashMissingException
+from odoo.addons.runbot.models.repo import HashMissingException, ArchiveFailException
 from odoo import models, fields, api
 from odoo.exceptions import UserError, ValidationError
 from odoo.http import request
@@ -555,10 +555,15 @@ class runbot_build(models.Model):
                     build.write({'requested_action': False, 'local_state': 'done'})
                     build._log('wake_up', 'Impossible to wake-up, build dir does not exists anymore', level='SEPARATOR')
                 else:
-                    log_path = build._path('logs', 'wake_up.txt')
-                    build.write({'job_start': now(), 'job_end': False, 'active_step': False, 'requested_action': False, 'local_state': 'running'})
-                    build._log('wake_up', 'Waking up build', level='SEPARATOR')
-                    self.env['runbot.build.config.step']._run_odoo_run(build, log_path)
+                    try:
+                        log_path = build._path('logs', 'wake_up.txt')
+                        build.write({'job_start': now(), 'job_end': False, 'active_step': False, 'requested_action': False, 'local_state': 'running'})
+                        build._log('wake_up', 'Waking up build', level='SEPARATOR')
+                        self.env['runbot.build.config.step']._run_odoo_run(build, log_path)
+                    except Exception:
+                        _logger.exception('Failed to wake up build %s', build.dest)
+                        build._log('_schedule', 'Failed waking up build', level='ERROR')
+                        build.write({'requested_action': False, 'local_state': 'done'})
                 continue
 
             if build.local_state == 'pending':
@@ -723,6 +728,9 @@ class runbot_build(models.Model):
                 exports[build_export_path] = commit.export()
             except HashMissingException:
                 self._log('_checkout', "Commit %s is unreachable. Did you force push the branch since build creation?" % commit, level='ERROR')
+                self._kill(result='ko')
+            except ArchiveFailException:
+                self._log('_checkout', "Archive %s failed. Did you force push the branch since build creation?" % commit, level='ERROR')
                 self._kill(result='ko')
         return exports
 
