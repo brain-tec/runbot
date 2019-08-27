@@ -165,8 +165,8 @@ class Project(models.Model):
 
     def _find_commands(self, comment):
         return re.findall(
-            '^[@|#]?{}:? (.*)$'.format(self.github_prefix),
-            comment, re.MULTILINE)
+            '^\s*[@|#]?{}:? (.*)$'.format(self.github_prefix),
+            comment, re.MULTILINE | re.IGNORECASE)
 
     def _has_branch(self, name):
         self.env.cr.execute("""
@@ -513,6 +513,28 @@ class PullRequests(models.Model):
         help="PR is not currently stageable for some reason (mostly an issue if status is ready)"
     )
 
+    @api.depends('repository.name', 'number')
+    def _compute_display_name(self):
+        return super(PullRequests, self)._compute_display_name()
+
+    def name_get(self):
+        return {
+            p.id: '%s:%s' % (p.repository.name, p.number)
+            for p in self
+        }
+
+    def __str__(self):
+        if len(self) == 0:
+            separator = ''
+        elif len(self) == 1:
+            separator = ' '
+        else:
+            separator = 's '
+        return '<pull_request%s%s>' % (separator, ' '.join(
+            '%s:%s' % (p.repository.name, p.number)
+            for p in self
+        ))
+
     # missing link to other PRs
     @api.depends('priority', 'state', 'squash', 'merge_method', 'batch_id.active', 'label')
     def _compute_is_blocked(self):
@@ -831,6 +853,36 @@ class PullRequests(models.Model):
                 'state_to': pr._tagstate,
             })
         return pr
+
+    def _from_gh(self, description, author=None, branch=None, repo=None):
+        if repo is None:
+            repo = self.env['runbot_merge.repository'].search([
+                ('name', '=', description['base']['repo']['full_name']),
+            ])
+        if branch is None:
+            branch = self.env['runbot_merge.branch'].search([
+                ('name', '=', description['base']['ref']),
+                ('project_id', '=', repo.project_id.id),
+            ])
+        if author is None:
+            author = self.env['res.partner'].search([
+                ('github_login', '=', description['user']['login']),
+            ], limit=1)
+
+        message = description['title'].strip()
+        body = description['body'] and description['body'].strip()
+        if body:
+            message += '\n\n' + body
+        return self.env['runbot_merge.pull_requests'].create({
+            'number': description['number'],
+            'label': description['head']['label'],
+            'author': author.id,
+            'target': branch.id,
+            'repository': repo.id,
+            'head': description['head']['sha'],
+            'squash': description['commits'] == 1,
+            'message': message,
+        })
 
     @api.multi
     def write(self, vals):
@@ -1213,6 +1265,7 @@ class Stagings(models.Model):
 
     # seems simpler than adding yet another indirection through a model
     heads = fields.Char(required=True, help="JSON-encoded map of heads, one per repo in the project")
+    head_ids = fields.Many2many('runbot_merge.commit', compute='_compute_statuses')
 
     statuses = fields.Binary(compute='_compute_statuses')
 
@@ -1227,7 +1280,7 @@ class Stagings(models.Model):
                 head: repo for repo, head in json.loads(st.heads).items()
                 if not repo.endswith('^')
             }
-            commits = Commits.search([('sha', 'in', list(heads.keys()))])
+            commits = st.head_ids = Commits.search([('sha', 'in', list(heads.keys()))])
             st.statuses = [
                 (
                     heads[commit.sha],
@@ -1392,7 +1445,6 @@ class Stagings(models.Model):
         project = self.target.project_id
         if self.state == 'success':
             gh = {repo.name: repo.github() for repo in project.repo_ids}
-            repo_name = None
             staging_heads = json.loads(self.heads)
             self.env.cr.execute('''
             SELECT 1 FROM runbot_merge_pull_requests
@@ -1400,11 +1452,11 @@ class Stagings(models.Model):
             FOR UPDATE
             ''', [tuple(self.mapped('batch_ids.prs.id'))])
             try:
-                repo_name = self._safety_dance(gh, staging_heads)
+                self._safety_dance(gh, staging_heads)
             except exceptions.FastForwardError as e:
                 logger.warning(
                     "Could not fast-forward successful staging on %s:%s",
-                    repo_name, self.target.name,
+                    e.args[0], self.target.name,
                     exc_info=True
                 )
                 self.write({
