@@ -511,7 +511,7 @@ class runbot_build(models.Model):
 
     def _find_port(self):
         # currently used port
-        ids = self.search([('local_state', 'not in', ['pending', 'done'])])
+        ids = self.search([('local_state', 'not in', ['pending', 'done']), ('host', '=', fqdn())])
         ports = set(i['port'] for i in ids.read(['port']))
 
         # starting port
@@ -558,7 +558,16 @@ class runbot_build(models.Model):
                 else:
                     try:
                         log_path = build._path('logs', 'wake_up.txt')
-                        build.write({'job_start': now(), 'job_end': False, 'active_step': False, 'requested_action': False, 'local_state': 'running'})
+
+                        port = self._find_port()
+                        build.write({
+                            'job_start': now(),
+                            'job_end': False,
+                            'active_step': False,
+                            'requested_action': False,
+                            'local_state': 'running',
+                            'port': port,
+                        })
                         build._log('wake_up', 'Waking up build', level='SEPARATOR')
                         self.env['runbot.build.config.step']._run_odoo_run(build, log_path)
                         # reload_nginx will be triggered by _run_odoo_run
@@ -823,9 +832,9 @@ class runbot_build(models.Model):
                 continue
             build._log('kill', 'Kill build %s' % build.dest)
             docker_stop(build._get_docker_name())
-            v = {'local_state': 'done', 'requested_action': False, 'active_step': False, 'duplicate_id': False, 'build_end': now()}  # what if duplicate? state done?
-            if not build.job_end:
-                v['job_end'] = now()
+            v = {'local_state': 'done', 'requested_action': False, 'active_step': False, 'duplicate_id': False, 'job_end': now()}  # what if duplicate? state done?
+            if not build.build_end:
+                v['build_end'] = now()
             if result:
                 v['local_result'] = result
             build.write(v)

@@ -568,6 +568,7 @@ class runbot_repo(models.Model):
         if hostname != fqdn():
             return 'Not for me'
         host = self.env['runbot.host']._get_current()
+        host.set_psql_conn_count()
         host.last_start_loop = fields.Datetime.now()
         self.env.cr.commit()
         start_time = time.time()
