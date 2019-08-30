@@ -1,6 +1,6 @@
 import logging
 from odoo import models, fields, api
-from ..common import fqdn
+from ..common import fqdn, local_pgadmin_cursor
 _logger = logging.getLogger(__name__)
 
 
@@ -21,6 +21,7 @@ class RunboHost(models.Model):
     nb_running = fields.Integer(compute='_compute_nb')
     last_exception = fields.Char('Last exception')
     exception_count = fields.Integer('Exception count')
+    psql_conn_count = fields.Integer('SQL connections count', default=0)
 
     def _compute_nb(self):
         groups = self.env['runbot.build'].read_group(
@@ -51,3 +52,9 @@ class RunboHost(models.Model):
         icp = self.env['ir.config_parameter']
         return self.nb_worker or int(icp.sudo().get_param('runbot.runbot_workers', default=6))
 
+    def set_psql_conn_count(self):
+        self.ensure_one()
+        with local_pgadmin_cursor() as local_cr:
+            local_cr.execute("SELECT sum(numbackends) FROM pg_stat_database;")
+            res = local_cr.fetchone()
+        self.psql_conn_count = res and res[0] or 0
