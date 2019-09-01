@@ -31,6 +31,8 @@ class RunbotBuildError(models.Model):
     tag_ids = fields.Many2many('runbot.build.error.tag', string='Tags')
     build_count = fields.Integer(compute='_compute_build_counts', string='Nb seen', stored=True)
     parent_id = fields.Many2one('runbot.build.error', 'Linked to')
+    child_ids = fields.One2many('runbot.build.error', 'parent_id', string='Child Errors')
+    Children_build_ids = fields.Many2many(related='child_ids.build_ids', string='Children builds')
 
     @api.model
     def create(self, vals):
@@ -45,7 +47,7 @@ class RunbotBuildError(models.Model):
     @api.depends('build_ids')
     def _compute_build_counts(self):
         for build_error in self:
-            build_error.build_count = len(build_error.build_ids)
+            build_error.build_count = len(build_error.build_ids) + len(build_error.Children_build_ids)
 
     @api.depends('build_ids')
     def _compute_branch_ids(self):
@@ -108,6 +110,11 @@ class RunbotBuildError(models.Model):
         build_errors[1:].parent_id = build_errors[0]
 
 
+    def clean_content(self):
+        cleaning_regs = self.env['runbot.error.regex'].search([('re_type', '=', 'cleaning')])
+        for build_error in self:
+            build_error.cleaned_content = cleaning_regs.r_sub('%', build_error.content)
+
 
 class RunbotBuildErrorTag(models.Model):
 
@@ -121,9 +128,12 @@ class RunbotErrorRegex(models.Model):
 
     _name = "runbot.error.regex"
     _inherit = "mail.thread"
+    _rec_name = 'id'
+    _order = 'sequence, id'
 
     regex = fields.Char('Regular expression')
     re_type = fields.Selection([('filter', 'Filter out'), ('cleaning', 'Cleaning')], string="Regex type")
+    sequence = fields.Integer('Sequence')
 
     def r_sub(self, replace, s):
         """ replaces patterns from the recordset by replace in the given string """
