@@ -110,6 +110,11 @@ class RunbotBuildError(models.Model):
         build_errors[1:].parent_id = build_errors[0]
 
 
+    def clean_content(self):
+        cleaning_regs = self.env['runbot.error.regex'].search([('re_type', '=', 'cleaning')])
+        for build_error in self:
+            build_error.cleaned_content = cleaning_regs.r_sub('%', build_error.content)
+
 
 class RunbotBuildErrorTag(models.Model):
 
