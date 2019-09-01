@@ -128,9 +128,12 @@ class RunbotErrorRegex(models.Model):
 
     _name = "runbot.error.regex"
     _inherit = "mail.thread"
+    _rec_name = 'id'
+    _order = 'sequence, id'
 
     regex = fields.Char('Regular expression')
     re_type = fields.Selection([('filter', 'Filter out'), ('cleaning', 'Cleaning')], string="Regex type")
+    sequence = fields.Integer('Sequence')
 
     def r_sub(self, replace, s):
         """ replaces patterns from the recordset by replace in the given string """

@@ -121,6 +121,7 @@
         <field name="model">runbot.error.regex</field>
         <field name="arch" type="xml">
             <tree string="Errors Regexes">
+                <field name="sequence" widget="handle"/>
                 <field name="regex"/>
                 <field name="re_type"/>
             </tree>
