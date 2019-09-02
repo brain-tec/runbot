@@ -48,6 +48,7 @@
         <tree string="Build Errors">
           <button name="action_goto_build" type="object" icon="fa-external-link "/>
           <field name="build_id"/>
+          <field name="log_create_date"/>
           <field name="repo_short_name"/>
           <field name="branch_name"/>
           <field name="name"/>

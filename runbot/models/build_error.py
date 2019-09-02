@@ -107,8 +107,7 @@ class RunbotBuildError(models.Model):
         if len(self) < 2:
             return
         build_errors = self.search([('id', 'in', self.ids)], order='responsible asc, random desc, id asc')
-        build_errors[1:].parent_id = build_errors[0]
-
+        build_errors[1:].write({'parent_id': build_errors[0].id})
 
     def clean_content(self):
         cleaning_regs = self.env['runbot.error.regex'].search([('re_type', '=', 'cleaning')])
