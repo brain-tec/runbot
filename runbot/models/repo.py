@@ -15,7 +15,7 @@ import shutil
 
 from odoo.exceptions import UserError, ValidationError
 from odoo.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT
-from odoo import models, fields, api
+from odoo import models, fields, api, registry
 from odoo.modules.module import get_module_resource
 from odoo.tools import config
 from ..common import fqdn, dt2time, Commit
@@ -23,6 +23,9 @@ from psycopg2.extensions import TransactionRollbackError
 _logger = logging.getLogger(__name__)
 
 class HashMissingException(Exception):
+    pass
+
+class ArchiveFailException(Exception):
     pass
 
 class runbot_repo(models.Model):
@@ -121,8 +124,8 @@ class runbot_repo(models.Model):
     def _git(self, cmd):
         """Execute a git command 'cmd'"""
         self.ensure_one()
+        _logger.debug("git command: git (dir %s) %s", self.short_name, ' '.join(cmd))
         cmd = ['git', '--git-dir=%s' % self.path] + cmd
-        _logger.debug("git command: %s", ' '.join(cmd))
         return subprocess.check_output(cmd).decode('utf-8')
 
     def _git_rev_parse(self, branch_name):
@@ -142,7 +145,7 @@ class runbot_repo(models.Model):
             self._update(force=True)
         if not self._hash_exists(sha):
             try:
-                self._git(['fetch', 'origin', sha])
+                result = self._git(['fetch', 'origin', sha])
             except:
                 pass
         if not self._hash_exists(sha):
@@ -150,10 +153,14 @@ class runbot_repo(models.Model):
 
         _logger.info('git export: checkouting to %s (new)' % export_path)
         os.makedirs(export_path)
+
         p1 = subprocess.Popen(['git', '--git-dir=%s' % self.path, 'archive', sha], stdout=subprocess.PIPE)
         p2 = subprocess.Popen(['tar', '-xmC', export_path], stdin=p1.stdout, stdout=subprocess.PIPE)
         p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
-        p2.communicate()[0]
+        (out, err) = p2.communicate()
+        if err:
+            raise ArchiveFailException(err)
+
         # TODO get result and fallback on cleaing in case of problem
         return export_path
 
@@ -398,21 +405,20 @@ class runbot_repo(models.Model):
                 _logger.exception('Fail to update repo %s', repo.name)
 
     @api.multi
-    def _scheduler(self):
+    def _scheduler(self, host=None):
         """Schedule builds for the repository"""
         ids = self.ids
         if not ids:
             return
         icp = self.env['ir.config_parameter']
-        host = fqdn()
-        settings_workers = int(icp.get_param('runbot.runbot_workers', default=6))
-        workers = int(icp.get_param('%s.workers' % host, default=settings_workers))
+        host = host or self.env['runbot.host']._get_current()
+        workers = host.get_nb_worker()
         running_max = int(icp.get_param('runbot.runbot_running_max', default=75))
-        assigned_only = int(icp.get_param('%s.assigned_only' % host, default=False))
+        assigned_only = host.assigned_only
 
         Build = self.env['runbot.build']
         domain = [('repo_id', 'in', ids)]
-        domain_host = domain + [('host', '=', host)]
+        domain_host = domain + [('host', '=', host.name)]
 
         # schedule jobs (transitions testing -> running, kill jobs, ...)
         build_ids = Build.search(domain_host + ['|', ('local_state', 'in', ['testing', 'running']), ('requested_action', 'in', ['wake_up', 'deathrow'])])
@@ -458,7 +464,7 @@ class runbot_repo(models.Model):
                                     )
                                 RETURNING id""" % where_clause
 
-                    self.env.cr.execute(query, {'repo_ids': tuple(ids), 'host': fqdn(), 'limit': limit})
+                    self.env.cr.execute(query, {'repo_ids': tuple(ids), 'host': host.name, 'limit': limit})
                     return self.env.cr.fetchall()
 
                 allocated = allocate_builds("""AND runbot_build.build_type != 'scheduled'""", assignable_slots)
@@ -561,6 +567,10 @@ class runbot_repo(models.Model):
         """
         if hostname != fqdn():
             return 'Not for me'
+        host = self.env['runbot.host']._get_current()
+        host.set_psql_conn_count()
+        host.last_start_loop = fields.Datetime.now()
+        self.env.cr.commit()
         start_time = time.time()
         # 1. source cleanup
         # -> Remove sources when no build is using them
@@ -576,17 +586,33 @@ class runbot_repo(models.Model):
         while time.time() - start_time < timeout:
             repos = self.search([('mode', '!=', 'disabled')])
             try:
-                repos._scheduler()
+                repos._scheduler(host)
+                host.last_success = fields.Datetime.now()
                 self.env.cr.commit()
                 self.env.reset()
                 self = self.env()[self._name]
                 self._reload_nginx()
                 time.sleep(update_frequency)
-            except TransactionRollbackError:
+            except TransactionRollbackError: # can lead to psycopg2.InternalError'>: "current transaction is aborted, commands ignored until end of transaction block
                 _logger.exception('Trying to rollback')
                 self.env.cr.rollback()
                 self.env.reset()
-                time.sleep(random.uniform(0, 1))
+                time.sleep(random.uniform(0, 3))
+            except Exception as e:
+                with registry(self._cr.dbname).cursor() as cr:  # user another cursor since transaction will be rollbacked
+                    message = str(e)
+                    chost = host.with_env(self.env(cr=cr))
+                    if chost.last_exception == message:
+                        chost.exception_count += 1
+                    else:
+                        chost.with_env(self.env(cr=cr)).last_exception = str(e)
+                        chost.exception_count = 1
+                raise
+
+        if host.last_exception:
+            host.last_exception = ""
+            host.exception_count = 0
+        host.last_end_loop = fields.Datetime.now()
 
     def _source_cleanup(self):
         try:

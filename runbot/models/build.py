@@ -10,7 +10,7 @@ import time
 import datetime
 from ..common import dt2time, fqdn, now, grep, uniq_list, local_pgadmin_cursor, s2human, Commit
 from ..container import docker_build, docker_stop, docker_is_running, Command
-from odoo.addons.runbot.models.repo import HashMissingException
+from odoo.addons.runbot.models.repo import HashMissingException, ArchiveFailException
 from odoo import models, fields, api
 from odoo.exceptions import UserError, ValidationError
 from odoo.http import request
@@ -33,6 +33,7 @@ def make_selection(array):
 class runbot_build(models.Model):
     _name = "runbot.build"
     _order = 'id desc'
+    _rec_name = 'id'
 
     branch_id = fields.Many2one('runbot.branch', 'Branch', required=True, ondelete='cascade', index=True)
     repo_id = fields.Many2one(related='branch_id.repo_id', readonly=True, store=True)
@@ -104,6 +105,9 @@ class runbot_build(models.Model):
                                          ],
                                         default='soft',
                                         string='Source export path mode')
+    build_url = fields.Char('Build url', compute='_compute_build_url', store=False)
+    build_error_ids = fields.Many2many('runbot.build.error', 'runbot_build_error_ids_runbot_build_rel', string='Errors')
+
     @api.depends('config_id')
     def _compute_log_list(self):  # storing this field because it will be access trhoug repo viewn and keep track of the list at create
         for build in self:
@@ -342,6 +346,10 @@ class runbot_build(models.Model):
             else:
                 build.domain = "%s:%s" % (domain, build.port)
 
+    def _compute_build_url(self):
+        for build in self:
+            build.build_url = "/runbot/build/%s" % build.id
+
     @api.depends('job_start', 'job_end', 'duplicate_id.job_time')
     def _compute_job_time(self):
         """Return the time taken by the tests"""
@@ -503,7 +511,7 @@ class runbot_build(models.Model):
 
     def _find_port(self):
         # currently used port
-        ids = self.search([('local_state', 'not in', ['pending', 'done'])])
+        ids = self.search([('local_state', 'not in', ['pending', 'done']), ('host', '=', fqdn())])
         ports = set(i['port'] for i in ids.read(['port']))
 
         # starting port
@@ -548,10 +556,25 @@ class runbot_build(models.Model):
                     build.write({'requested_action': False, 'local_state': 'done'})
                     build._log('wake_up', 'Impossible to wake-up, build dir does not exists anymore', level='SEPARATOR')
                 else:
-                    log_path = build._path('logs', 'wake_up.txt')
-                    build.write({'job_start': now(), 'job_end': False, 'active_step': False, 'requested_action': False, 'local_state': 'running'})
-                    build._log('wake_up', 'Waking up build', level='SEPARATOR')
-                    self.env['runbot.build.config.step']._run_odoo_run(build, log_path)
+                    try:
+                        log_path = build._path('logs', 'wake_up.txt')
+
+                        port = self._find_port()
+                        build.write({
+                            'job_start': now(),
+                            'job_end': False,
+                            'active_step': False,
+                            'requested_action': False,
+                            'local_state': 'running',
+                            'port': port,
+                        })
+                        build._log('wake_up', 'Waking up build', level='SEPARATOR')
+                        self.env['runbot.build.config.step']._run_odoo_run(build, log_path)
+                        # reload_nginx will be triggered by _run_odoo_run
+                    except Exception:
+                        _logger.exception('Failed to wake up build %s', build.dest)
+                        build._log('_schedule', 'Failed waking up build', level='ERROR')
+                        build.write({'requested_action': False, 'local_state': 'done'})
                 continue
 
             if build.local_state == 'pending':
@@ -717,6 +740,9 @@ class runbot_build(models.Model):
             except HashMissingException:
                 self._log('_checkout', "Commit %s is unreachable. Did you force push the branch since build creation?" % commit, level='ERROR')
                 self._kill(result='ko')
+            except ArchiveFailException:
+                self._log('_checkout', "Archive %s failed. Did you force push the branch since build creation?" % commit, level='ERROR')
+                self._kill(result='ko')
         return exports
 
     def _get_modules_to_test(self, commits=None):
@@ -806,9 +832,9 @@ class runbot_build(models.Model):
                 continue
             build._log('kill', 'Kill build %s' % build.dest)
             docker_stop(build._get_docker_name())
-            v = {'local_state': 'done', 'requested_action': False, 'active_step': False, 'duplicate_id': False, 'build_end': now()}  # what if duplicate? state done?
-            if not build.job_end:
-                v['job_end'] = now()
+            v = {'local_state': 'done', 'requested_action': False, 'active_step': False, 'duplicate_id': False, 'job_end': now()}  # what if duplicate? state done?
+            if not build.build_end:
+                v['build_end'] = now()
             if result:
                 v['local_result'] = result
             build.write(v)
@@ -987,6 +1013,14 @@ class runbot_build(models.Model):
             if f.readline().strip().endswith('python3'):
                 return '3'
         return ''
+
+    def _parse_logs(self):
+        """ Parse build logs to classify errors """
+        BuildError = self.env['runbot.build.error']
+        # only parse logs from builds in error and not already scanned
+        builds_to_scan = self.search([('id', 'in', self.ids), ('local_result', '=', 'ko'), ('build_error_ids', '=', False)])
+        ir_logs = self.env['ir.logging'].search([('level', '=', 'ERROR'), ('type', '=', 'server'), ('build_id', 'in', builds_to_scan.ids)])
+        BuildError._parse_logs(ir_logs)
 
     def read_file(self, file, mode='r'):
         file_path = self._path(file)
