@@ -107,6 +107,7 @@ class runbot_build(models.Model):
                                         string='Source export path mode')
     build_url = fields.Char('Build url', compute='_compute_build_url', store=False)
     build_error_ids = fields.Many2many('runbot.build.error', 'runbot_build_error_ids_runbot_build_rel', string='Errors')
+    log_counter = fields.Integer('Log Lines counter', default=100)
 
     @api.depends('config_id')
     def _compute_log_list(self):  # storing this field because it will be access trhoug repo viewn and keep track of the list at create
