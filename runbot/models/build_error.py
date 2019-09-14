@@ -69,6 +69,10 @@ class RunbotBuildError(models.Model):
         for build_error in self:
             build_error.children_build_ids = build_error.mapped('child_ids.build_ids')
 
+    @api.onchange('active')
+    def _onchange_active(self):
+        self.child_ids.write({'active': self.active})
+
     @api.model
     def _digest(self, s):
         """
@@ -91,19 +95,22 @@ class RunbotBuildError(models.Model):
             hash_dict[fingerprint].append(log)
 
         # add build ids to already detected errors
-        for build_error in self.env['runbot.build.error'].search([('fingerprint', 'in', list(hash_dict.keys()))]):
+        for build_error in self.env['runbot.build.error'].search([('fingerprint', 'in', list(hash_dict.keys())), ('active', '=', True)]):
             for build in {rec.build_id for rec in hash_dict[build_error.fingerprint]}:
                 build.build_error_ids += build_error
             del hash_dict[build_error.fingerprint]
 
+        fixed_errors_dict = {rec.fingerprint: rec for rec in self.env['runbot.build.error'].search([('fingerprint', 'in', list(hash_dict.keys())), ('active', '=', False)])}
         # create an error for the remaining entries
         for fingerprint, logs in hash_dict.items():
-            self.env['runbot.build.error'].create({
+            build_error = self.env['runbot.build.error'].create({
                 'content': logs[0].message,
                 'module_name': logs[0].name,
                 'function': logs[0].func,
                 'build_ids': [(6, False, [r.build_id.id for r in logs])],
             })
+            if build_error.fingerprint in fixed_errors_dict:
+                fixed_errors_dict[build_error.fingerprint].write({'parent_id': build_error.id})
 
     def link_errors(self):
         """ Link errors with the first one of the recordset
