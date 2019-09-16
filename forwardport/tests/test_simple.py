@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 import collections
-import pprint
-import sys
+from datetime import datetime, timedelta
 import time
 from operator import itemgetter
 
 import pytest
 
 from utils import *
+
+FAKE_PREV_WEEK = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
 
 # need:
 # * an odoo server
@@ -164,7 +165,14 @@ def test_straightforward_flow(env, config, make_repo, users):
         prod.post_status(pr1.head, 'success', 'legal/cla')
 
     env.run_crons()
-    env.run_crons('forwardport.reminder', 'runbot_merge.feedback_cron')
+    env.run_crons('forwardport.reminder', 'runbot_merge.feedback_cron', context={'forwardport_updated_before': FAKE_PREV_WEEK})
+
+    assert pr.comments == [
+        (users['reviewer'], 'hansen r+ rebase-ff'),
+        (users['user'], 'Merge method set to rebase and fast-forward'),
+        (users['user'], re_matches(r'Merged at [0-9a-f]{40}, thanks!')),
+        (users['user'], 'This pull request has forward-port PRs awaiting action'),
+    ]
 
     pr0_, pr1_, pr2 = env['runbot_merge.pull_requests'].search([], order='number')
     assert pr0_ == pr0
@@ -191,7 +199,6 @@ To merge the full chain, say
 
 More info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port
 """ % (users['reviewer'], project.fp_github_name)),
-        (users['user'], "This forward port PR is awaiting action"),
     ]
     with prod:
         prod.post_status(pr2.head, 'success', 'ci/runbot')
@@ -425,8 +432,6 @@ xxx
         get_pr.post_comment('hansen r+', config['role_reviewer']['token'])
     env.run_crons()
 
-    print(f"check staging of {pr1} ({pr1.staging_id})", file=sys.stderr)
-    print(f'\t{pr1.batch_ids.read(["id", "active", "staging_id"])}', file=sys.stderr)
     assert pr1.staging_id
     with prod:
         prod.post_status('staging.b', 'success', 'legal/cla')
@@ -592,28 +597,25 @@ def test_empty(env, config, make_repo, users):
     assert env['runbot_merge.pull_requests'].search([], order='number') == prs
 
     # check reminder
-    env.run_crons('forwardport.reminder', 'runbot_merge.feedback_cron')
-    env.run_crons('forwardport.reminder', 'runbot_merge.feedback_cron')
-    failed_pr = prod.get_pr(fail_id.number)
-    # stop there (criminal scum), checking the entire message is a PITA and
-    # I'd need to look into integrating better diffing / error reporting when
-    # an re_matches doesn't match
-    ping_note = re_matches(r"Ping @%s\nCherrypicking [0-9a-z]{40} of source #%d failed" % (users['reviewer'], pr1.number))
-    assert failed_pr.comments == [
-        (users['user'], ping_note),
-        (users['user'], "This forward port PR is awaiting action"),
-        (users['user'], "This forward port PR is awaiting action"),
-    ]
+    env.run_crons('forwardport.reminder', 'runbot_merge.feedback_cron', context={'forwardport_updated_before': FAKE_PREV_WEEK})
+    env.run_crons('forwardport.reminder', 'runbot_merge.feedback_cron', context={'forwardport_updated_before': FAKE_PREV_WEEK})
+
+    assert pr1.comments == [
+        (users['reviewer'], 'hansen r+'),
+        (users['user'], re_matches(r'Merged at [0-9a-f]{40}, thanks!')),
+        (users['user'], 'This pull request has forward-port PRs awaiting action'),
+        (users['user'], 'This pull request has forward-port PRs awaiting action'),
+    ], "each cron run should trigger a new message on the ancestor"
     # check that this stops if we close the PR
     with prod:
-        failed_pr.close()
-    env.run_crons('forwardport.reminder', 'runbot_merge.feedback_cron')
-    # FIXME: carve out git messages as they're not necessarily stable / parseable
-    assert failed_pr.comments == [
-        (users['user'], ping_note),
-        (users['user'], "This forward port PR is awaiting action"),
-        (users['user'], "This forward port PR is awaiting action"),
-    ], "should not have a 4th note"
+        prod.get_pr(fail_id.number).close()
+    env.run_crons('forwardport.reminder', 'runbot_merge.feedback_cron', context={'forwardport_updated_before': FAKE_PREV_WEEK})
+    assert pr1.comments == [
+        (users['reviewer'], 'hansen r+'),
+        (users['user'], re_matches(r'Merged at [0-9a-f]{40}, thanks!')),
+        (users['user'], 'This pull request has forward-port PRs awaiting action'),
+        (users['user'], 'This pull request has forward-port PRs awaiting action'),
+    ]
 
 def test_partially_empty(env, config, make_repo):
     """ Check what happens when only some commits of the PR are now empty
@@ -788,6 +790,48 @@ def test_limit_disable(env, config, make_repo, users, enabled):
         (users['user'], "Forward-porting to 'c'."),
     }
 
+def test_default_disabled(env, config, make_repo, users):
+    """ If the default limit is disabled, it should still be the default
+    limit but the ping message should be set on the actual last FP (to the
+    last non-deactivated target)
+    """
+    prod, other = make_basic(env, config, make_repo)
+    branch_c = env['runbot_merge.branch'].search([('name', '=', 'c')])
+    branch_c.fp_target = False
+
+    with prod:
+        [c] = prod.make_commits('a', Commit('c', tree={'0': '0'}), ref='heads/branch0')
+        pr = prod.make_pr(target='a', head='branch0')
+        prod.post_status(c, 'success', 'legal/cla')
+        prod.post_status(c, 'success', 'ci/runbot')
+        pr.post_comment('hansen r+', config['role_reviewer']['token'])
+    env.run_crons()
+
+    assert env['runbot_merge.pull_requests'].search([]).limit_id == branch_c
+
+    with prod:
+        prod.post_status('staging.a', 'success', 'legal/cla')
+        prod.post_status('staging.a', 'success', 'ci/runbot')
+    env.run_crons()
+
+    p1, p2 = env['runbot_merge.pull_requests'].search([], order='number')
+    assert p1.number == pr.number
+    pr2 = prod.get_pr(p2.number)
+
+    cs = pr2.comments
+    assert len(cs) == 1
+    assert pr2.comments == [
+        (users['user'], """\
+Ping @%s
+This PR targets b and is the last of the forward-port chain.
+
+To merge the full chain, say
+> @%s r+
+
+More info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port
+""" % (users['reviewer'], users['user'])),
+    ]
+
 # reviewer = of the FP sequence, the original PR is always reviewed by `user`
 # set as reviewer
 Case = collections.namedtuple('Case', 'author reviewer delegate success')
@@ -856,7 +900,6 @@ def test_access_rights(env, config, make_repo, users, author, reviewer, delegate
             token=config['role_' + reviewer]['token']
         )
     env.run_crons()
-    print(f"check staging of {pr1} ({pr1.staging_id}), {pr2} ({pr2.staging_id})", file=sys.stderr)
     if success:
         assert pr1.staging_id and pr2.staging_id,\
             "%s should have approved FP of PRs by %s" % (reviewer, author)
@@ -957,10 +1000,6 @@ More info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port
     assert pr1a.number == pr1.number
     assert pr2a.number == pr2.number
     assert pr1a.state == pr2a.state == 'merged'
-
-    print('PRA label', (pr1a | pr2a).mapped('label'))
-    print('PRB label', (pr1b | pr2b).mapped('label'))
-    print('PRC label', (pr1c | pr2c).mapped('label'))
 
     assert pr1b.label == pr2b.label, "batched source should yield batched FP"
     assert pr1c.label == pr2c.label, "batched source should yield batched FP"
@@ -1121,7 +1160,6 @@ class TestRecognizeCommands:
             sPeNgBaB(botname),
         ]
 
-        print([repr(o) for o in [a, c, pr_id, pr_id.limit_id]])
         for n in names:
             assert pr_id.limit_id == c
             with repo:

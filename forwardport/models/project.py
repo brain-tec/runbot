@@ -197,7 +197,7 @@ class PullRequests(models.Model):
                         pr.state = newstate
                         pr.reviewed_by = author
                         # TODO: logging & feedback
-            elif token == 'up' and next(tokens, None) == 'to' and self._pr_acl(author).is_reviewer:
+            elif token == 'up' and next(tokens, None) == 'to' and self._pr_acl(author).is_author:
                 limit = next(tokens, None)
                 if not limit:
                     msg = "Please provide a branch to forward-port to."
@@ -303,8 +303,10 @@ class PullRequests(models.Model):
         ), None)
 
     def _commits_lazy(self):
+        s = requests.Session()
+        s.headers['Authorization'] = 'token %s' % self.repository.project_id.fp_github_token
         for page in itertools.count(1):
-            r = requests.get('https://api.github.com/repos/{}/pulls/{}/commits'.format(
+            r = s.get('https://api.github.com/repos/{}/pulls/{}/commits'.format(
                 self.repository.name,
                 self.number
             ), params={'page': page})
@@ -460,7 +462,7 @@ Either perform the forward-port manually (and push to this branch, proceeding as
 
 In the former case, you may want to edit this PR message as well.
 """ % (h, source.number, sout, serr)
-            elif base.limit_id == target:
+            elif base._find_next_target(new_pr) is None:
                 ancestors = "".join(
                     "* %s#%d\n" % (p.repository.name, p.number)
                     for p in pr._iter_ancestors()
@@ -520,7 +522,15 @@ More info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port
         _logger.info("Create working copy to forward-port %s:%d to %s",
                      self.repository.name, self.number, target_branch.name)
         working_copy = source.clone(
-            cleanup.enter_context(tempfile.TemporaryDirectory()),
+            cleanup.enter_context(
+                tempfile.TemporaryDirectory(
+                    prefix='%s:%d-to-%s' % (
+                        self.repository.name,
+                        self.number,
+                        target_branch.name
+                    ),
+                    dir=user_cache_dir('forwardport')
+                )),
             branch=target_branch.name
         )
         project_id = self.repository.project_id
@@ -586,25 +596,39 @@ stderr:
         cmap = json.loads(self.commits_map)
 
         # original head so we can reset
-        h = working_copy.stdout().rev_parse('HEAD').stdout
+        original_head = working_copy.stdout().rev_parse('HEAD').stdout.decode().strip()
 
         commits = self.commits()
-        logger.info("%s: %s commits in %s", self, len(commits), h.decode())
+        logger.info("%s: %s commits in %s", self, len(commits), original_head)
         for c in commits:
             logger.debug('- %s (%s)', c['sha'], c['commit']['message'])
 
         for commit in commits:
             commit_sha = commit['sha']
-            r = working_copy.with_params('merge.renamelimit=0').with_config(
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-            ).cherry_pick(commit_sha)
+            conf = working_copy.with_config(stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+            # first try with default / low renamelimit
+            r = conf.cherry_pick(commit_sha)
+            _logger.debug("Cherry-picked %s: %s\n%s\n%s", commit_sha, r.returncode, r.stdout.decode(), r.stderr.decode())
+            if r.returncode:
+                # if it failed, retry with high renamelimit
+                working_copy.reset('--hard', original_head)
+                r = conf.with_params('merge.renamelimit=0').cherry_pick(commit_sha)
+                _logger.debug("Cherry-picked %s (renamelimit=0): %s\n%s\n%s", commit_sha, r.returncode, r.stdout.decode(), r.stderr.decode())
 
             if r.returncode: # pick failed, reset and bail
                 logger.info("%s: failed", commit_sha)
-                working_copy.reset('--hard', h.decode().strip())
-                raise CherrypickError(commit_sha, r.stdout.decode(), r.stderr.decode())
+                working_copy.reset('--hard', original_head)
+                raise CherrypickError(
+                    commit_sha,
+                    r.stdout.decode(),
+                    # Don't include the inexact rename detection spam in the
+                    # feedback, it's useless. There seems to be no way to
+                    # silence these messages.
+                    '\n'.join(
+                        line for line in r.stderr.decode().splitlines()
+                        if not line.startswith('Performing inexact rename detection')
+                    )
+                )
 
             msg = self._parse_commit_message(commit['commit']['message'])
 
@@ -647,6 +671,10 @@ stderr:
             ], check=True)
             # add PR branches as local but namespaced (?)
             repo = git(repo_dir)
+            # bare repos don't have a fetch spec by default (!) so adding one
+            # removes the default behaviour and stops fetching the base
+            # branches unless we add an explicit fetch spec for them
+            repo.config('--add', 'remote.origin.fetch', '+refs/heads/*:refs/heads/*')
             repo.config('--add', 'remote.origin.fetch', '+refs/pull/*/head:refs/heads/pull/*')
             return repo
 
