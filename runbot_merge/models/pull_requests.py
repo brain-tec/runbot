@@ -1,19 +1,23 @@
 import base64
 import collections
 import datetime
+import io
 import json
 import logging
 import os
 import pprint
 import re
+import sys
 import time
 
 from itertools import takewhile
 
 import requests
+from werkzeug.datastructures import Headers
 
 from odoo import api, fields, models, tools
 from odoo.exceptions import ValidationError
+from odoo.tools import OrderedSet
 
 from .. import github, exceptions, controllers, utils
 
@@ -431,7 +435,10 @@ class Branch(models.Model):
                 'state_to': 'staged',
             })
 
-        logger.info("Created staging %s (%s)", st, staged)
+        logger.info("Created staging %s (%s) to %s", st, ', '.join(
+            '%s[%s]' % (batch, batch.prs)
+            for batch in staged
+        ), st.target.name)
         return st
 
     def _check_visibility(self, repo, branch_name, expected_head, token):
@@ -451,6 +458,7 @@ class Branch(models.Model):
                 return head == expected_head
             return False
 
+ACL = collections.namedtuple('ACL', 'is_admin is_reviewer is_author')
 class PullRequests(models.Model):
     _name = 'runbot_merge.pull_requests'
     _order = 'number desc'
@@ -531,7 +539,7 @@ class PullRequests(models.Model):
         else:
             separator = 's '
         return '<pull_request%s%s>' % (separator, ' '.join(
-            '%s:%s' % (p.repository.name, p.number)
+            '{0.id} ({0.repository.name}:{0.number})'.format(p)
             for p in self
         ))
 
@@ -651,10 +659,7 @@ class PullRequests(models.Model):
 
         (login, name) = (author.github_login, author.display_name) if author else (login, 'not in system')
 
-        is_admin = (author.reviewer and self.author != author) or (author.self_reviewer and self.author == author)
-        is_reviewer = is_admin or self in author.delegate_reviewer
-        # TODO: should delegate reviewers be able to retry PRs?
-        is_author = is_reviewer or self.author == author
+        is_admin, is_reviewer, is_author = self._pr_acl(author)
 
         commands = dict(
             ps
@@ -707,7 +712,6 @@ class PullRequests(models.Model):
             elif command == 'review':
                 if param and is_reviewer:
                     newstate = RPLUS.get(self.state)
-                    print('r+', self.state, self.status)
                     if newstate:
                         self.state = newstate
                         self.reviewed_by = author
@@ -791,6 +795,16 @@ class PullRequests(models.Model):
                 'message': ' '.join(msgs),
             })
         return '\n'.join(msg)
+
+    def _pr_acl(self, user):
+        if not self:
+            return ACL(False, False, False)
+
+        is_admin = (user.reviewer and self.author != user) or (user.self_reviewer and self.author == user)
+        is_reviewer = is_admin or self in user.delegate_reviewer
+        # TODO: should delegate reviewers be able to retry PRs?
+        is_author = is_reviewer or self.author == user
+        return ACL(is_admin, is_reviewer, is_author)
 
     def _validate(self, statuses):
         # could have two PRs (e.g. one open and one closed) at least
@@ -989,34 +1003,27 @@ class PullRequests(models.Model):
             if commit:
                 self.env.cr.commit()
 
+    def _parse_commit_message(self, message):
+        """ Parses a commit message to split out the pseudo-headers (which
+        should be at the end) from the body, and serialises back with a
+        predefined pseudo-headers ordering.
+        """
+        return Message.from_message(message)
+
     def _build_merge_message(self, message):
         # handle co-authored commits (https://help.github.com/articles/creating-a-commit-with-multiple-authors/)
-        original = message.splitlines()
-        lines = []
-        coauthors = []
-        for line in original:
-            if line.startswith('Co-authored-by:'):
-                # remove all empty lines before C-A-B
-                coauthors.append(line)
-                while lines and not lines[-1]:
-                    lines.pop()
-                continue
-
-            lines.append(line.strip())
-
-        m = re.search(r'( |{repository})#{pr.number}\b'.format(
+        m = self._parse_commit_message(message)
+        pattern = r'( |{repository})#{pr.number}\b'.format(
             pr=self,
             repository=self.repository.name.replace('/', '\\/')
-        ), message)
-        if not m:
-            lines.extend(['', 'closes {pr.repository.name}#{pr.number}'.format(pr=self)])
-        if self.reviewed_by:
-            lines.extend(['', 'Signed-off-by: {}'.format(self.reviewed_by.formatted_email)])
+        )
+        if not re.search(pattern, m.body):
+            m.body += '\n\ncloses {pr.repository.name}#{pr.number}'.format(pr=self)
 
-        if coauthors:
-            lines.extend(['', ''])
-            lines.extend(coauthors)
-        return '\n'.join(lines)
+        if self.reviewed_by:
+            m.headers.add('signed-off-by', self.reviewed_by.formatted_email)
+
+        return str(m)
 
     def _stage(self, gh, target):
         # nb: pr_commits is oldest to newest so pr.head is pr_commits[-1]
@@ -1112,6 +1119,39 @@ class PullRequests(models.Model):
                 b.split_id = False
 
         self.staging_id.cancel(reason, *args)
+
+    def _try_closing(self, by):
+        # ignore if the PR is already being updated in a separate transaction
+        # (most likely being merged?)
+        self.env.cr.execute('''
+        SELECT id, state FROM runbot_merge_pull_requests
+        WHERE id = %s AND state != 'merged'
+        FOR UPDATE SKIP LOCKED;
+        ''', [self.id])
+        res = self.env.cr.fetchone()
+        if not res:
+            return False
+
+        self.env.cr.execute('''
+        UPDATE runbot_merge_pull_requests
+        SET state = 'closed'
+        WHERE id = %s AND state != 'merged'
+        ''', [self.id])
+        self.env.cr.commit()
+        self.invalidate_cache(fnames=['state'], ids=[self.id])
+        if self.env.cr.rowcount:
+            self.env['runbot_merge.pull_requests.tagging'].create({
+                'pull_request': self.number,
+                'repository': self.repository.id,
+                'state_from': res[1] if not self.staging_id else 'staged',
+                'state_to': 'closed',
+            })
+            self.unstage(
+                "PR %s:%s closed by %s",
+                self.repository.name, self.number,
+                by
+            )
+        return True
 
 # state changes on reviews
 RPLUS = {
@@ -1684,3 +1724,64 @@ def parse_refs_smart(read):
             break # empty list (no refs)
         m = refline.match(line)
         yield m[1].decode(), m[2].decode()
+
+HEADER = re.compile('^([A-Za-z-]+): (.*)$')
+class Message:
+    @classmethod
+    def from_message(cls, msg):
+        in_headers = True
+        headers = []
+        body = []
+        for line in reversed(msg.splitlines()):
+            if not line:
+                if not in_headers and body and body[-1]:
+                    body.append(line)
+                continue
+
+            h = HEADER.match(line)
+            if h:
+                # c-a-b = special case from an existing test, not sure if actually useful?
+                if in_headers or h.group(1).lower() == 'co-authored-by':
+                    headers.append(h.groups())
+                    continue
+
+            body.append(line)
+            in_headers = False
+
+        return cls('\n'.join(reversed(body)), Headers(reversed(headers)))
+
+    def __init__(self, body, headers=None):
+        self.body = body
+        self.headers = headers or Headers()
+
+    def __setattr__(self, name, value):
+        # make sure stored body is always stripped
+        if name == 'body':
+            value = value and value.strip()
+        super().__setattr__(name, value)
+
+    def __str__(self):
+        if not self.headers:
+            return self.body + '\n'
+
+        with io.StringIO(self.body) as msg:
+            msg.write(self.body)
+            msg.write('\n\n')
+            # https://git.wiki.kernel.org/index.php/CommitMessageConventions
+            # seems to mostly use capitalised names (rather than title-cased)
+            keys = list(OrderedSet(k.capitalize() for k in self.headers.keys()))
+            # c-a-b must be at the very end otherwise github doesn't see it
+            keys.sort(key=lambda k: k == 'Co-authored-by')
+            for k in keys:
+                for v in self.headers.getlist(k):
+                    msg.write(k)
+                    msg.write(': ')
+                    msg.write(v)
+                    msg.write('\n')
+
+            return msg.getvalue()
+
+    def sub(self, pattern, repl, *, flags):
+        """ Performs in-place replacements on the body
+        """
+        self.body = re.sub(pattern, repl, self.body, flags=flags)
