@@ -188,7 +188,15 @@ class PullRequests(models.Model):
 
         # TODO: don't use a mutable tokens iterator
         tokens = iter(tokens)
-        for token in tokens:
+        while True:
+            token = next(tokens, None)
+            if token is None:
+                break
+
+            if token == 'ignore': # replace 'ignore' by 'up to <pr_branch>'
+                token = 'up'
+                tokens = itertools.chain(['to', self.target.name], tokens)
+
             if token in ('r+', 'review+') and self.source_id._pr_acl(author).is_reviewer:
                 # don't update the root ever
                 for pr in filter(lambda p: p.parent_id, self._iter_ancestors()):
@@ -208,17 +216,23 @@ class PullRequests(models.Model):
                     ])
                     if not limit_id:
                         msg = "There is no branch %r, it can't be used as a forward port target." % limit
+                    elif limit_id == self.target:
+                        msg = "Forward-port disabled."
+                        self.limit_id = limit_id
                     elif not limit_id.fp_enabled:
                         msg = "Branch %r is disabled, it can't be used as a forward port target." % limit_id.name
                     else:
                         msg = "Forward-porting to %r." % limit_id.name
                         self.limit_id = limit_id
 
+                _logger.info("%s: %s", author, msg)
                 self.env['runbot_merge.pull_requests.feedback'].create({
                     'repository': self.repository.id,
                     'pull_request': self.number,
                     'message': msg,
+                    'token_field': 'fp_github_token',
                 })
+
 
     def _validate(self, statuses):
         _logger = logging.getLogger(__name__).getChild('forwardport.next')
@@ -235,6 +249,7 @@ class PullRequests(models.Model):
                     self.env['runbot_merge.pull_requests.feedback'].create({
                         'repository': pr.repository.id,
                         'pull_request': pr.number,
+                        'token_field': 'fp_github_token',
                         'message': pr.source_id._pingline() + '\n\nCI failed on this forward-port PR'
                     })
                 continue
@@ -423,7 +438,11 @@ class PullRequests(models.Model):
                 message += '\n\n'
             else:
                 message = ''
-            message += "Forward-Port-Of: %s#%s" % (source.repository.name, source.number)
+            root = pr._get_root()
+            message += '\n'.join(
+                "Forward-Port-Of: %s#%s" % (p.repository.name, p.number)
+                for p in root | source
+            )
 
             (h, out, err) = conflicts.get(pr) or (None, None, None)
 
@@ -501,6 +520,7 @@ More info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port
                 'repository': new_pr.repository.id,
                 'pull_request': new_pr.number,
                 'message': message,
+                'token_field': 'fp_github_token',
             })
             # not great but we probably want to avoid the risk of the webhook
             # creating the PR from under us. There's still a "hole" between
@@ -585,8 +605,7 @@ More info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port
             working_copy.checkout('-bsquashed', root_branch)
             root_commits = root.commits()
 
-            # squash to a single commit: reset to the first parent of the pr's
-            # first commit
+            # squash to a single commit
             working_copy.reset('--soft', root_commits[0]['parents'][0]['sha'])
             working_copy.commit(a=True, message="temp")
             squashed = working_copy.stdout().rev_parse('HEAD').stdout.strip().decode()
@@ -596,9 +615,15 @@ More info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port
             # cherry-pick the squashed commit
             working_copy.with_params('merge.renamelimit=0').with_config(check=False).cherry_pick(squashed)
 
-            working_copy.commit(
-                a=True, allow_empty=True,
-                message="""Cherry pick of %s failed
+            # if there was a single commit, reuse its message when committing
+            # the conflict
+            # TODO: still add conflict information to this?
+            if len(root_commits) == 1:
+                working_copy.commit(all=True, allow_empty=True, reuse_message=root_commits[0]['sha'])
+            else:
+                working_copy.commit(
+                    all=True, allow_empty=True,
+                    message="""Cherry pick of %s failed
 
 stdout:
 %s
@@ -717,6 +742,10 @@ class Stagings(models.Model):
                     })
         return r
 
+class Feedback(models.Model):
+    _inherit = 'runbot_merge.pull_requests.feedback'
+
+    token_field = fields.Selection(selection_add=[('fp_github_token', 'Forwardport Bot')])
 
 def git(directory): return Repo(directory, check=True)
 class Repo:
