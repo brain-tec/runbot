@@ -1263,18 +1263,22 @@ class Commit(models.Model):
         PRs = self.env['runbot_merge.pull_requests']
         # chances are low that we'll have more than one commit
         for c in self.search([('to_check', '=', True)]):
-            c.to_check = False
-            st = json.loads(c.statuses)
-            pr = PRs.search([('head', '=', c.sha)])
-            if pr:
-                pr._validate(st)
-            # heads is a json-encoded mapping of reponame:head, so chances
-            # are if a sha matches a heads it's matching one of the shas
-            stagings = Stagings.search([('heads', 'ilike', c.sha)])
-            if stagings:
-                stagings._validate()
-
-            self.env.cr.commit()
+            try:
+                c.to_check = False
+                st = json.loads(c.statuses)
+                pr = PRs.search([('head', '=', c.sha)])
+                if pr:
+                    pr._validate(st)
+                # heads is a json-encoded mapping of reponame:head, so chances
+                # are if a sha matches a heads it's matching one of the shas
+                stagings = Stagings.search([('heads', 'ilike', c.sha)])
+                if stagings:
+                    stagings._validate()
+            except Exception:
+                _logger.exception("Failed to apply commit %s (%s)", c, c.sha)
+                self.env.cr.rollback()
+            else:
+                self.env.cr.commit()
 
     _sql_constraints = [
         ('unique_sha', 'unique (sha)', 'no duplicated commit'),
