@@ -226,7 +226,14 @@ class PullRequests(models.Model):
                         ('project_id', '=', self.repository.project_id.id),
                         ('name', '=', limit),
                     ])
-                    if not limit_id:
+                    if self.parent_id:
+                        msg = "Sorry, forward-port limit can only be set on an origin PR" \
+                              " (#%d here) before it's merged and forward-ported." % (
+                            self._get_root().number
+                        )
+                    elif self.state in ['merged', 'closed']:
+                        msg = "Sorry, forward-port limit can only be set before the PR is merged."
+                    elif not limit_id:
                         msg = "There is no branch %r, it can't be used as a forward port target." % limit
                     elif limit_id == self.target:
                         msg = "Forward-port disabled."
@@ -257,7 +264,7 @@ class PullRequests(models.Model):
                 continue
             if pr.state not in ['validated', 'ready']:
                 _logger.info('-> wrong state (%s)', pr.state)
-                if pr in failed:
+                if pr in failed and pr.state not in ['closed', 'merged']:
                     self.env['runbot_merge.pull_requests.feedback'].create({
                         'repository': pr.repository.id,
                         'pull_request': pr.number,
@@ -516,7 +523,7 @@ In the former case, you may want to edit this PR message as well.
                 ancestors = "".join(
                     "* %s#%d\n" % (p.repository.name, p.number)
                     for p in pr._iter_ancestors()
-                    if p.parent_id and p.parent_id != source
+                    if p.parent_id
                 )
                 message = source._pingline() + """
 This PR targets %s and is the last of the forward-port chain%s
@@ -525,7 +532,7 @@ To merge the full chain, say
 > @%s r+
 
 More info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port
-""" % (target.name, 'containing:' if ancestors else '.', ancestors, pr.repository.project_id.fp_github_name)
+""" % (target.name, ' containing:' if ancestors else '.', ancestors, pr.repository.project_id.fp_github_name)
             else:
                 message = """\
 This PR targets %s and is part of the forward-port chain. Further PRs will be created up to %s.
