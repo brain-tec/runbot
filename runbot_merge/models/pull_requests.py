@@ -415,7 +415,7 @@ class Branch(models.Model):
                         i, len(WAIT_FOR_VISIBILITY)
                     )
                     break
-                _logger.warn(
+                _logger.warning(
                     "[repo] updated %s:%s to %s: failed (at %d/%d)",
                     r.name, refname, staging_head,
                     i, len(WAIT_FOR_VISIBILITY)
@@ -528,7 +528,7 @@ class PullRequests(models.Model):
 
     def name_get(self):
         return {
-            p.id: '%s:%s' % (p.repository.name, p.number)
+            p.id: '%s#%s' % (p.repository.name, p.number)
             for p in self
         }
 
@@ -540,7 +540,7 @@ class PullRequests(models.Model):
         else:
             separator = 's '
         return '<pull_request%s%s>' % (separator, ' '.join(
-            '{0.id} ({0.repository.name}:{0.number})'.format(p)
+            '{0.id} ({0.display_name})'.format(p)
             for p in self
         ))
 
@@ -824,7 +824,7 @@ class PullRequests(models.Model):
                 success = False
                 if st in ('error', 'failure'):
                     failed |= pr
-                    self._notify_ci_new_failure(ci, to_status(statuses.get(ci.strip(), 'pending')))
+                    pr._notify_ci_new_failure(ci, to_status(statuses.get(ci.strip(), 'pending')))
             if success:
                 oldstate = pr.state
                 if oldstate == 'opened':
@@ -988,7 +988,7 @@ class PullRequests(models.Model):
                     'pull_request': r.number,
                     'message': "Linked pull request(s) {} not ready. Linked PRs are not staged until all of them are ready.".format(
                         ', '.join(map(
-                            '{0.repository.name}#{0.number}'.format,
+                            '{0.display_name}'.format,
                             unready
                         ))
                     )
@@ -1032,7 +1032,7 @@ class PullRequests(models.Model):
             repository=self.repository.name.replace('/', '\\/')
         )
         if not re.search(pattern, m.body):
-            m.body += '\n\ncloses {pr.repository.name}#{pr.number}'.format(pr=self)
+            m.body += '\n\ncloses {pr.display_name}'.format(pr=self)
 
         if self.reviewed_by:
             m.headers.add('signed-off-by', self.reviewed_by.formatted_email)
@@ -1123,7 +1123,7 @@ class PullRequests(models.Model):
         """
         split_batches = self.with_context(active_test=False).mapped('batch_ids').filtered('split_id')
         if len(split_batches) > 1:
-            _logger.warn("Found a PR linked with more than one split batch: %s (%s)", self, split_batches)
+            _logger.warning("Found a PR linked with more than one split batch: %s (%s)", self, split_batches)
         for b in split_batches:
             if len(b.split_id.batch_ids) == 1:
                 # only the batch of this PR -> delete split

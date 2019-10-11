@@ -2,8 +2,6 @@
 import logging
 from contextlib import ExitStack
 
-import subprocess
-
 from odoo import fields, models
 
 
@@ -16,12 +14,13 @@ class Queue:
     def _process(self):
         for b in self.search([]):
             try:
-                with self.env.cr.savepoint():
-                    b._process_item()
+                b._process_item()
                 b.unlink()
                 self.env.cr.commit()
             except Exception:
                 _logger.exception("Error while processing %s, skipping", b)
+                self.env.cr.rollback()
+            self.clear_caches()
 
 class BatchQueue(models.Model, Queue):
     _name = 'forwardport.batches'
@@ -39,7 +38,7 @@ class BatchQueue(models.Model, Queue):
         # only some prs of the batch have a parent, that's weird
         with_parent = batch.prs.filtered(lambda p: p.parent_id)
         if with_parent and with_parent != batch.prs:
-            _logger.warn("Found a subset of batch %s (%s) with parents: %s, should probably investigate (normally either they're all parented or none are)", batch, batch.prs, with_parent)
+            _logger.warning("Found a subset of batch %s (%s) with parents: %s, should probably investigate (normally either they're all parented or none are)", batch, batch.prs, with_parent)
 
         newbatch = batch.prs._port_forward()
         if newbatch:

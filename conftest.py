@@ -80,6 +80,13 @@ def pytest_addoption(parser):
 def pytest_report_header(config):
     return 'Running against database ' + config.getoption('--db')
 
+@pytest.fixture(scope='session', autouse=True)
+def _set_socket_timeout():
+    """ Avoid unlimited wait on standard sockets during tests, this is mostly
+    an issue for non-trivial cron calls
+    """
+    socket.setdefaulttimeout(60.0)
+
 @pytest.fixture(scope="session")
 def config(pytestconfig):
     """ Flat version of the pytest config file (pytest.ini), parses to a
@@ -886,11 +893,12 @@ class Environment:
         crons = xids or self._default_crons
         print('running crons', crons, file=sys.stderr)
         for xid in crons:
+            t0 = time.time()
             print('\trunning cron', xid, '...', file=sys.stderr)
             _, model, cron_id = self('ir.model.data', 'xmlid_lookup', xid)
             assert model == 'ir.cron', "Expected {} to be a cron, got {}".format(xid, model)
             self('ir.cron', 'method_direct_trigger', [cron_id], **kw)
-            print('\tdone', file=sys.stderr)
+            print('\tdone %.3fs' % (time.time() - t0), file=sys.stderr)
         print('done', file=sys.stderr)
         # sleep for some time as a lot of crap may have happened (?)
         wait_for_hook()
