@@ -80,6 +80,29 @@ class Project(models.Model):
             if not project.fp_github_email:
                 raise UserError(_("The forward-port bot needs a primary email set up."))
 
+    def _send_feedback(self):
+        super()._send_feedback()
+        ghs = {}
+        to_remove = []
+        for f in self.env['forwardport.tagging'].search([]):
+            repo = f.repository
+            gh = ghs.get(repo)
+            if not gh:
+                gh = ghs[repo] = repo.github()
+
+            try:
+                gh('POST', 'issues/{}/labels'.format(f.pull_request), json={
+                    'labels': json.loads(f.to_add)
+                })
+            except Exception:
+                _logger.exception(
+                    "Error while trying to add the tags %s to %s#%s",
+                    f.to_add, repo.name, f.pull_request
+                )
+            else:
+                to_remove.append(f.id)
+        if to_remove:
+            self.env['forwardport.tagging'].browse(to_remove).unlink()
 
 class Repository(models.Model):
     _inherit = 'runbot_merge.repository'
@@ -480,14 +503,15 @@ class PullRequests(models.Model):
 
             (h, out, err) = conflicts.get(pr) or (None, None, None)
 
+            title, body = re.match(r'(?P<title>[^\n]+)\n*(?P<body>.*)', message, flags=re.DOTALL).groups()
+            title = '[FW]' + title
+            if not body:
+                body = None
+
             r = requests.post(
                 'https://api.github.com/repos/{}/pulls'.format(pr.repository.name), json={
-                    'title': "Forward Port of #%d to %s%s" % (
-                        source.number,
-                        target.name,
-                        ' (failed)' if has_conflicts else ''
-                    ),
-                    'body': message,
+                    'title': title,
+                    'body': body,
                     'head': '%s:%s' % (owner, new_branch),
                     'base': target.name,
                     #'draft': has_conflicts, draft mode is not supported on private repos so remove it (again)
@@ -565,6 +589,14 @@ More info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port
                 'pull_request': new_pr.number,
                 'message': message,
                 'token_field': 'fp_github_token',
+            })
+            labels = ['forwardport']
+            if has_conflicts:
+                labels.append('conflict')
+            self.env['forwardport.tagging'].create({
+                'repository': new_pr.repository.id,
+                'pull_request': new_pr.number,
+                'to_add': json.dumps(labels),
             })
             # not great but we probably want to avoid the risk of the webhook
             # creating the PR from under us. There's still a "hole" between
@@ -810,6 +842,17 @@ class Feedback(models.Model):
     _inherit = 'runbot_merge.pull_requests.feedback'
 
     token_field = fields.Selection(selection_add=[('fp_github_token', 'Forwardport Bot')])
+
+class Tagging(models.Model):
+    _name = 'forwardport.tagging'
+
+    token_field = fields.Selection([
+        ('github_token', 'Mergebot'),
+        ('fp_github_token', 'Forwardport Bot'),
+    ], required=True)
+    repository = fields.Many2one('runbot_merge.repository', required=True)
+    pull_request = fields.Integer(string="PR number")
+    to_add = fields.Char(string="JSON-encoded array of labels to add")
 
 def git(directory): return Repo(directory, check=True)
 class Repo:
