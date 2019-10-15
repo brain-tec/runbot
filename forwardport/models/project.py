@@ -597,6 +597,7 @@ More info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port
                 'repository': new_pr.repository.id,
                 'pull_request': new_pr.number,
                 'to_add': json.dumps(labels),
+                'token_field': 'fp_github_token',
             })
             # not great but we probably want to avoid the risk of the webhook
             # creating the PR from under us. There's still a "hole" between
@@ -827,11 +828,14 @@ class Stagings(models.Model):
 
     def write(self, vals):
         r = super().write(vals)
-        if vals.get('active') == False and self.state == 'success':
+        # we've just deactivated a successful staging (so it got ~merged)
+        if vals.get('active') is False and self.state == 'success':
+            # check al batches to see if they should be forward ported
             for b in self.with_context(active_test=False).batch_ids:
-                # if batch PRs have parents they're part of an FP sequence and
-                # thus handled separately
-                if not b.mapped('prs.parent_id'):
+                # if all PRs of a batch have parents they're part of an FP
+                # sequence and thus handled separately, otherwise they're
+                # considered regular merges
+                if not all(p.parent_id for p in b.prs):
                     self.env['forwardport.batches'].create({
                         'batch_id': b.id,
                         'source': 'merge',
