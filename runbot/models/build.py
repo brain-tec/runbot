@@ -108,6 +108,8 @@ class runbot_build(models.Model):
     build_url = fields.Char('Build url', compute='_compute_build_url', store=False)
     build_error_ids = fields.Many2many('runbot.build.error', 'runbot_build_error_ids_runbot_build_rel', string='Errors')
     log_counter = fields.Integer('Log Lines counter', default=100)
+    keep_running = fields.Boolean('Keep running', help='Keep running')
+
 
     @api.depends('config_id')
     def _compute_log_list(self):  # storing this field because it will be access trhoug repo viewn and keep track of the list at create
@@ -318,14 +320,11 @@ class runbot_build(models.Model):
             assert bool(not build.duplicate_id) ^ (build.local_state == 'duplicate')  # don't change duplicate state without removing duplicate id.
         return res
 
-    def _end_test(self):
+    def update_build_end(self):
         for build in self:
-            if build.parent_id and build.global_state in ('running', 'done'):
-                global_result = build.global_result
-                loglevel = 'OK' if global_result == 'ok' else 'WARNING' if global_result == 'warn' else 'ERROR'
-                build.parent_id._log('children_build', 'returned a "%s" result ' % (global_result), level=loglevel, log_type='subbuild', path=self.id)
-                if build.parent_id.local_state in ('running', 'done'):
-                    build.parent_id._end_test()
+            build.build_end = now()
+            if build.parent_id and build.parent_id.local_state in ('running', 'done'):
+                    build.parent_id.update_build_end()
 
     @api.depends('name', 'branch_id.name')
     def _compute_dest(self):
@@ -608,9 +607,11 @@ class runbot_build(models.Model):
             else:  # testing/running build
                 if build.local_state == 'testing':
                     # failfast in case of docker error (triggered in database)
-                    if (not build.local_result or build.local_result == 'ok') and build.triggered_result:
-                        build.local_result = build.triggered_result
-                        build._github_status()  # failfast
+                    if build.triggered_result:
+                        worst_result = self._get_worst_result([build.triggered_result, build.local_result])
+                        if  worst_result != build.local_result:
+                            build.local_result = build.triggered_result
+                            build._github_status()  # failfast
                 # check if current job is finished
                 if docker_is_running(build._get_docker_name()):
                     timeout = min(build.active_step.cpu_limit, int(icp.get_param('runbot.runbot_timeout', default=10000)))
@@ -640,14 +641,13 @@ class runbot_build(models.Model):
                 build_values.update(build._next_job_values())  # find next active_step or set to done
                 ending_build = build.local_state not in ('done', 'running') and build_values.get('local_state') in ('done', 'running')
                 if ending_build:
-                    build_values['build_end'] = now()
+                    build.update_build_end()
 
                 step_end_message = 'Step %s finished in %s' % (build.job, s2human(build.job_time))
                 build.write(build_values)
 
                 if ending_build:
                     build._github_status()
-                    # build._end_test()
                     if not build.local_result:  # Set 'ok' result if no result set (no tests job on build)
                         build.local_result = 'ok'
                         build._logger("No result set, setting ok by default")
@@ -1050,6 +1050,7 @@ class runbot_build(models.Model):
         except Exception as e:
             self._log('make_dirs', 'exception: %s' % e)
             return False
+          
 
     def build_type_label(self):
         self.ensure_one()

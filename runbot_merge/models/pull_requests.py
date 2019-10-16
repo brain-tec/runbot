@@ -122,9 +122,9 @@ class Project(models.Model):
         to_remove = []
         for f in self.env['runbot_merge.pull_requests.feedback'].search([]):
             repo = f.repository
-            gh = ghs.get(repo)
+            gh = ghs.get((repo, f.token_field))
             if not gh:
-                gh = ghs[repo] = repo.github()
+                gh = ghs[(repo, f.token_field)] = repo.github(f.token_field)
 
             try:
                 if f.close:
@@ -143,7 +143,7 @@ class Project(models.Model):
         self.env['runbot_merge.pull_requests.feedback'].browse(to_remove).unlink()
 
     def is_timed_out(self, staging):
-        return fields.Datetime.from_string(staging.staged_at) + datetime.timedelta(minutes=self.ci_timeout) < datetime.datetime.now()
+        return fields.Datetime.from_string(staging.timeout_limit) < datetime.datetime.now()
 
     def _check_fetch(self, commit=False):
         """
@@ -186,8 +186,8 @@ class Repository(models.Model):
     name = fields.Char(required=True)
     project_id = fields.Many2one('runbot_merge.project', required=True)
 
-    def github(self):
-        return github.GH(self.project_id.github_token, self.name)
+    def github(self, token_field='github_token'):
+        return github.GH(self.project_id[token_field], self.name)
 
     def _auto_init(self):
         res = super(Repository, self)._auto_init()
@@ -415,7 +415,7 @@ class Branch(models.Model):
                         i, len(WAIT_FOR_VISIBILITY)
                     )
                     break
-                _logger.warn(
+                _logger.warning(
                     "[repo] updated %s:%s to %s: failed (at %d/%d)",
                     r.name, refname, staging_head,
                     i, len(WAIT_FOR_VISIBILITY)
@@ -505,6 +505,7 @@ class PullRequests(models.Model):
 
     statuses = fields.Text(compute='_compute_statuses')
     status = fields.Char(compute='_compute_statuses')
+    previous_failure = fields.Char(default='{}')
 
     batch_id = fields.Many2one('runbot_merge.batch',compute='_compute_active_batch', store=True)
     batch_ids = fields.Many2many('runbot_merge.batch')
@@ -527,7 +528,7 @@ class PullRequests(models.Model):
 
     def name_get(self):
         return {
-            p.id: '%s:%s' % (p.repository.name, p.number)
+            p.id: '%s#%s' % (p.repository.name, p.number)
             for p in self
         }
 
@@ -539,7 +540,7 @@ class PullRequests(models.Model):
         else:
             separator = 's '
         return '<pull_request%s%s>' % (separator, ' '.join(
-            '{0.id} ({0.repository.name}:{0.number})'.format(p)
+            '{0.id} ({0.display_name})'.format(p)
             for p in self
         ))
 
@@ -810,8 +811,9 @@ class PullRequests(models.Model):
         # could have two PRs (e.g. one open and one closed) at least
         # temporarily on the same head, or on the same head with different
         # targets
+        failed = self.browse(())
         for pr in self:
-            required = pr.repository.project_id.required_statuses.split(',')
+            required = filter(None, pr.repository.project_id.required_statuses.split(','))
 
             success = True
             for ci in required:
@@ -820,20 +822,33 @@ class PullRequests(models.Model):
                     continue
 
                 success = False
-                # only report an issue of the PR is already approved (r+'d)
-                if st in ('error', 'failure') and pr.state == 'approved':
-                    self.env['runbot_merge.pull_requests.feedback'].create({
-                        'repository': pr.repository.id,
-                        'pull_request': pr.number,
-                        'message': "%r failed on this reviewed PR." % ci,
-                    })
-
+                if st in ('error', 'failure'):
+                    failed |= pr
+                    pr._notify_ci_new_failure(ci, to_status(statuses.get(ci.strip(), 'pending')))
             if success:
                 oldstate = pr.state
                 if oldstate == 'opened':
                     pr.state = 'validated'
                 elif oldstate == 'approved':
                     pr.state = 'ready'
+        return failed
+
+    def _notify_ci_new_failure(self, ci, st):
+        # only sending notification if the newly failed status is different than
+        # the old one
+        prev = json.loads(self.previous_failure)
+        if st != prev:
+            self.previous_failure = json.dumps(st)
+            self._notify_ci_failed(ci)
+
+    def _notify_ci_failed(self, ci):
+        # only report an issue of the PR is already approved (r+'d)
+        if self.state == 'approved':
+            self.env['runbot_merge.pull_requests.feedback'].create({
+                'repository': self.repository.id,
+                'pull_request': self.number,
+                'message': "%r failed on this reviewed PR." % ci,
+            })
 
     def _auto_init(self):
         super(PullRequests, self)._auto_init()
@@ -856,8 +871,7 @@ class PullRequests(models.Model):
     def create(self, vals):
         pr = super().create(vals)
         c = self.env['runbot_merge.commit'].search([('sha', '=', pr.head)])
-        if c and c.statuses:
-            pr._validate(json.loads(c.statuses))
+        pr._validate(json.loads(c.statuses or '{}'))
 
         if pr.state not in ('closed', 'merged'):
             self.env['runbot_merge.pull_requests.tagging'].create({
@@ -974,7 +988,7 @@ class PullRequests(models.Model):
                     'pull_request': r.number,
                     'message': "Linked pull request(s) {} not ready. Linked PRs are not staged until all of them are ready.".format(
                         ', '.join(map(
-                            '{0.repository.name}#{0.number}'.format,
+                            '{0.display_name}'.format,
                             unready
                         ))
                     )
@@ -1018,7 +1032,7 @@ class PullRequests(models.Model):
             repository=self.repository.name.replace('/', '\\/')
         )
         if not re.search(pattern, m.body):
-            m.body += '\n\ncloses {pr.repository.name}#{pr.number}'.format(pr=self)
+            m.body += '\n\ncloses {pr.display_name}'.format(pr=self)
 
         if self.reviewed_by:
             m.headers.add('signed-off-by', self.reviewed_by.formatted_email)
@@ -1109,7 +1123,7 @@ class PullRequests(models.Model):
         """
         split_batches = self.with_context(active_test=False).mapped('batch_ids').filtered('split_id')
         if len(split_batches) > 1:
-            _logger.warn("Found a PR linked with more than one split batch: %s (%s)", self, split_batches)
+            _logger.warning("Found a PR linked with more than one split batch: %s (%s)", self, split_batches)
         for b in split_batches:
             if len(b.split_id.batch_ids) == 1:
                 # only the batch of this PR -> delete split
@@ -1224,6 +1238,12 @@ class Feedback(models.Model):
     pull_request = fields.Integer()
     message = fields.Char()
     close = fields.Boolean()
+    token_field = fields.Selection(
+        [('github_token', "Mergebot")],
+        default='github_token',
+        string="Bot User",
+        help="Token field (from repo's project) to use to post messages"
+    )
 
 class Commit(models.Model):
     """Represents a commit onto which statuses might be posted,
@@ -1246,25 +1266,27 @@ class Commit(models.Model):
         r = super(Commit, self).write(values)
         return r
 
-    # NB: GH recommends doing heavy work asynchronously, may be a good
-    #     idea to defer this to a cron or something
     def _notify(self):
         Stagings = self.env['runbot_merge.stagings']
         PRs = self.env['runbot_merge.pull_requests']
         # chances are low that we'll have more than one commit
         for c in self.search([('to_check', '=', True)]):
-            c.to_check = False
-            st = json.loads(c.statuses)
-            pr = PRs.search([('head', '=', c.sha)])
-            if pr:
-                pr._validate(st)
-            # heads is a json-encoded mapping of reponame:head, so chances
-            # are if a sha matches a heads it's matching one of the shas
-            stagings = Stagings.search([('heads', 'ilike', c.sha)])
-            if stagings:
-                stagings._validate()
-
-            self.env.cr.commit()
+            try:
+                c.to_check = False
+                st = json.loads(c.statuses)
+                pr = PRs.search([('head', '=', c.sha)])
+                if pr:
+                    pr._validate(st)
+                # heads is a json-encoded mapping of reponame:head, so chances
+                # are if a sha matches a heads it's matching one of the shas
+                stagings = Stagings.search([('heads', 'ilike', c.sha)])
+                if stagings:
+                    stagings._validate()
+            except Exception:
+                _logger.exception("Failed to apply commit %s (%s)", c, c.sha)
+                self.env.cr.rollback()
+            else:
+                self.env.cr.commit()
 
     _sql_constraints = [
         ('unique_sha', 'unique (sha)', 'no duplicated commit'),
@@ -1297,10 +1319,11 @@ class Stagings(models.Model):
         ('pending', 'Pending'),
         ('cancelled', "Cancelled"),
         ('ff_failed', "Fast forward failed")
-    ])
+    ], default='pending')
     active = fields.Boolean(default=True)
 
     staged_at = fields.Datetime(default=fields.Datetime.now)
+    timeout_limit = fields.Datetime(store=True, compute='_compute_timeout_limit')
     reason = fields.Text("Reason for final state (if any)")
 
     # seems simpler than adding yet another indirection through a model
@@ -1333,10 +1356,21 @@ class Stagings(models.Model):
                 for status in [to_status(st)]
             ]
 
+    # only depend on staged_at as it should not get modified, but we might
+    # update the CI timeout after the staging have been created and we
+    # *do not* want to update the staging timeouts in that case
+    @api.depends('staged_at')
+    def _compute_timeout_limit(self):
+        for st in self:
+            st.timeout_limit = fields.Datetime.to_string(
+                  fields.Datetime.from_string(st.staged_at)
+                + datetime.timedelta(minutes=st.target.project_id.ci_timeout)
+            )
+
     def _validate(self):
         Commits = self.env['runbot_merge.commit']
         for s in self:
-            if s.state in ('cancelled', 'ff_failed'):
+            if s.state != 'pending':
                 continue
 
             heads = [
@@ -1347,6 +1381,7 @@ class Stagings(models.Model):
                 ('sha', 'in', heads)
             ])
 
+            update_timeout_limit = False
             reqs = [r.strip() for r in s.target.project_id.required_statuses.split(',')]
             st = 'success'
             for c in commits:
@@ -1354,17 +1389,22 @@ class Stagings(models.Model):
                 for v in map(lambda n: state_(statuses, n), reqs):
                     if st == 'failure' or v in ('error', 'failure'):
                         st = 'failure'
-                    elif v in (None, 'pending'):
+                    elif v is None:
                         st = 'pending'
+                    elif v == 'pending':
+                        st = 'pending'
+                        update_timeout_limit = True
                     else:
                         assert v == 'success'
             # mark failure as soon as we find a failed status, but wait until
             # all commits are known & not pending to mark a success
             if st == 'success' and len(commits) < len(heads):
-                s.state = 'pending'
-                continue
+                st = 'pending'
 
-            s.state = st
+            vals = {'state': st}
+            if update_timeout_limit:
+                vals['timeout_limit'] = fields.Datetime.to_string(datetime.datetime.now() + datetime.timedelta(minutes=s.target.project_id.ci_timeout))
+            s.write(vals)
 
     @api.multi
     def action_cancel(self):

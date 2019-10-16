@@ -142,14 +142,14 @@ def handle_pr(env, event):
 
         if pr_obj.state == 'ready':
             pr_obj.unstage(
-                "PR %s:%s updated by %s",
-                pr_obj.repository.name, pr_obj.number,
+                "PR %s updated by %s",
+                pr_obj.display_name,
                 event['sender']['login']
             )
 
         _logger.info(
-            "PR %s:%s updated to %s by %s, resetting to 'open' and squash=%s",
-            pr_obj.repository.name, pr_obj.number,
+            "PR %s updated to %s by %s, resetting to 'open' and squash=%s",
+            pr_obj.display_name,
             pr['head']['sha'], event['sender']['login'],
             pr['commits'] == 1
         )
@@ -164,12 +164,19 @@ def handle_pr(env, event):
     # don't marked merged PRs as closed (!!!)
     if event['action'] == 'closed' and pr_obj.state != 'merged':
         # FIXME: store some sort of "try to close it later" if the merge fails?
+        _logger.info(
+            '%s closing %s (state=%s)',
+            event['sender']['login'],
+            pr_obj.display_name,
+            pr_obj.state,
+        )
         if pr_obj._try_closing(event['sender']['login']):
             return 'Closed {}'.format(pr_obj.id)
         else:
             return 'Ignored: could not lock rows (probably being merged)'
 
     if event['action'] == 'reopened' and pr_obj.state == 'closed':
+        _logger.info('%s reopening %s', event['sender']['login'], pr_obj.display_name)
         pr_obj.write({
             'state': 'opened',
             # updating the head triggers a revalidation
@@ -190,14 +197,17 @@ def handle_status(env, event):
     env.cr.execute('SELECT id FROM runbot_merge_commit WHERE sha=%s FOR UPDATE', [event['sha']])
     c = Commits.browse(env.cr.fetchone())
     if c:
-        c.statuses = json.dumps({
-            **json.loads(c.statuses),
+        old = json.loads(c.statuses)
+        new = {
+            **old,
             event['context']: {
                 'state': event['state'],
                 'target_url': event['target_url'],
                 'description': event['description']
             }
-        })
+        }
+        if new != old: # don't update the commit if nothing's changed (e.g dupe status)
+            c.statuses = json.dumps(new)
     else:
         Commits.create({
             'sha': event['sha'],

@@ -13,24 +13,27 @@ it up), ...
 """
 import base64
 import contextlib
+import datetime
 import itertools
 import json
 import logging
 import os
 import pathlib
+import re
 import subprocess
 import tempfile
 
-import re
+import dateutil
 import requests
 
-from odoo.exceptions import UserError
-from odoo.tools.appdirs import user_cache_dir
-
 from odoo import _, models, fields, api
+from odoo.exceptions import UserError
+from odoo.tools import topological_sort, groupby
+from odoo.tools.appdirs import user_cache_dir
 from odoo.addons.runbot_merge import utils
 from odoo.addons.runbot_merge.models.pull_requests import RPLUS
 
+DEFAULT_DELTA = dateutil.relativedelta.relativedelta(days=3)
 
 _logger = logging.getLogger('odoo.addons.forwardport')
 
@@ -66,7 +69,7 @@ class Project(models.Model):
                 'Authorization': 'token %s' % project.fp_github_token
             })
             if not (r0.ok and r1.ok):
-                _logger.warn("Failed to fetch bot information for project %s: %s", project.name, (r0.text or r0.content) if not r0.ok else (r1.text or r1.content))
+                _logger.warning("Failed to fetch bot information for project %s: %s", project.name, (r0.text or r0.content) if not r0.ok else (r1.text or r1.content))
                 continue
             project.fp_github_name = r0.json()['login']
             project.fp_github_email = next((
@@ -77,6 +80,29 @@ class Project(models.Model):
             if not project.fp_github_email:
                 raise UserError(_("The forward-port bot needs a primary email set up."))
 
+    def _send_feedback(self):
+        super()._send_feedback()
+        ghs = {}
+        to_remove = []
+        for f in self.env['forwardport.tagging'].search([]):
+            repo = f.repository
+            gh = ghs.get(repo)
+            if not gh:
+                gh = ghs[repo] = repo.github()
+
+            try:
+                gh('POST', 'issues/{}/labels'.format(f.pull_request), json={
+                    'labels': json.loads(f.to_add)
+                })
+            except Exception:
+                _logger.exception(
+                    "Error while trying to add the tags %s to %s#%s",
+                    f.to_add, repo.name, f.pull_request
+                )
+            else:
+                to_remove.append(f.id)
+        if to_remove:
+            self.env['forwardport.tagging'].browse(to_remove).unlink()
 
 class Repository(models.Model):
     _inherit = 'runbot_merge.repository'
@@ -152,6 +178,7 @@ class PullRequests(models.Model):
         # also a bit odd to only handle updating 1 head at a time, but then
         # again 2 PRs with same head is weird so...
         newhead = vals.get('head')
+        with_parents = self.filtered('parent_id')
         if newhead and not self.env.context.get('ignore_head_update') and newhead != self.head:
             vals.setdefault('parent_id', False)
             # if any children, this is an FP PR being updated, enqueue
@@ -164,12 +191,23 @@ class PullRequests(models.Model):
 
         if vals.get('parent_id') and 'source_id' not in vals:
             vals['source_id'] = self.browse(vals['parent_id'])._get_root().id
-        return super().write(vals)
+        r = super().write(vals)
+        if self.env.context.get('forwardport_detach_warn', True):
+            for p in with_parents:
+                if not p.parent_id:
+                    self.env['runbot_merge.pull_requests.feedback'].create({
+                        'repository': p.repository.id,
+                        'pull_request': p.number,
+                        'message': "This PR was modified / updated and has become a normal PR. "
+                                   "It should be merged the normal way (via @%s)" % p.repository.project_id.github_prefix,
+                        'token_field': 'fp_github_token',
+                    })
+        return r
 
     def _try_closing(self, by):
         r = super()._try_closing(by)
         if r:
-            self.parent_id = False
+            self.with_context(forwardport_detach_warn=False).parent_id = False
         return r
 
     def _parse_commands(self, author, comment, login):
@@ -188,7 +226,15 @@ class PullRequests(models.Model):
 
         # TODO: don't use a mutable tokens iterator
         tokens = iter(tokens)
-        for token in tokens:
+        while True:
+            token = next(tokens, None)
+            if token is None:
+                break
+
+            if token == 'ignore': # replace 'ignore' by 'up to <pr_branch>'
+                token = 'up'
+                tokens = itertools.chain(['to', self.target.name], tokens)
+
             if token in ('r+', 'review+') and self.source_id._pr_acl(author).is_reviewer:
                 # don't update the root ever
                 for pr in filter(lambda p: p.parent_id, self._iter_ancestors()):
@@ -197,7 +243,7 @@ class PullRequests(models.Model):
                         pr.state = newstate
                         pr.reviewed_by = author
                         # TODO: logging & feedback
-            elif token == 'up' and next(tokens, None) == 'to' and self._pr_acl(author).is_reviewer:
+            elif token == 'up' and next(tokens, None) == 'to' and self._pr_acl(author).is_author:
                 limit = next(tokens, None)
                 if not limit:
                     msg = "Please provide a branch to forward-port to."
@@ -206,37 +252,73 @@ class PullRequests(models.Model):
                         ('project_id', '=', self.repository.project_id.id),
                         ('name', '=', limit),
                     ])
-                    if not limit_id:
+                    if self.parent_id:
+                        msg = "Sorry, forward-port limit can only be set on an origin PR" \
+                              " (%s here) before it's merged and forward-ported." % (
+                            self._get_root().display_name
+                        )
+                    elif self.state in ['merged', 'closed']:
+                        msg = "Sorry, forward-port limit can only be set before the PR is merged."
+                    elif not limit_id:
                         msg = "There is no branch %r, it can't be used as a forward port target." % limit
+                    elif limit_id == self.target:
+                        msg = "Forward-port disabled."
+                        self.limit_id = limit_id
                     elif not limit_id.fp_enabled:
                         msg = "Branch %r is disabled, it can't be used as a forward port target." % limit_id.name
                     else:
                         msg = "Forward-porting to %r." % limit_id.name
                         self.limit_id = limit_id
 
+                _logger.info("%s: %s", author, msg)
                 self.env['runbot_merge.pull_requests.feedback'].create({
                     'repository': self.repository.id,
                     'pull_request': self.number,
                     'message': msg,
+                    'token_field': 'fp_github_token',
                 })
+
+    def _notify_ci_failed(self, ci):
+        # only care about FP PRs which are not staged / merged yet
+        # NB: probably ignore approved PRs as normal message will handle them?
+        if not (self.state == 'opened' and self.parent_id):
+            return
+
+        self.env['runbot_merge.pull_requests.feedback'].create({
+            'repository': self.repository.id,
+            'pull_request': self.number,
+            'token_field': 'fp_github_token',
+            'message': '%s\n\n%s failed on this forward-port PR' % (
+                self.source_id._pingline(),
+                ci,
+            )
+        })
 
     def _validate(self, statuses):
         _logger = logging.getLogger(__name__).getChild('forwardport.next')
-        super()._validate(statuses)
+        failed = super()._validate(statuses)
         # if the PR has a parent and is CI-validated, enqueue the next PR
         for pr in self:
             _logger.info('Checking if forward-port %s (%s)', pr, pr.number)
-            if not pr.parent_id or pr.state not in ('validated', 'ready'):
-                _logger.info('-> no parent or wrong state (%s)', pr.state)
+            if not pr.parent_id:
+                _logger.info('-> no parent (%s)', pr)
                 continue
-            # if it already has a child, bail
-            if self.search_count([('parent_id', '=', self.id)]):
-                _logger.info('-> already has a child')
+            if pr.state not in ['validated', 'ready']:
+                _logger.info('-> wrong state (%s)', pr.state)
                 continue
 
-            # check if we've already selected this PR's batch for forward
-            # porting and just haven't come around to it yet
-            batch = pr.batch_id
+            # check if we've already forward-ported this branch:
+            # it has a batch without a staging
+            batch = self.env['runbot_merge.batch'].with_context(active_test=False).search([
+                ('staging_id', '=', False),
+                ('prs', 'in', pr.id),
+            ], limit=1)
+            # if the batch is inactive, the forward-port has been done *or*
+            # the PR's own forward port is in error, so bail
+            if not batch.active:
+                continue
+
+            # otherwise check if we already have a pending forward port
             _logger.info("%s %s %s", pr, batch, batch.prs)
             if self.env['forwardport.batches'].search_count([('batch_id', '=', batch.id)]):
                 _logger.warn('-> already recorded')
@@ -262,6 +344,7 @@ class PullRequests(models.Model):
                 'batch_id': batch.id,
                 'source': 'fp',
             })
+        return failed
 
     def _forward_port_sequence(self):
         # risk: we assume disabled branches are still at the correct location
@@ -302,6 +385,34 @@ class PullRequests(models.Model):
             if branch.fp_enabled
         ), None)
 
+    def _commits_lazy(self):
+        s = requests.Session()
+        s.headers['Authorization'] = 'token %s' % self.repository.project_id.fp_github_token
+        for page in itertools.count(1):
+            r = s.get('https://api.github.com/repos/{}/pulls/{}/commits'.format(
+                self.repository.name,
+                self.number
+            ), params={'page': page})
+            r.raise_for_status()
+            yield from r.json()
+            if not r.links.get('next'):
+                return
+
+    def commits(self):
+        """ Returns a PR's commits oldest first (that's what GH does &
+        is what we want)
+        """
+        commits = list(self._commits_lazy())
+        # map shas to the position the commit *should* have
+        idx =  {
+            c: i
+            for i, c in enumerate(topological_sort({
+                c['sha']: [p['sha'] for p in c['parents']]
+                for c in commits
+            }))
+        }
+        return sorted(commits, key=lambda c: idx[c['sha']])
+
     def _iter_descendants(self):
         pr = self
         while True:
@@ -332,35 +443,35 @@ class PullRequests(models.Model):
         target = base._find_next_target(ref)
         if target is None:
             _logger.info(
-                "Will not forward-port %s#%s: no next target",
-                ref.repository.name, ref.number,
+                "Will not forward-port %s: no next target",
+                ref.display_name,
             )
             return  # QUESTION: do the prs need to be updated?
 
         proj = self.mapped('target.project_id')
         if not proj.fp_github_token:
-            _logger.warn(
-                "Can not forward-port %s#%s: no token on project %s",
-                ref.repository.name, ref.number,
+            _logger.warning(
+                "Can not forward-port %s: no token on project %s",
+                ref.display_name,
                 proj.name
             )
             return
 
         notarget = [p.repository.name for p in self if not p.repository.fp_remote_target]
         if notarget:
-            _logger.warn(
+            _logger.warning(
                 "Can not forward-port %s: repos %s don't have a remote configured",
                 self, ', '.join(notarget)
             )
             return
 
         # take only the branch bit
-        new_branch = '%s-%s-%s-forwardport' % (
+        new_branch = '%s-%s-%s-fw' % (
             target.name,
             base.refname,
             # avoid collisions between fp branches (labels can be reused
             # or conflict especially as we're chopping off the owner)
-            base64.b32encode(os.urandom(5)).decode()
+            base64.urlsafe_b64encode(os.urandom(3)).decode()
         )
         # TODO: send outputs to logging?
         conflicts = {}
@@ -380,45 +491,48 @@ class PullRequests(models.Model):
             owner, _ = pr.repository.fp_remote_target.split('/', 1)
             source = pr.source_id or pr
             message = source.message
+            if message:
+                message += '\n\n'
+            else:
+                message = ''
+            root = pr._get_root()
+            message += '\n'.join(
+                "Forward-Port-Of: %s" % p.display_name
+                for p in root | source
+            )
+
             (h, out, err) = conflicts.get(pr) or (None, None, None)
-            if h:
-                message = """Cherrypicking %s of source #%d failed with the following
 
-stdout:
-```
-%s
-```
-
-stderr:
-```
-%s
-```
-
-Either perform the forward-port manually (and push to this branch, proceeding
-as usual) or close this PR (maybe?).
-
-In the former case, you may want to edit this PR message as well.
-""" % (h, source.number, out, err)
+            title, body = re.match(r'(?P<title>[^\n]+)\n*(?P<body>.*)', message, flags=re.DOTALL).groups()
+            title = '[FW]' + title
+            if not body:
+                body = None
 
             r = requests.post(
                 'https://api.github.com/repos/{}/pulls'.format(pr.repository.name), json={
-                    'title': "Forward Port of #%d to %s%s" % (
-                        source.number,
-                        target.name,
-                        ' (failed)' if has_conflicts else ''
-                    ),
-                    'message': message,
+                    'title': title,
+                    'body': body,
                     'head': '%s:%s' % (owner, new_branch),
                     'base': target.name,
-                    'draft': has_conflicts,
+                    #'draft': has_conflicts, draft mode is not supported on private repos so remove it (again)
                 }, headers={
                     'Accept': 'application/vnd.github.shadow-cat-preview+json',
                     'Authorization': 'token %s' % pr.repository.project_id.fp_github_token,
                 }
             )
             assert 200 <= r.status_code < 300, r.json()
-            new_pr = self._from_gh(r.json())
-            _logger.info("Created forward-port PR %s", new_pr)
+            r = r.json()
+            self.env.cr.commit()
+
+            new_pr = self.search([
+                ('number', '=', r['number']),
+                ('repository.name', '=', r['base']['repo']['full_name']),
+            ], limit=1)
+            if new_pr:
+                _logger.info("Received forward-port PR %s", new_pr)
+            else:
+                new_pr = self._from_gh(r)
+                _logger.info("Created forward-port PR %s", new_pr)
             new_batch |= new_pr
 
             new_pr.write({
@@ -427,11 +541,63 @@ In the former case, you may want to edit this PR message as well.
                 # only link to previous PR of sequence if cherrypick passed
                 'parent_id': pr.id if not has_conflicts else False,
             })
-            assignees = (new_pr.source_id.author | new_pr.source_id.reviewed_by).mapped('github_login')
+            # delegate original author on merged original PR & on new PR so
+            # they can r+ the forward ports (via mergebot or forwardbot)
+            source.author.write({
+                'delegate_reviewer': [
+                    (4, source.id, False),
+                    (4, new_pr.id, False),
+                ]
+            })
+
+            if h:
+                sout = serr = ''
+                if out.strip():
+                    sout = "\nstdout:\n```\n%s\n```\n" % out
+                if err.strip():
+                    serr = "\nstderr:\n```\n%s\n```\n" % err
+
+                message = source._pingline() + """
+Cherrypicking %s of source #%d failed
+%s%s
+Either perform the forward-port manually (and push to this branch, proceeding as usual) or close this PR (maybe?).
+
+In the former case, you may want to edit this PR message as well.
+""" % (h, source.number, sout, serr)
+            elif base._find_next_target(new_pr) is None:
+                ancestors = "".join(
+                    "* %s\n" % p.display_name
+                    for p in pr._iter_ancestors()
+                    if p.parent_id
+                )
+                message = source._pingline() + """
+This PR targets %s and is the last of the forward-port chain%s
+%s
+To merge the full chain, say
+> @%s r+
+
+More info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port
+""" % (target.name, ' containing:' if ancestors else '.', ancestors, pr.repository.project_id.fp_github_name)
+            else:
+                message = """\
+This PR targets %s and is part of the forward-port chain. Further PRs will be created up to %s.
+
+More info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port
+""" % (target.name, base.limit_id.name)
             self.env['runbot_merge.pull_requests.feedback'].create({
                 'repository': new_pr.repository.id,
                 'pull_request': new_pr.number,
-                'message': "Ping %s" % ', '.join('@' + login for login in assignees if login),
+                'message': message,
+                'token_field': 'fp_github_token',
+            })
+            labels = ['forwardport']
+            if has_conflicts:
+                labels.append('conflict')
+            self.env['forwardport.tagging'].create({
+                'repository': new_pr.repository.id,
+                'pull_request': new_pr.number,
+                'to_add': json.dumps(labels),
+                'token_field': 'fp_github_token',
             })
             # not great but we probably want to avoid the risk of the webhook
             # creating the PR from under us. There's still a "hole" between
@@ -448,6 +614,14 @@ In the former case, you may want to edit this PR message as well.
             'active': not has_conflicts,
         })
 
+    def _pingline(self):
+        assignees = (self.author | self.reviewed_by).mapped('github_login')
+        return "Ping %s" % ', '.join(
+            '@' + login
+            for login in assignees
+            if login
+        )
+
     def _create_fp_branch(self, target_branch, fp_branch_name, cleanup):
         """ Creates a forward-port for the current PR to ``target_branch`` under
         ``fp_branch_name``.
@@ -460,12 +634,23 @@ In the former case, you may want to edit this PR message as well.
         """
         source = self._get_local_directory()
         # update all the branches & PRs
+        _logger.info("Update %s", source._directory)
         source.with_params('gc.pruneExpire=1.day.ago').fetch('-p', 'origin')
         # FIXME: check that pr.head is pull/{number}'s head instead?
         source.cat_file(e=self.head)
         # create working copy
+        _logger.info("Create working copy to forward-port %s:%d to %s",
+                     self.repository.name, self.number, target_branch.name)
         working_copy = source.clone(
-            cleanup.enter_context(tempfile.TemporaryDirectory()),
+            cleanup.enter_context(
+                tempfile.TemporaryDirectory(
+                    prefix='%s:%d-to-%s' % (
+                        self.repository.name,
+                        self.number,
+                        target_branch.name
+                    ),
+                    dir=user_cache_dir('forwardport')
+                )),
             branch=target_branch.name
         )
         project_id = self.repository.project_id
@@ -480,23 +665,42 @@ In the former case, you may want to edit this PR message as well.
                 p=project_id
             )
         )
+        _logger.info("Create FP branch %s", fp_branch_name)
         working_copy.checkout(b=fp_branch_name)
 
         root = self._get_root()
         try:
             root._cherry_pick(working_copy)
         except CherrypickError as e:
-            # apply the diff of the PR to the target
-            # in git diff, "A...B" selects the bits of B not in A
-            # (which is the other way around from gitrevisions(7)
-            # because git)
-            diff = working_copy.stdout().diff('%s...%s' % root._reference_branches()).stdout
-            # apply probably fails (because conflict, we don't care
-            working_copy.with_config(input=diff).apply('-3', '-')
+            # using git diff | git apply -3 to get the entire conflict set
+            # turns out to not work correctly: in case files have been moved
+            # / removed (which turns out to be a common source of conflicts
+            # when forward-porting) it'll just do nothing to the working copy
+            # so the "conflict commit" will be empty
+            # switch to a squashed-pr branch
+            root_branch = 'origin/pull/%d' % root.number
+            working_copy.checkout('-bsquashed', root_branch)
+            root_commits = root.commits()
 
-            working_copy.commit(
-                a=True, allow_empty=True,
-                message="""Cherry pick of %s failed
+            # squash to a single commit
+            working_copy.reset('--soft', root_commits[0]['parents'][0]['sha'])
+            working_copy.commit(a=True, message="temp")
+            squashed = working_copy.stdout().rev_parse('HEAD').stdout.strip().decode()
+
+            # switch back to the PR branch
+            working_copy.checkout(fp_branch_name)
+            # cherry-pick the squashed commit
+            working_copy.with_params('merge.renamelimit=0').with_config(check=False).cherry_pick(squashed)
+
+            # if there was a single commit, reuse its message when committing
+            # the conflict
+            # TODO: still add conflict information to this?
+            if len(root_commits) == 1:
+                working_copy.commit(all=True, allow_empty=True, reuse_message=root_commits[0]['sha'])
+            else:
+                working_copy.commit(
+                    all=True, allow_empty=True,
+                    message="""Cherry pick of %s failed
 
 stdout:
 %s
@@ -517,33 +721,41 @@ stderr:
         cmap = json.loads(self.commits_map)
 
         # original head so we can reset
-        h = working_copy.stdout().rev_parse('HEAD').stdout
+        original_head = working_copy.stdout().rev_parse('HEAD').stdout.decode().strip()
 
-        commits_range = self._reference_branches()
-        # need to cherry-pick commit by commit because `-n` doesn't yield
-        # back control on each op. `-e` with VISUAL=false kinda works but
-        # doesn't seem to provide a good way to know when we're done
-        # cherrypicking
-        rev_list = working_copy.lazy().stdout()\
-            .rev_list('--reverse', '%s..%s' % commits_range)
-        commits = list(rev_list.stdout)
-        logger.info("%d commit(s) on %s", len(commits), h.decode())
+        commits = self.commits()
+        logger.info("%s: %s commits in %s", self, len(commits), original_head)
+        for c in commits:
+            logger.debug('- %s (%s)', c['sha'], c['commit']['message'])
+
         for commit in commits:
-            commit = commit.decode().strip()
-            r = working_copy.with_config(
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-            ).cherry_pick(commit)
+            commit_sha = commit['sha']
+            conf = working_copy.with_config(stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+            # first try with default / low renamelimit
+            r = conf.cherry_pick(commit_sha)
+            _logger.debug("Cherry-picked %s: %s\n%s\n%s", commit_sha, r.returncode, r.stdout.decode(), r.stderr.decode())
+            if r.returncode:
+                # if it failed, retry with high renamelimit
+                working_copy.reset('--hard', original_head)
+                r = conf.with_params('merge.renamelimit=0').cherry_pick(commit_sha)
+                _logger.debug("Cherry-picked %s (renamelimit=0): %s\n%s\n%s", commit_sha, r.returncode, r.stdout.decode(), r.stderr.decode())
 
             if r.returncode: # pick failed, reset and bail
-                logger.info("%s: failed", commit)
-                working_copy.reset('--hard', h.decode().strip())
-                raise CherrypickError(commit, r.stdout.decode(), r.stderr.decode())
+                logger.info("%s: failed", commit_sha)
+                working_copy.reset('--hard', original_head)
+                raise CherrypickError(
+                    commit_sha,
+                    r.stdout.decode(),
+                    # Don't include the inexact rename detection spam in the
+                    # feedback, it's useless. There seems to be no way to
+                    # silence these messages.
+                    '\n'.join(
+                        line for line in r.stderr.decode().splitlines()
+                        if not line.startswith('Performing inexact rename detection')
+                    )
+                )
 
-            original_msg = working_copy.stdout().show('-s', '--format=%B', commit).stdout.decode()
-
-            msg = self._parse_commit_message(original_msg)
+            msg = self._parse_commit_message(commit['commit']['message'])
 
             # original signed-off-er should be retained but didn't necessarily
             # sign off here, so convert signed-off-by to something else
@@ -555,22 +767,14 @@ stderr:
                     for v in sob
                 )
             # write the *merged* commit as "original", not the PR's
-            msg.headers['x-original-commit'] = cmap.get(commit, commit)
+            msg.headers['x-original-commit'] = cmap.get(commit_sha, commit_sha)
 
             # replace existing commit message with massaged one
             working_copy\
                 .with_config(input=str(msg).encode())\
                 .commit(amend=True, file='-')
             new = working_copy.stdout().rev_parse('HEAD').stdout.decode()
-            logger.info('%s: success -> %s', commit, new)
-
-    def _reference_branches(self):
-        """
-        :returns: (PR target, PR branch)
-        """
-        ancestor_branch = 'origin/pull/%d' % self.number
-        source_target = 'origin/%s' % self.target.name
-        return source_target, ancestor_branch
+            logger.info('%s: success -> %s', commit_sha, new)
 
     def _get_local_directory(self):
         repos_dir = pathlib.Path(user_cache_dir('forwardport'))
@@ -580,6 +784,7 @@ stderr:
         if repo_dir.is_dir():
             return git(repo_dir)
         else:
+            _logger.info("Cloning out %s to %s", self.repository.name, repo_dir)
             subprocess.run([
                 'git', 'clone', '--bare',
                 'https://{}:{}@github.com/{}'.format(
@@ -591,25 +796,67 @@ stderr:
             ], check=True)
             # add PR branches as local but namespaced (?)
             repo = git(repo_dir)
+            # bare repos don't have a fetch spec by default (!) so adding one
+            # removes the default behaviour and stops fetching the base
+            # branches unless we add an explicit fetch spec for them
+            repo.config('--add', 'remote.origin.fetch', '+refs/heads/*:refs/heads/*')
             repo.config('--add', 'remote.origin.fetch', '+refs/pull/*/head:refs/heads/pull/*')
             return repo
+
+    def _reminder(self):
+        cutoff = self.env.context.get('forwardport_updated_before') or fields.Datetime.to_string(datetime.datetime.now() - DEFAULT_DELTA)
+
+        for source, prs in groupby(self.env['runbot_merge.pull_requests'].search([
+            # only FP PRs
+            ('source_id', '!=', False),
+            # active
+            ('state', 'not in', ['merged', 'closed']),
+            # last updated more than <cutoff> ago
+            ('write_date', '<', cutoff),
+        ]), lambda p: p.source_id):
+            self.env['runbot_merge.pull_requests.feedback'].create({
+                'repository': source.repository.id,
+                'pull_request': source.number,
+                'message': "This pull request has forward-port PRs awaiting action (not merged or closed): %s" % ', '.join(
+                    pr.display_name for pr in sorted(prs, key=lambda p: p.number)
+                ),
+                'token_field': 'fp_github_token',
+            })
 
 class Stagings(models.Model):
     _inherit = 'runbot_merge.stagings'
 
     def write(self, vals):
         r = super().write(vals)
-        if vals.get('active') == False and self.state == 'success':
+        # we've just deactivated a successful staging (so it got ~merged)
+        if vals.get('active') is False and self.state == 'success':
+            # check al batches to see if they should be forward ported
             for b in self.with_context(active_test=False).batch_ids:
-                # if batch PRs have parents they're part of an FP sequence and
-                # thus handled separately
-                if not b.mapped('prs.parent_id'):
+                # if all PRs of a batch have parents they're part of an FP
+                # sequence and thus handled separately, otherwise they're
+                # considered regular merges
+                if not all(p.parent_id for p in b.prs):
                     self.env['forwardport.batches'].create({
                         'batch_id': b.id,
                         'source': 'merge',
                     })
         return r
 
+class Feedback(models.Model):
+    _inherit = 'runbot_merge.pull_requests.feedback'
+
+    token_field = fields.Selection(selection_add=[('fp_github_token', 'Forwardport Bot')])
+
+class Tagging(models.Model):
+    _name = 'forwardport.tagging'
+
+    token_field = fields.Selection([
+        ('github_token', 'Mergebot'),
+        ('fp_github_token', 'Forwardport Bot'),
+    ], required=True)
+    repository = fields.Many2one('runbot_merge.repository', required=True)
+    pull_request = fields.Integer(string="PR number")
+    to_add = fields.Char(string="JSON-encoded array of labels to add")
 
 def git(directory): return Repo(directory, check=True)
 class Repo:
@@ -661,7 +908,7 @@ class Repo:
 
     def clone(self, to, branch=None):
         self._run(
-            'git', 'clone', '-s',
+            'clone',
             *([] if branch is None else ['-b', branch]),
             self._directory, to,
         )

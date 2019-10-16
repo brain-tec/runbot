@@ -103,6 +103,7 @@ class RunbotErrorLog(models.Model):
     hidden = fields.Boolean(string='Hidden', readonly=True)
     branch_id = fields.Many2one('runbot.branch', string='Branch', readonly=True)
     branch_name = fields.Char(string='Branch name', readonly=True)
+    branch_sticky = fields.Boolean(string='Sticky', readonly=True)
     repo_id = fields.Many2one('runbot.repo', string='Repo', readonly=True)
     repo_name = fields.Char(string='Repo name', readonly=True)
     repo_short_name = fields.Char(compute='_compute_repo_short_name', readonly=True)
@@ -160,6 +161,7 @@ class RunbotErrorLog(models.Model):
                 bu.hidden  AS hidden,
                 br.id  AS branch_id,
                 br.branch_name  AS branch_name,
+                br.sticky AS branch_sticky,
                 re.id  AS repo_id,
                 re.name  AS repo_name
             FROM
