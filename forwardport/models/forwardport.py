@@ -134,12 +134,19 @@ class DeleteBranches(models.Model, Queue):
 
         github = GH(token=repository.project_id.fp_github_token, repo=fp_remote)
         refurl = 'git/refs/heads/' + branch
-        ref = github('get', refurl)
+        ref = github('get', refurl, check=False)
         if ref.status_code != 200:
             _deleter.info("✘ branch already deleted (%s)", ref.json())
             return
 
         ref = ref.json()
+        if isinstance(ref, list):
+            _deleter.info(
+                "✘ got a fuzzy match (%s), branch probably deleted",
+                ', '.join(r['ref'] for r in ref)
+            )
+            return
+
         if ref['object']['sha'] != self.pr_id.head:
             _deleter.info(
                 "✘ branch %s head mismatch, expected %s, got %s",
@@ -149,7 +156,7 @@ class DeleteBranches(models.Model, Queue):
             )
             return
 
-        r = github('delete', refurl)
+        r = github('delete', refurl, check=False)
         assert r.status_code == 204, \
             "Tried to delete branch %s of %s, got %s" % (
                 branch, self.pr_id.display_name,

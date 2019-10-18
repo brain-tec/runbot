@@ -15,6 +15,7 @@ class runbot_event(models.Model):
     _order = 'id'
 
     build_id = fields.Many2one('runbot.build', 'Build', index=True, ondelete='cascade')
+    active_step_id = fields.Many2one('runbot.build.config.step', 'Active step', index=True)
     type = fields.Selection(TYPES, string='Type', required=True, index=True)
 
     @api.model_cr
@@ -28,6 +29,29 @@ CREATE OR REPLACE FUNCTION runbot_set_logging_build() RETURNS TRIGGER AS $runbot
 BEGIN
   IF (NEW.build_id IS NULL AND NEW.dbname IS NOT NULL AND NEW.dbname != current_database()) THEN
     NEW.build_id := split_part(NEW.dbname, '-', 1)::integer;
+    SELECT active_step INTO NEW.active_step_id FROM runbot_build WHERE runbot_build.id = NEW.build_id;
+  END IF;
+  IF (NEW.build_id IS NOT NULL) AND (NEW.type = 'server') THEN
+    DECLARE
+        counter INTEGER;
+    BEGIN
+        UPDATE runbot_build b
+            SET log_counter = log_counter - 1
+        WHERE b.id = NEW.build_id;
+        SELECT log_counter
+        INTO counter
+        FROM runbot_build
+        WHERE runbot_build.id = NEW.build_id;
+        IF (counter = 0) THEN
+            NEW.message = 'Log limit reached (full logs are still available in the log file)';
+            NEW.level = 'SEPARATOR';
+            NEW.func = '';
+            NEW.type = 'runbot';
+            RETURN NEW;
+        ELSIF (counter < 0) THEN
+                RETURN NULL;
+        END IF;
+    END;
   END IF;
   IF (NEW.build_id IS NOT NULL AND UPPER(NEW.level) NOT IN ('INFO', 'SEPARATOR')) THEN
     BEGIN
