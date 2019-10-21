@@ -97,10 +97,11 @@ class ConfigStep(models.Model):
     # install_odoo
     create_db = fields.Boolean('Create Db', default=True, track_visibility='onchange')  # future
     custom_db_name = fields.Char('Custom Db Name', track_visibility='onchange')  # future
-    install_modules = fields.Char('Modules to install', help="List of module patterns to install, use * to install all available modules, prefix the pattern with dash to remove the module.", default='*')
+    install_modules = fields.Char('Modules to install', help="List of module patterns to install, use * to install all available modules, prefix the pattern with dash to remove the module.", default='')
     db_name = fields.Char('Db Name', compute='_compute_db_name', inverse='_inverse_db_name', track_visibility='onchange')
     cpu_limit = fields.Integer('Cpu limit', default=3600, track_visibility='onchange')
-    coverage = fields.Boolean('Coverage', dafault=False, track_visibility='onchange')
+    coverage = fields.Boolean('Coverage', default=False, track_visibility='onchange')
+    flamegraph = fields.Boolean('Allow Flamegraph', default=False, track_visibility='onchange')
     test_enable = fields.Boolean('Test enable', default=True, track_visibility='onchange')
     test_tags = fields.Char('Test tags', help="comma separated list of test tags")
     extra_params = fields.Char('Extra cmd args', track_visibility='onchange')
@@ -296,6 +297,8 @@ class ConfigStep(models.Model):
             build.coverage = True
             coverage_extra_params = self._coverage_params(build, modules_to_install)
             python_params = ['-m', 'coverage', 'run', '--branch', '--source', '/data/build'] + coverage_extra_params
+        elif self.flamegraph:
+            python_params = ['-m', 'flamegraph', '-o', self._perfs_data_path()]
         cmd = build._cmd(python_params, py_version)
         # create db if needed
         db_name = "%s-%s" % (build.dest, self.db_name)
@@ -334,6 +337,8 @@ class ConfigStep(models.Model):
 
         cmd.posts.append(self._post_install_command(build, modules_to_install, py_version))  # coverage post, extra-checks, ...
 
+        cmd.finals.append(['pg_dump', db_name, '|', 'gzip', '>', '/data/build/logs/%s.sql.gz' % db_name])
+
         max_timeout = int(self.env['ir.config_parameter'].get_param('runbot.runbot_timeout', default=10000))
         timeout = min(self.cpu_limit, max_timeout)
         return docker_run(cmd.build(), log_path, build._path(), build._get_docker_name(), cpu_limit=timeout, ro_volumes=exports)
@@ -348,7 +353,12 @@ class ConfigStep(models.Model):
             cov_path = build._path('coverage')
             os.makedirs(cov_path, exist_ok=True)
             return ['python%s' % py_version, "-m", "coverage", "html", "-d", "/data/build/coverage", "--ignore-errors"]
+        elif self.flamegraph:
+            return ['flamegraph.pl', '--title', 'Flamegraph %s for build %s' % (self.name, build.id), self._perfs_data_path(), '>', self._perfs_data_path(prefix='flame', ext='svg')]
         return []
+
+    def _perfs_data_path(self, prefix='perf', ext='log'):
+        return '/data/build/logs/%s_%s.%s' % (prefix, self.name, ext)
 
     def _coverage_params(self, build, modules_to_install):
         pattern_to_omit = set()
