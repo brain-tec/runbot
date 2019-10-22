@@ -458,7 +458,7 @@ class runbot_build(models.Model):
             return
         _logger.debug('Local cleaning')
 
-        def cleanup(dest_list, func, max_days, label):
+        def cleanup(dest_list, func, max_days_main, max_days_child, label):
             dest_by_builds_ids = defaultdict(list)
             ignored = set()
             for dest in dest_list:
@@ -478,7 +478,7 @@ class runbot_build(models.Model):
                 dest_list = [dest for sublist in [dest_by_builds_ids[rem_id] for rem_id in remaining.ids] for dest in sublist]
                 _logger.debug('(%s) (%s) not deleted because no corresponding build found' % (label, " ".join(dest_list)))
             for build in existing:
-                if fields.Datetime.from_string(build.job_end or build.create_date) + datetime.timedelta(days=max_days) < datetime.datetime.now():
+                if fields.Datetime.from_string(build.job_end or build.create_date) + datetime.timedelta(days=(max_days_main if not build.parent_id else int(max_days_child / 2))) < datetime.datetime.now():
                     if build.local_state == 'done':
                         for db in dest_by_builds_ids[build.id]:
                             func(db)
@@ -486,7 +486,8 @@ class runbot_build(models.Model):
                         _logger.warning('db (%s) not deleted because state is not done' % " ".join(dest_by_builds_ids[build.id]))
 
         icp = self.env['ir.config_parameter']
-        max_days = int(icp.get_param('runbot.db_gc_days', default=30))
+        max_days_main = int(icp.get_param('runbot.db_gc_days', default=30))
+        max_days_child = int(icp.get_param('runbot.db_gc_days_child', default=15))
         with local_pgadmin_cursor() as local_cr:
             local_cr.execute("""
                 SELECT datname
@@ -495,7 +496,7 @@ class runbot_build(models.Model):
             """)
             existing_db = [d[0] for d in local_cr.fetchall()]
 
-        cleanup(dest_list=existing_db, func=self._local_pg_dropdb, max_days=max_days, label='db')
+        cleanup(dest_list=existing_db, func=self._local_pg_dropdb, max_days_main=max_days_main, max_days_child=max_days_child, label='db')
 
         root = self.env['runbot.repo']._root()
         build_dir = os.path.join(root, 'build')
@@ -506,7 +507,7 @@ class runbot_build(models.Model):
             if os.path.isdir(path) and os.path.isabs(path):
                 shutil.rmtree(path)
 
-        cleanup(dest_list=builds, func=rm, max_days=max_days, label='workspace')
+        cleanup(dest_list=builds, func=rm, max_days_main=max_days_main, max_days_child=max_days_child, label='workspace')
 
     def _find_port(self):
         # currently used port
@@ -632,30 +633,23 @@ class runbot_build(models.Model):
                     _logger.exception('An error occured while computing results')
                     build._log('_make_results', 'An error occured while computing results', level='ERROR')
                     results = {'local_result': 'ko'}
+
                 build_values.update(results)
 
-                # Non running build in
-                notify_end_job = build.active_step.job_type != 'create_build'
+                build.active_step.log_end(build)
 
                 build_values.update(build._next_job_values())  # find next active_step or set to done
+
                 ending_build = build.local_state not in ('done', 'running') and build_values.get('local_state') in ('done', 'running')
                 if ending_build:
                     build.update_build_end()
 
-                step_end_message = 'Step %s finished in %s $$fa-download$$' % (build.job, s2human(build.job_time))
-                step_end_link = 'http://%s/runbot/static/build/%s/logs/%s-%s.sql.gz' % (build.host, build.dest, build.dest, build.active_step.db_name)
                 build.write(build_values)
-
                 if ending_build:
                     build._github_status()
                     if not build.local_result:  # Set 'ok' result if no result set (no tests job on build)
                         build.local_result = 'ok'
                         build._logger("No result set, setting ok by default")
-
-                if notify_end_job:
-                    build._log('end_job', step_end_message, log_type='link', path=step_end_link)
-                else:
-                    build._logger(step_end_message)
 
             # run job
             pid = None
@@ -682,6 +676,9 @@ class runbot_build(models.Model):
         build = self
         root = self.env['runbot.repo']._root()
         return os.path.join(root, 'build', build.dest, *l)
+
+    def http_log_url(self):
+        return 'http://%s/runbot/static/build/%s/logs/' % (self.host, self.dest)
 
     def _server(self, *path):
         """Return the absolute path to the direcory containing the server file, adding optional *path"""
