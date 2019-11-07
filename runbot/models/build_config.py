@@ -327,7 +327,7 @@ class ConfigStep(models.Model):
                     test_tags = self.test_tags.replace(' ', '')
                     cmd.extend(['--test-tags', test_tags])
             else:
-                build._log('test_all', 'Test tags given but not supported', level='WARNING')
+                build._log('test_all', 'Test tags given but not supported')
 
         if grep(config_path, "--screenshots"):
             cmd += ['--screenshots', '/data/build/tests']
@@ -349,7 +349,7 @@ class ConfigStep(models.Model):
         cmd.finals.append(['pg_dump', db_name, '>', sql_dest])
         cmd.finals.append(['cp', '-r', filestore_path, filestore_dest])
         cmd.finals.append(['cd', dump_dir])
-        cmd.finals.append(['zip', '-rm9', zip_path, '*'])
+        cmd.finals.append(['zip', '-rqm9', zip_path, '*'])
         infos = '{\n    "db_name": "%s",\n    "build_id": %s,\n    "shas": [%s]\n}' % (db_name, build.id, ', '.join(['"%s"' % commit for commit in build._get_all_commit()]))
         build.write_file('logs/%s/info.json' % db_name, infos)
 
