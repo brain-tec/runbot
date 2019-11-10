@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from collections import defaultdict
 from itertools import cycle
 from unittest.mock import patch
 from werkzeug.wrappers import Response
@@ -25,9 +26,11 @@ class Test_Frontend(common.HttpCase):
         })
         self.Build = self.env['runbot.build']
 
+    @patch('odoo.addons.runbot.models.build.runbot_build._get_params')
     @patch('odoo.http.Response.set_default')
     @patch('odoo.addons.runbot.controllers.frontend.request')
-    def test_frontend_basic(self, mock_request, mock_set_default):
+    def test_frontend_basic(self, mock_request, mock_set_default, mock_get_params):
+        mock_get_params.return_value = defaultdict(lambda: defaultdict(str))
         mock_request.env = self.env
         mock_request._cr = self.cr
         controller = frontend.Runbot()

@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 from unittest.mock import patch
 from odoo.tests import common
+from .common import RunbotCase
 
-
-class TestBuildConfigStep(common.TransactionCase):
+class TestBuildConfigStep(RunbotCase):
 
     def setUp(self):
         super(TestBuildConfigStep, self).setUp()
-        self.Repo = self.env['runbot.repo']
+        self.start_get_params_patcher()
+        self.grep_patcher = patch('odoo.addons.runbot.models.build_config.grep')
         self.repo = self.Repo.create({'name': 'bla@example.com:foo/bar'})
-        self.Branch = self.env['runbot.branch']
         self.branch = self.Branch.create({
             'repo_id': self.repo.id,
             'name': 'refs/heads/master'
@@ -112,7 +112,7 @@ class TestBuildConfigStep(common.TransactionCase):
             self.assertEqual(log_path, 'dev/null/logpath')
 
         mock_docker_run.side_effect = docker_run
-    
+
         config_step._run_odoo_install(self.parent_build, 'dev/null/logpath')
 
 
@@ -123,8 +123,7 @@ class TestBuildConfigStep(common.TransactionCase):
     @patch('odoo.addons.runbot.models.build.runbot_build._server')
     @patch('odoo.addons.runbot.models.build.runbot_build._checkout')
     @patch('odoo.addons.runbot.models.build_config.docker_run')
-    @patch('odoo.addons.runbot.models.build_config.grep')
-    def test_install_tags(self, mock_grep, mock_docker_run, mock_checkout, mock_server, mock_get_py_version, mock_get_addons_path, mock_get_server_info, mock_local_pg_createdb):
+    def test_install_tags(self, mock_docker_run, mock_checkout, mock_server, mock_get_py_version, mock_get_addons_path, mock_get_server_info, mock_local_pg_createdb):
         config_step = self.ConfigStep.create({
             'name': 'all',
             'job_type': 'install_odoo',
@@ -143,6 +142,7 @@ class TestBuildConfigStep(common.TransactionCase):
         mock_get_addons_path.return_value = ['bar/addons']
         mock_get_server_info.return_value = (self.parent_build._get_all_commit()[0], 'server.py')
         mock_local_pg_createdb.return_value = True
+        mock_grep = self.start_patcher('grep_patcher')
         mock_grep.return_value = True
 
         def docker_run(cmd, log_path, build_dir, *args, **kwargs):
