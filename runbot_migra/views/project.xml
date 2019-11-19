@@ -9,18 +9,15 @@
                         <h1><field name="name" placeholder="Name"/></h1>
                     </div>
                     <group>
-                        <group>
-                            <field name="version_target"/>
-                        </group>
-                        <group>
-                            <field name="versions"/>
-                        </group>
+                      <field name="version_target"/>
+                      <field name="versions"/>
                     </group>
-
                     <separator string="Repositories"/>
-                    <field name="server_repo"/>
-                    <field name="migration_scripts_repo"/>
-                    <field name="addons_repo_ids">
+                      <group>
+                        <field name="server_repo" string="Odoo Server Repo"/>
+                        <field name="migration_scripts_repo" string="Migration Scripts Repo"/>
+                      </group>
+                    <field name="addons_repo_ids" string="Other addons repos">
                         <tree editable="bottom">
                             <field name="name"/>
                         </tree>
