@@ -15,7 +15,10 @@
                     <separator string="Repositories"/>
                       <group>
                         <field name="server_repo" string="Odoo Server Repo"/>
+                      </group>
+                      <group>
                         <field name="migration_scripts_repo" string="Migration Scripts Repo"/>
+                        <field name="migration_scripts_branch" string="Migration Scrips Branch"/>
                       </group>
                     <field name="addons_repo_ids" string="Other addons repos">
                         <tree editable="bottom">
@@ -35,6 +38,7 @@
 
     <menuitem name="Migrabot" id="runbot_migra_root_menu"/>
     <menuitem name="Projects" id="runbot_migra_menu_project"
+              sequence="10"
               parent="runbot_migra_root_menu"
               action="runbot_migra_action_project"/>
 </odoo>

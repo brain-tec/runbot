@@ -9,6 +9,7 @@
         'security/security.xml',
         'security/ir.model.access.csv',
         'views/project.xml',
+        'views/repo.xml',
         'data/migra_cron.xml'
     ],
 }
