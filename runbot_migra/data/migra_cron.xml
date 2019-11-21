@@ -1,0 +1,13 @@
+<odoo>
+  <record model="ir.cron" id="migra_cron">
+    <field name="name">Migra Bot Process active projects</field>
+    <field name="model_id" ref="model_runbot_migra_project"/>
+    <field name="state">code</field>
+    <field name="code">model._test_all_upgrade()</field>
+    <field name="interval_number">1</field>
+    <field name="interval_type">days</field>
+    <field name="numbercall">-1</field>
+    <field name="doall" eval="False"/>
+    <field name="active" eval="False"/>
+  </record>
+</odoo>

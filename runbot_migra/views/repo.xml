@@ -1,0 +1,47 @@
+<odoo>
+  <data>  
+    <record id="runbot_migra_repo_form" model="ir.ui.view">
+        <field name="name">Migration Repo Form</field>
+        <field name="model">runbot_migra.repo</field>
+        <field name="arch" type="xml">
+          <form>
+            <sheet>
+              <group name="repo_group">
+                <field name="name"/>
+                <field name="short_name"/>
+              </group>
+            </sheet>
+          </form>
+        </field>
+    </record>
+          
+    
+    <record id="runbot_migra_repo_view_tree" model="ir.ui.view">
+        <field name="name">Migration Repo Tree View</field>
+        <field name="model">runbot_migra.repo</field>
+        <field name="arch" type="xml">
+            <tree string="Repositories">
+              <field name="short_name"/>
+              <field name="name"/>
+              <field name="path"/>
+              <field name="base"/>
+            </tree>
+        </field>
+    </record>
+    
+    <record id="open_view_runbot_migra_repo_tree" model="ir.actions.act_window">
+        <field name="name">Repositories</field>
+        <field name="res_model">runbot_migra.repo</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+
+    <menuitem
+        name="Repositories" 
+        id="runbot_migra_menu_repo_tree"
+        parent="runbot_migra_root_menu"
+        sequence="20"
+        action="open_view_runbot_migra_repo_tree"
+        />
+    
+  </data>
+</odoo>
