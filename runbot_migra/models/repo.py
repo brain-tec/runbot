@@ -61,7 +61,7 @@ class Repo(models.Model):
         self.ensure_one()
         _logger.debug("git command: git (dir %s) %s", self.short_name, ' '.join(cmd))
         cmd = ['git', '--git-dir=%s' % self.path] + cmd
-        return subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode('utf-8')
+        return subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode()
 
     def _clone(self):
         """ Clone the remote repo if needed """
@@ -76,6 +76,12 @@ class Repo(models.Model):
         if not os.path.exists(destination):
             subprocess.check_output(['git', 'clone', self.path, destination])
         subprocess.check_output(['git', 'pull'], cwd=destination)
+        return destination
+
+    def _add_worktree(self, path, treeish):
+        if not os.path.exists(os.path.join(path, '.git')):
+            _logger.info('Creating worktree %s in "%s" (for )', treeish, path)
+            self._git(['worktree', 'add', path, treeish])
 
     def _update_git(self):
         """ Update the git repo on FS """

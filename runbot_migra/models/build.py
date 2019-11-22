@@ -37,7 +37,6 @@ class Build(models.Model):
     version_src = fields.Char('Migration Source Version', required=True)
     build_dir = fields.Char(compute='_get_build_dir', store=False, readonly=True)
     server_dir = fields.Char(compute='_get_server_dir', store=False, readonly=True)
-    migration_scripts_dir = fields.Char(compute='_get_migration_scripts_dir', store=False, readonly=True)
     logs_dir = fields.Char(compute='_get_logs_dir', store=False, readonly=True)
     state = fields.Selection([
         ('pending', 'Pending'),
@@ -74,11 +73,6 @@ class Build(models.Model):
     def _get_logs_dir(self):
         for build in self:
             build.logs_dir = os.path.join(build.build_dir, 'logs')
-
-    @api.depends('name')
-    def _get_migration_scripts_dir(self):
-        for build in self:
-            build.migration_scripts_dir = os.path.join(build.build_dir, 'scripts')
 
     @staticmethod
     def _db_exists(dbname):
