@@ -1,3 +1,4 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_runbot_migra_project_admin,Admin access to project,runbot_migra.model_runbot_migra_project,runbot_migra.group_admin,1,1,1,1
 access_runbot_migra_repo_admin,Admin access to repo,runbot_migra.model_runbot_migra_repo,runbot_migra.group_admin,1,1,1,1
+access_runbot_migra_build_admin,Admin access to  build,runbot_migra.model_runbot_migra_build,runbot_migra.group_admin,1,1,1,1

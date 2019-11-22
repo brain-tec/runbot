@@ -37,7 +37,7 @@ class Repo(models.Model):
         """compute the server path of repo from the name"""
         root = self._root()
         for repo in self:
-            repo.path = os.path.join(root, 'repo', repo._sanitized_name(repo.name))
+            repo.path = os.path.join(root, 'repos', repo._sanitized_name(repo.name))
 
     @api.depends('name')
     def _get_base_url(self):
@@ -70,11 +70,11 @@ class Repo(models.Model):
             _logger.info("Cloning repository '%s' in '%s'" % (self.name, self.path))
             subprocess.call(['git', 'clone', '--bare', self.name, self.path])
 
-    def _sync_branch(self, destination, branch_name):
-        """ Clone a branch from the local repo to destination """
+    def _clone_repo_to(self, destination):
+        """ Clone from the local repo to destination """
         self.ensure_one()
         if not os.path.exists(destination):
-            subprocess.check_output(['git', 'clone', '-b', branch_name, '--single-branch', self.path, destination])
+            subprocess.check_output(['git', 'clone', self.path, destination])
         subprocess.check_output(['git', 'pull'], cwd=destination)
 
     def _update_git(self):

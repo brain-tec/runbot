@@ -1,3 +1,3 @@
 # -*- coding: utf-8 -*-
 
-from . import project, repo
+from . import project, repo, build
