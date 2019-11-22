@@ -57,15 +57,26 @@ class Project(models.Model):
             project.migration_scripts_dir = os.path.join(project.project_dir, 'scripts')
 
     @staticmethod
-    def _get_addons(addons_path):
+    def _list_addons_from_dir(addons_path):
         """ yield a list of dirs in path """
+        if not os.path.exists(addons_path):
+            _logger.warning('addons path "%s" not found', addons_path)
+            return
         for f in os.listdir(addons_path):
             if os.path.isdir(os.path.join(addons_path, f)):
                 yield f
 
+    def _get_addons(self, version):
+        self.ensure_one()
+        addons = []
+        addons.extend(self._list_addons_from_dir(os.path.join(self.servers_dir, version, 'addons')))
+        for addon_repo in self.addons_repo_ids:
+            addon_dir = os.path.join(self.project_dir, addon_repo.name.strip('/').split('/')[-1])
+            addons.extend(self._list_addons_from_dir(os.path.join(addon_dir, version)))
+        return addons
+
     def _test_upgrade(self):
         """ Create upgrade builds for a project """
-        addons = []
         self.ensure_one()
         self._update_repos()
 
@@ -73,15 +84,16 @@ class Project(models.Model):
         for version in [self.version_target] + self.versions.split(','):
             self.server_repo._add_worktree(os.path.join(self.servers_dir, version), version)
 
-        print('FINI')
-        return
         for addon_repo in self.addons_repo_ids:
             addon_dir = os.path.join(self.project_dir, addon_repo.name.strip('/').split('/')[-1])
-            addon_repo._clone_repo_to(addon_dir)
-            subprocess.check_output(['git', 'checkout', self.version_target], cwd=addon_dir)
-            addons.extend(self._get_addons(addon_dir))
+            for version in [self.version_target] + self.versions.split(','):
+                pass
+                addon_repo._add_worktree(os.path.join(addon_dir, version), version)
 
-        addons.extend(self._get_addons(os.path.join(self.servers_dir, 'addons')))
+        addons = self._get_addons(self.version_target)
+
+        print('addons: %s' % addons)
+        return
 
         # #### TO REMOVE ####
         addons = addons[:8]  # LIMIT TO 4 ADDONS
