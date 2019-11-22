@@ -96,7 +96,7 @@ def test_straightforward_flow(env, config, make_repo, users):
     c = prod.commit(pr1.head)
     # TODO: add original committer (if !author) as co-author in commit message?
     assert c.author['name'] == other_user['user'], "author should still be original's probably"
-    assert itemgetter('name', 'email')(c.committer) == (project.fp_github_name, project.fp_github_email)
+    assert c.committer['name'] == other_user['user'], "committer should also still be the original's, really"
     assert prod.read_tree(c) == {
         'f': 'c',
         'g': 'b',
@@ -114,7 +114,6 @@ def test_straightforward_flow(env, config, make_repo, users):
     assert pr.comments == [
         (users['reviewer'], 'hansen r+ rebase-ff'),
         (users['user'], 'Merge method set to rebase and fast-forward'),
-        (users['user'], re_matches(r'Merged at [0-9a-f]{40}, thanks!')),
         (users['user'], 'This pull request has forward-port PRs awaiting action (not merged or closed): ' + ', '.join((pr1 | pr2).mapped('display_name'))),
     ]
 
@@ -387,7 +386,11 @@ def test_conflict(env, config, make_repo):
         'g': 'a',
     }
     assert pr1.state == 'opened'
-    assert prod.read_tree(prod.commit(pr1.head)) == {
+    p = prod.commit(p_0)
+    c = prod.commit(pr1.head)
+    assert c.author == p.author
+    assert c.committer == p.committer
+    assert prod.read_tree(c) == {
         'f': 'c',
         'g': re_matches(r'''<<<<<<< HEAD
 a
@@ -613,7 +616,6 @@ def test_empty(env, config, make_repo, users):
 
     assert pr1.comments == [
         (users['reviewer'], 'hansen r+'),
-        (users['user'], re_matches(r'Merged at [0-9a-f]{40}, thanks!')),
         (users['other'], 'This pull request has forward-port PRs awaiting action (not merged or closed): ' + fail_id.display_name),
         (users['other'], 'This pull request has forward-port PRs awaiting action (not merged or closed): ' + fail_id.display_name),
     ], "each cron run should trigger a new message on the ancestor"
@@ -623,7 +625,6 @@ def test_empty(env, config, make_repo, users):
     env.run_crons('forwardport.reminder', 'runbot_merge.feedback_cron', context={'forwardport_updated_before': FAKE_PREV_WEEK})
     assert pr1.comments == [
         (users['reviewer'], 'hansen r+'),
-        (users['user'], re_matches(r'Merged at [0-9a-f]{40}, thanks!')),
         (users['other'], 'This pull request has forward-port PRs awaiting action (not merged or closed): ' + fail_id.display_name),
         (users['other'], 'This pull request has forward-port PRs awaiting action (not merged or closed): ' + fail_id.display_name),
     ]
