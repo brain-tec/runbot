@@ -1,0 +1,55 @@
+<odoo>
+  <data> 
+    <record id="runbot_migra_repo_build" model="ir.ui.view">
+        <field name="name">Migration Build Form</field>
+        <field name="model">runbot_migra.build</field>
+        <field name="arch" type="xml">
+          <form>
+            <sheet>
+              <group name="build_group">
+                <field name="project_id"/>
+                <field name="name"/>
+                <field name="addon"/>
+                <field name="version_src"/>
+                <field name="target_db_name"/>
+                <field name="state"/>
+                <field name="result"/>
+              </group>
+            </sheet>
+          </form>
+        </field>
+    </record>
+          
+    
+    <record id="runbot_migra_build_view_tree" model="ir.ui.view">
+        <field name="name">Migration Build Tree View</field>
+        <field name="model">runbot_migra.build</field>
+        <field name="arch" type="xml">
+            <tree string="Builds">
+              <field name="project_id"/>
+              <field name="name"/>
+              <field name="addon"/>
+              <field name="version_src"/>
+              <field name="target_db_name"/>
+              <field name="state"/>
+              <field name="result"/>
+            </tree>
+        </field>
+    </record>
+    
+    <record id="open_view_runbot_migra_build_tree" model="ir.actions.act_window">
+        <field name="name">Builds</field>
+        <field name="res_model">runbot_migra.build</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+
+    <menuitem
+        name="Builds" 
+        id="runbot_migra_menu_build_tree"
+        parent="runbot_migra_root_menu"
+        sequence="30"
+        action="open_view_runbot_migra_build_tree"
+        />
+    
+  </data>
+</odoo>

@@ -82,7 +82,7 @@ class Repo(models.Model):
         if not os.path.exists(os.path.join(path, '.git')):
             _logger.info('Creating worktree %s in "%s" (for %s)', treeish, path, self.short_name)
             try:
-                self._git(['worktree', 'add', path, treeish])
+                self._git(['worktree', 'add', '-f', path, treeish])
             except subprocess.CalledProcessError as error:
                 _logger.warning('Failed to add worktree: %s', error.output.decode())
 

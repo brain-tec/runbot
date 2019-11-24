@@ -41,17 +41,17 @@ class Project(models.Model):
             sanitized_name = self.env['runbot_migra.repo']._sanitized_name(project.name)
             project.project_dir = os.path.join(static_path, 'projects', sanitized_name)
 
-    @api.depends('name')
+    @api.depends('name', 'project_dir')
     def _get_servers_dir(self):
         for project in self:
             project.servers_dir = os.path.join(project.project_dir, 'servers')
 
-    @api.depends('name')
+    @api.depends('name', 'project_dir')
     def _get_addons_dir(self):
         for project in self:
-            project.servers_dir = os.path.join(project.project_dir, 'addons')
+            project.addons_dir = os.path.join(project.project_dir, 'addons')
 
-    @api.depends('name')
+    @api.depends('name', 'project_dir')
     def _get_migration_scripts_dir(self):
         for project in self:
             project.migration_scripts_dir = os.path.join(project.project_dir, 'scripts')
@@ -69,10 +69,12 @@ class Project(models.Model):
     def _get_addons(self, version):
         self.ensure_one()
         addons = []
+        # server addons
         addons.extend(self._list_addons_from_dir(os.path.join(self.servers_dir, version, 'addons')))
+        # other addons
         for addon_repo in self.addons_repo_ids:
-            addon_dir = os.path.join(self.project_dir, addon_repo.name.strip('/').split('/')[-1])
-            addons.extend(self._list_addons_from_dir(os.path.join(addon_dir, version)))
+            addon_dirname = addon_repo.name.strip('/').split('/')[-1]
+            addons.extend(self._list_addons_from_dir(os.path.join(self.addons_dir, addon_dirname, version)))
         return addons
 
     def _test_upgrade(self):
@@ -85,15 +87,14 @@ class Project(models.Model):
             self.server_repo._add_worktree(os.path.join(self.servers_dir, version), version)
 
         for addon_repo in self.addons_repo_ids:
-            addon_dir = os.path.join(self.project_dir, addon_repo.name.strip('/').split('/')[-1])
+            addon_dirname = addon_repo.name.strip('/').split('/')[-1]
             for version in [self.version_target] + self.versions.split(','):
-                pass
-                addon_repo._add_worktree(os.path.join(addon_dir, version), version)
+                addon_path = os.path.join(self.addons_dir, addon_dirname)
+                # if not os.path.exists(addon_path):
+                #    os.makedirs(addon_path, exist_ok=True)
+                addon_repo._add_worktree(os.path.join(addon_path, version), version)
 
         addons = self._get_addons(self.version_target)
-
-        print('addons: %s' % addons)
-        return
 
         # #### TO REMOVE ####
         addons = addons[:8]  # LIMIT TO 4 ADDONS
