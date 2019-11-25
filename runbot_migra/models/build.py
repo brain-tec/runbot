@@ -5,7 +5,6 @@ import os
 import pwd
 import psycopg2
 import subprocess
-import traceback
 
 from odoo import models, fields, api
 from ..container import Command, docker_run, docker_ps, docker_is_running
@@ -41,6 +40,7 @@ class Build(models.Model):
     log_update = fields.Char(compute='_get_log_update_path', store=False, readonly=True)
     state = fields.Selection([
         ('pending', 'Pending'),
+        ('l10n_init', 'Change res_partner Country')
         ('init', 'Initializing'),
         ('migrate', 'Testing migration'),
         ('done', 'Done')
@@ -116,53 +116,74 @@ class Build(models.Model):
         free = max_running - len(running_dockers)
         return free if free > 0 else 0
 
-    def _launch_odoo(self, db_name, modules_to_install, log_path, version, mode='install'):
+    def _launch_odoo(self, db_name, modules_to_install, log_path, version):
         self.ensure_one()
         py_version = '3'
         pres = []
         posts = []
-        server_dir = os.path.join(self.project_id.servers_dir, version)
 
-        ro_volumes = {'/data/addons/%s' % '/'.join(a.split('/')[-2:-1]): a for a in self._get_addons_dirs(version)}
-        print(ro_volumes)
+        ro_volumes = {'addons/%s' % '/'.join(a.split('/')[-2:-1]): a for a in self._get_addons_dirs(version)}
 
-        odoo_cmd = ['python%s' % py_version, 'odoo-bin']
+        odoo_cmd = ['python%s' % py_version, 'odoo/odoo-bin']
         # options
         odoo_cmd += ['--no-http']
 
         # use the username of the host to connect to the databases
         odoo_cmd += ['-r %s' % pwd.getpwuid(os.getuid()).pw_name]
         odoo_cmd += ['-d', db_name]
-        if mode == 'install':
+        if 'init' in self.state:
             odoo_cmd += ['-i', modules_to_install]
-        elif mode == 'update':
+        elif self.state == 'migrate':
             odoo_cmd += ['-u', 'all']
+            odoo_cmd += ['--upgrades-paths', '/data/build/migration_scripts']
         odoo_cmd += ['--stop-after-init']
         odoo_cmd += ['--max-cron-threads=0']
-        odoo_cmd += ['--addons-path', ','.join(['/data/build/addons'] + ['%s' % k for k in ro_volumes.keys()])]
-        print(odoo_cmd)
+        odoo_cmd += ['--addons-path', ','.join(['/data/build/odoo/addons'] + ['%s' % k for k in ro_volumes.keys()])]
 
-        pres = [['ls', '-l', '/data/build', '>', '/data/build/logs/ls.txt']]
+        # adding odoo server
+        server_dir = os.path.join(self.project_id.servers_dir, version)
+        ro_volumes.update({'odoo': server_dir})
+
+        # adding migration scripts
+        if self.state == 'migrate':
+            ro_volumes.update({'migration_scripts':     def _l10_build(self):
+        self.ensure_one()
+        self.state = 'l10n'os.path.join(self.project_id.migration_scripts_dir, self.project_id.migration_scripts_branch)})
+
         docker_command = Command(pres, odoo_cmd, posts)
-        print(docker_command)
 
-        self.container_name = '%s' % db_name
-        return docker_run(docker_command.build(), log_path, server_dir, self.container_name, ro_volumes=ro_volumes)
+        self.container_name = '%s-%s' % (db_name, self.state)
+
+        return docker_run(docker_command.build(), log_path, self.build_dir, self.container_name, ro_volumes=ro_volumes)
 
     def _init_build(self):
         self.ensure_one()
         # start init phase
-        self.state = 'init'
+        if self.addon.startswith('l10n'):
+            self.state = 'l10n_init'
+            modules_to_install = 'base'
+        else:
+            self.state = 'init'
+            modules_to_install = 'base,%s' % self.addon
         if not self._db_exists(self.name):
             _logger.info('Creating DB %s', self.name)
             log_path = os.path.join(self.build_dir, 'logs', 'create_%s.txt' % self.name)
-            self._launch_odoo(self.name, 'base,%s' % self.addon, log_path, self.version_src)
+            self._launch_odoo(self.name, modules_to_install, log_path, self.version_src)
+
+    def _update_res_partner_build(self):
+        _logger.info('Changing res_partner country in  DB %s', self.name)
+        # ensure that install is finished
+        if self.container_name and docker_is_running(self.container_name):
+            return
 
     def _migrate_build(self):
         self.ensure_one()
         _logger.info('Migrating DB %s', self.name)
+        # ensure that install is finished
+        if self.container_name and docker_is_running(self.container_name):
+            return
         self.state = 'migrate'
-        self._launch_odoo(self.name, 'base,%s' % self.addon, self.log_update, self.project_id.version_target, mode='update')
+        self._launch_odoo(self.name, 'base,%s' % self.addon, self.log_update, self.project_id.version_target)
 
     def _finish_build(self):
         self.ensure_one()
@@ -179,20 +200,20 @@ class Build(models.Model):
         for pending_build in self.search([('state', '=', 'pending')], limit=self._get_free_docker_slots()):
             try:
                 pending_build._init_build()
-            except Exception as e:
+            except Exception:
                 _logger.error('Init Build failed: %s', pending_build.name)
                 raise
 
         for init_build in self.search([('state', '=', 'init')], limit=self._get_free_docker_slots()):
             try:
                 init_build._migrate_build()
-            except Exception as e:
+            except Exception:
                 _logger.error('Migrate Build failed: %s', init_build.name)
                 raise
 
         for init_build in self.search([('state', '=', 'migrate')]):
             try:
                 init_build._finish_build()
-            except Exception as e:
+            except Exception:
                 _logger.info('Finish Build failed: %s', init_build.name)
                 raise

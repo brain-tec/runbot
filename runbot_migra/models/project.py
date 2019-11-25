@@ -27,6 +27,7 @@ class Project(models.Model):
     migration_scripts_dir = fields.Char(compute='_get_migration_scripts_dir', store=False, readonly=True)
     version_target = fields.Char('Targeted version', help='Final version, used by the update instance')
     versions = fields.Char('Start versions', help='Comma separated intermediary versions')
+    build_ids = fields.One2many('runbot_migra.build', 'project_id', string='Builds')
 
     def _update_repos(self):
         self.ensure_one()
@@ -85,6 +86,8 @@ class Project(models.Model):
         # add worktrees if needed
         for version in [self.version_target] + self.versions.split(','):
             self.server_repo._add_worktree(os.path.join(self.servers_dir, version), version)
+
+        self.migration_scripts_repo._add_worktree(os.path.join(self.migration_scripts_dir), self.migration_scripts_branch)
 
         for addon_repo in self.addons_repo_ids:
             addon_dirname = addon_repo.name.strip('/').split('/')[-1]

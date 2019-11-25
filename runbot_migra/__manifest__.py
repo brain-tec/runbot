@@ -11,6 +11,8 @@
         'views/project.xml',
         'views/repo.xml',
         'views/build.xml',
-        'data/migra_cron.xml'
+        'data/migra_cron.xml',
+        'templates/project.xml',
+        'templates/build.xml'
     ],
 }
