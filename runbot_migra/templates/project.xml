@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <data>
+    <template id="runbot_migra.project_list">
+    <t t-call="website.layout">
+     <div class="container-fluid">
+       <div class="row">
+         <div class="col-md-12">
+           <table class="table table-condensed table-stripped" style="table-layout: initial;">
+               <thead>
+                   <tr>
+                       <th>Project</th>
+                       <th>Builds</th>
+                   </tr>
+               </thead>
+               <t t-foreach="projects" t-as="project">
+                 <tr>
+                  <td><a t-attf-href="/migrabot/project/{{project.id}}"><t t-esc="project.name"/></a></td>
+                  <td><t t-esc="len(project.build_ids)"/></td>
+                </tr>
+               </t>
+           </table>
+         </div>
+       </div>
+     </div>
+    </t>
+    </template>
+
+    <template id="runbot_migra.project">
+      <t t-call="website.layout">
+       <div class="container-fluid">
+        <section class="row">
+          <h2><t t-esc="project.name"/></h2>
+            <t t-foreach="project.build_ids" t-as="build">
+              <t t-set="klass"></t>
+              <t t-if="build.result == 'ko'"><t t-set="klass">text-danger</t></t>
+              <t t-if="build.result == 'ok'"><t t-set="klass">text-success</t></t>
+              <t t-if="build.state == 'migrate'"><t t-set="klass">text-info</t></t>
+              <section class="col-md-12">
+                <ul style="display: flex;" t-attf-class="list-unstyled {{klass}}">
+                   <li style="flex: 1;"><t t-esc="build.addon"/></li>
+                   <li style="flex: 1;"><a t-attf-href="/migrabot/build/{{build.id}}"><t t-esc="build.name"/></a></li>
+                   <li style="flex: 1;"><t t-esc="build.result"/></li>
+                   <li style="flex: 1;"><t t-esc="build.state"/></li>
+                </ul>
+              </section>
+            </t>
+        </section>
+       </div>
+      </t>
+    </template>
+  </data>
+</odoo>

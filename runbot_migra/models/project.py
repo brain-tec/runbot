@@ -87,7 +87,7 @@ class Project(models.Model):
         for version in [self.version_target] + self.versions.split(','):
             self.server_repo._add_worktree(os.path.join(self.servers_dir, version), version)
 
-        self.migration_scripts_repo._add_worktree(os.path.join(self.migration_scripts_dir), self.migration_scripts_branch)
+        self.migration_scripts_repo._add_worktree(self.migration_scripts_dir, self.migration_scripts_branch)
 
         for addon_repo in self.addons_repo_ids:
             addon_dirname = addon_repo.name.strip('/').split('/')[-1]

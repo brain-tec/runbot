@@ -41,7 +41,7 @@ class Build(models.Model):
     state = fields.Selection([
         ('pending', 'Pending'),
         ('base', 'Install base'),
-        ('addon', 'Install addon')
+        ('addon', 'Install addon'),
         ('migrate', 'Testing migration'),
         ('done', 'Done')
     ], default='pending', required=True)
@@ -75,6 +75,10 @@ class Build(models.Model):
     def _get_log_update_path(self):
         for build in self:
             build.log_update = os.path.join(build.build_dir, 'logs', 'update_%s.txt' % build.name)
+
+    @staticmethod
+    def _git_rev_parse(git_dir, treeish):
+        return subprocess.check_output(['git', '--git-dir=%s' % git_dir, 'rev-parse', treeish]).decode().strip()
 
     @staticmethod
     def _db_exists(dbname):
@@ -135,8 +139,13 @@ class Build(models.Model):
         if self.state in ('base', 'addon'):
             odoo_cmd += ['-i', modules_to_install]
         elif self.state == 'migrate':
-            odoo_cmd += ['-u', 'all']
-            odoo_cmd += ['--upgrades-paths', '/data/build/migration_scripts']
+            odoo_cmd += ['-u', 'all',
+                         '--upgrades-paths', '/data/build/migration_scripts',
+                         '--db-filter=^%s$' % db_name,
+                         '--log-handler=:INFO', '--log-handler=odoo.models.schema:INFO', '--log-handler=odoo.modules.loading:DEBUG',
+                         '--log-handler=odoo.modules.graph:CRITICAL', '--log-handler=odoo.modules.migration:DEBUG', ' --log-handler=odoo.tools.misc:INFO',
+                         '--log-handler=odoo.addons.base.maintenance.migrations:DEBUG']
+
         if self.template_db:
             odoo_cmd += ['--db-template=%s' % self.template_db]
         odoo_cmd += ['--stop-after-init']
@@ -149,18 +158,22 @@ class Build(models.Model):
 
         # adding migration scripts
         if self.state == 'migrate':
-            ro_volumes.update({'migration_scripts': os.path.join(self.project_id.migration_scripts_dir, self.project_id.migration_scripts_branch)})
+            ro_volumes.update({'migration_scripts': self.project_id.migration_scripts_dir})
 
         # update res_partner when l10_n
-        if self.addon.startswith('l10n_') and self.state == 'addon':
+        if self.addon.startswith('l10n_') and self.state == 'addon' and self.template_db:
             country_code = self.addon.split('_')[1]
             pres = [
-                'psql', '-d', "%s" % self.template_db, '-c', "UPDATE res_partner SET country_id = (SELECT id FROM res_country WHERE lower(code)='%s')" % country_code,
+                ['psql', '-d', '"%s"' % self.template_db, '-c', "\"UPDATE res_partner SET country_id = (SELECT id FROM res_country WHERE lower(code)='%s')\"" % country_code,
+                 '-U', pwd.getpwuid(os.getuid()).pw_name],
             ]
 
         docker_command = Command(pres, odoo_cmd, posts)
 
         self.container_name = '%s-%s' % (db_name, self.state)
+        for k, v in ro_volumes.items():
+            print("%s,%s" % (k, v))
+            print(self._git_rev_parse(os.path.join(v, '.git'), 'HEAD'))
 
         return docker_run(docker_command.build(), log_path, self.build_dir, self.container_name, ro_volumes=ro_volumes)
 
@@ -191,6 +204,7 @@ class Build(models.Model):
         if self.container_name and docker_is_running(self.container_name):
             return
         self.state = 'migrate'
+        self.template_db = False
         self._launch_odoo(self.name, None, self.log_update, self.project_id.version_target)
 
     def _finish_build(self):
@@ -212,7 +226,14 @@ class Build(models.Model):
                 _logger.error('Init Build failed: %s', pending_build.name)
                 raise
 
-        for init_build in self.search([('state', '=', 'init')], limit=self._get_free_docker_slots()):
+        for init_build in self.search([('state', '=', 'base')], limit=self._get_free_docker_slots()):
+            try:
+                init_build._update_addon_build()
+            except Exception:
+                _logger.error('Update Addon Build failed: %s', init_build.name)
+                raise
+
+        for init_build in self.search([('state', '=', 'addon')], limit=self._get_free_docker_slots()):
             try:
                 init_build._migrate_build()
             except Exception:
