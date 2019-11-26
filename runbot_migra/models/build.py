@@ -40,8 +40,8 @@ class Build(models.Model):
     log_update = fields.Char(compute='_get_log_update_path', store=False, readonly=True)
     state = fields.Selection([
         ('pending', 'Pending'),
-        ('l10n_init', 'Change res_partner Country')
-        ('init', 'Initializing'),
+        ('base', 'Install base'),
+        ('addon', 'Install addon')
         ('migrate', 'Testing migration'),
         ('done', 'Done')
     ], default='pending', required=True)
@@ -50,6 +50,7 @@ class Build(models.Model):
         ('ko', 'Failure')
     ])
     container_name = fields.Char('Current container')
+    template_db = fields.Char('Template Database')
 
     @api.model
     def create(self, vals):
@@ -131,11 +132,13 @@ class Build(models.Model):
         # use the username of the host to connect to the databases
         odoo_cmd += ['-r %s' % pwd.getpwuid(os.getuid()).pw_name]
         odoo_cmd += ['-d', db_name]
-        if 'init' in self.state:
+        if self.state in ('base', 'addon'):
             odoo_cmd += ['-i', modules_to_install]
         elif self.state == 'migrate':
             odoo_cmd += ['-u', 'all']
             odoo_cmd += ['--upgrades-paths', '/data/build/migration_scripts']
+        if self.template_db:
+            odoo_cmd += ['--db-template=%s' % self.template_db]
         odoo_cmd += ['--stop-after-init']
         odoo_cmd += ['--max-cron-threads=0']
         odoo_cmd += ['--addons-path', ','.join(['/data/build/odoo/addons'] + ['%s' % k for k in ro_volumes.keys()])]
@@ -146,9 +149,14 @@ class Build(models.Model):
 
         # adding migration scripts
         if self.state == 'migrate':
-            ro_volumes.update({'migration_scripts':     def _l10_build(self):
-        self.ensure_one()
-        self.state = 'l10n'os.path.join(self.project_id.migration_scripts_dir, self.project_id.migration_scripts_branch)})
+            ro_volumes.update({'migration_scripts': os.path.join(self.project_id.migration_scripts_dir, self.project_id.migration_scripts_branch)})
+
+        # update res_partner when l10_n
+        if self.addon.startswith('l10n_') and self.state == 'addon':
+            country_code = self.addon.split('_')[1]
+            pres = [
+                'psql', '-d', "%s" % self.template_db, '-c', "UPDATE res_partner SET country_id = (SELECT id FROM res_country WHERE lower(code)='%s')" % country_code,
+            ]
 
         docker_command = Command(pres, odoo_cmd, posts)
 
@@ -156,25 +164,25 @@ class Build(models.Model):
 
         return docker_run(docker_command.build(), log_path, self.build_dir, self.container_name, ro_volumes=ro_volumes)
 
-    def _init_build(self):
+    def _base_build(self):
         self.ensure_one()
         # start init phase
-        if self.addon.startswith('l10n'):
-            self.state = 'l10n_init'
-            modules_to_install = 'base'
-        else:
-            self.state = 'init'
-            modules_to_install = 'base,%s' % self.addon
+        self.state = 'base'
         if not self._db_exists(self.name):
             _logger.info('Creating DB %s', self.name)
-            log_path = os.path.join(self.build_dir, 'logs', 'create_%s.txt' % self.name)
-            self._launch_odoo(self.name, modules_to_install, log_path, self.version_src)
+            log_path = os.path.join(self.build_dir, 'logs', 'base_%s.txt' % self.name)
+            db_name = '%s-base' % self.name
+            self._launch_odoo(db_name, 'base', log_path, self.version_src)
 
-    def _update_res_partner_build(self):
+    def _update_addon_build(self):
         _logger.info('Changing res_partner country in  DB %s', self.name)
         # ensure that install is finished
         if self.container_name and docker_is_running(self.container_name):
             return
+        self.state = 'addon'
+        self.template_db = '%s-base' % self.name
+        log_path = os.path.join(self.build_dir, 'logs', 'addon_%s.txt' % self.name)
+        self._launch_odoo(self.name, self.addon, log_path, self.version_src)
 
     def _migrate_build(self):
         self.ensure_one()
@@ -183,7 +191,7 @@ class Build(models.Model):
         if self.container_name and docker_is_running(self.container_name):
             return
         self.state = 'migrate'
-        self._launch_odoo(self.name, 'base,%s' % self.addon, self.log_update, self.project_id.version_target)
+        self._launch_odoo(self.name, None, self.log_update, self.project_id.version_target)
 
     def _finish_build(self):
         self.ensure_one()
@@ -199,7 +207,7 @@ class Build(models.Model):
     def _process_build_queue(self):
         for pending_build in self.search([('state', '=', 'pending')], limit=self._get_free_docker_slots()):
             try:
-                pending_build._init_build()
+                pending_build._base_build()
             except Exception:
                 _logger.error('Init Build failed: %s', pending_build.name)
                 raise
