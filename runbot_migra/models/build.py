@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import contextlib
+import fnmatch
 import logging
 import os
 import pwd
@@ -121,6 +122,11 @@ class Build(models.Model):
         free = max_running - len(running_dockers)
         return free if free > 0 else 0
 
+    def _clean(self):
+        for build in self:
+            for f in fnmatch.filter(os.listdir(build.logs_dir), '*%s.txt*' % build.name):
+                os.unlink(os.path.join(build.logs_dir, f))
+
     def _launch_odoo(self, db_name, modules_to_install, log_path, version):
         self.ensure_one()
         py_version = '3'
@@ -171,9 +177,12 @@ class Build(models.Model):
         docker_command = Command(pres, odoo_cmd, posts)
 
         self.container_name = '%s-%s' % (db_name, self.state)
-        for k, v in ro_volumes.items():
-            print("%s,%s" % (k, v))
-            print(self._git_rev_parse(os.path.join(v, '.git'), 'HEAD'))
+
+        # write commit hashes in log file
+        with open('%s.hashes' % log_path, 'w') as lf:
+            for k, v in ro_volumes.items():
+                hash = self._git_rev_parse(os.path.join(v, '.git'), 'HEAD')
+                lf.write("commit for %s: %s\n" % (k, hash))
 
         return docker_run(docker_command.build(), log_path, self.build_dir, self.container_name, ro_volumes=ro_volumes)
 

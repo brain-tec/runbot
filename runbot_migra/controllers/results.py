@@ -17,8 +17,10 @@ class RunbotMigration(Controller):
         if not project.exists():
             return request.not_found()
 
+        hashes = project._get_hashes()
         context = {
             'project': project,
+            'hashes': hashes,
         }
         return request.render("runbot_migra.project", context)
 
@@ -37,8 +39,14 @@ class RunbotMigration(Controller):
         except FileNotFoundError:
             migrate_log = ''
 
+        try:
+            hashes_log = open('%s.hashes' % build.log_update, 'r').read()
+        except FileNotFoundError:
+            hashes_log = ''
+
         context = {
             'build': build,
             'migrate_log': migrate_log,
+            'hashes_log': hashes_log
         }
         return request.render("runbot_migra.build", context)
