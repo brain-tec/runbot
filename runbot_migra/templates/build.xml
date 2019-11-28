@@ -7,11 +7,8 @@
        <div class="row">
          <div class="col-md-12">
            <h1><t t-esc="build.name"/></h1>
-           <pre>
-             <code>
-               <t t-esc="migrate_log"/>
-             </code>
-           </pre>
+           <pre><t t-esc="hashes_log"/></pre>
+           <pre><t t-esc="migrate_log"/></pre>
          </div>
        </div>
      </div>

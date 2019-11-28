@@ -67,6 +67,30 @@ class Project(models.Model):
             if os.path.isdir(os.path.join(addons_path, f)):
                 yield f
 
+    def _get_hashes(self):
+
+        def rev_parse(git_dir):
+            if not git_dir.endswith('.git'):
+                git_dir = os.path.join(git_dir, '.git')
+            cmd = ['git', '--git-dir=%s' % git_dir, 'rev-parse', 'HEAD']
+            return subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode()
+
+        self.ensure_one()
+        hashes = {}
+        git_dir = self.migration_scripts_dir
+        hashes[git_dir] = rev_parse(git_dir)
+
+        for version in [self.version_target] + self.versions.split(','):
+            git_dir = os.path.join(self.servers_dir, version)
+            hashes[git_dir] = rev_parse(git_dir)
+
+            for addon_repo in self.addons_repo_ids:
+                addon_dirname = addon_repo.name.strip('/').split('/')[-1]
+                addon_path = os.path.join(self.addons_dir, addon_dirname)
+                git_dir = os.path.join(addon_path, version)
+                hashes[git_dir] = rev_parse(git_dir)
+        return hashes
+
     def _get_addons(self, version):
         self.ensure_one()
         addons = []
@@ -81,6 +105,14 @@ class Project(models.Model):
     def _test_upgrade(self):
         """ Create upgrade builds for a project """
         self.ensure_one()
+
+        # ensure builds are done and clean previous builds
+        if self.build_ids.filtered(lambda rec: rec.state != 'done'):
+            return
+        self.build_ids.filtered(lambda rec: rec.state == 'done')._clean()
+        self.build_ids.unlink()
+
+        # fetch repos
         self._update_repos()
 
         # add worktrees if needed
@@ -93,8 +125,6 @@ class Project(models.Model):
             addon_dirname = addon_repo.name.strip('/').split('/')[-1]
             for version in [self.version_target] + self.versions.split(','):
                 addon_path = os.path.join(self.addons_dir, addon_dirname)
-                # if not os.path.exists(addon_path):
-                #    os.makedirs(addon_path, exist_ok=True)
                 addon_repo._add_worktree(os.path.join(addon_path, version), version)
 
         addons = self._get_addons(self.version_target)
