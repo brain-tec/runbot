@@ -39,8 +39,7 @@ class TestBuildError(RunbotCase):
 
         self.BuildError = self.env['runbot.build.error']
 
-    @patch('odoo.addons.runbot.models.build.runbot_build._get_params')
-    def test_build_scan(self, mock_get_params):
+    def test_build_scan(self):
         IrLog = self.env['ir.logging']
         ko_build = self.create_test_build({'local_result': 'ko'})
         ok_build = self.create_test_build({'local_result': 'ok'})

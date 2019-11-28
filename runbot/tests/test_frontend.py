@@ -5,9 +5,10 @@ from unittest.mock import patch
 from werkzeug.wrappers import Response
 from odoo.tests import common
 from odoo.addons.runbot.controllers import frontend
+from .common import RunbotCase
 
 
-class Test_Frontend(common.HttpCase):
+class Test_Frontend(RunbotCase):
 
     def setUp(self):
         super(Test_Frontend, self).setUp()
@@ -26,11 +27,9 @@ class Test_Frontend(common.HttpCase):
         })
         self.Build = self.env['runbot.build']
 
-    @patch('odoo.addons.runbot.models.build.runbot_build._get_params')
     @patch('odoo.http.Response.set_default')
     @patch('odoo.addons.runbot.controllers.frontend.request')
-    def test_frontend_basic(self, mock_request, mock_set_default, mock_get_params):
-        mock_get_params.return_value = defaultdict(lambda: defaultdict(str))
+    def test_frontend_basic(self, mock_request, mock_set_default):
         mock_request.env = self.env
         mock_request._cr = self.cr
         controller = frontend.Runbot()

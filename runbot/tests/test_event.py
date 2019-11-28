@@ -25,8 +25,7 @@ class TestIrLogging(RunbotCase):
                 VALUES (NOW() at time zone 'UTC', %s, %s, %s, %s, %s, %s, %s, %s)
             """, val)
 
-    @patch('odoo.addons.runbot.models.build.fqdn')
-    def test_ir_logging(self, mock_fqdn):
+    def test_ir_logging(self):
         build = self.create_build({
             'branch_id': self.branch.id,
             'name': 'd0d0caca0000ffffffffffffffffffffffffffff',

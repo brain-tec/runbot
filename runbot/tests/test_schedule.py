@@ -21,14 +21,12 @@ class TestSchedule(RunbotCase):
             'name': 'refs/heads/master'
         })
 
-    @patch('odoo.addons.runbot.models.build.os.makedirs')
     @patch('odoo.addons.runbot.models.build.os.path.getmtime')
     @patch('odoo.addons.runbot.models.build.docker_is_running')
-    def test_schedule_mark_done(self, mock_running, mock_getmtime, mock_makedirs):
+    def test_schedule_mark_done(self, mock_running, mock_getmtime):
         """ Test that results are set even when job_30_run is skipped """
         job_end_time = datetime.datetime.now()
         mock_getmtime.return_value = job_end_time.timestamp()
-        self.start_get_params_patcher()
 
         build = self.Build.create({
             'local_state': 'testing',

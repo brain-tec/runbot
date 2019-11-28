@@ -2,7 +2,7 @@
 import datetime
 from unittest import skip
 from unittest.mock import patch, Mock
-from odoo.tests import common
+from odoo.tests import common, TransactionCase
 import logging
 import odoo
 import time
@@ -17,7 +17,7 @@ class Test_Repo(RunbotCase):
     def setUp(self):
         super(Test_Repo, self).setUp()
         self.commit_list = []
-        self.mock_root = self.start_patcher('repo_root_patcher')
+        self.mock_root = self.patchers['repo_root_patcher']
 
     def mock_git_helper(self):
         """Helper that returns a mock for repo._git()"""
@@ -176,9 +176,11 @@ class Test_Repo(RunbotCase):
 
         _logger.info('Create pending builds took: %ssec', (time.time() - inserted_time))
 
+
+class Test_Github(TransactionCase):
     def test_github(self):
         """ Test different github responses or failures"""
-        repo = self.Repo.create({'name': 'bla@example.com:foo/foo'})
+        repo = self.env['runbot.repo'].create({'name': 'bla@example.com:foo/foo'})
         self.assertEqual(repo._github('/repos/:owner/:repo/statuses/abcdef', dict(), ignore_errors=True), None, 'A repo without token should return None')
         repo.token = 'abc'
         with patch('odoo.addons.runbot.models.repo.requests.Session') as mock_session:
@@ -212,7 +214,7 @@ class Test_Repo_Scheduler(RunbotCase):
         super(Test_Repo_Scheduler, self).setUp()
 
         self.fqdn_patcher = patch('odoo.addons.runbot.models.host.fqdn')
-        mock_root = self.start_patcher('repo_root_patcher')
+        mock_root = self.patchers['repo_root_patcher']
         mock_root.return_value = '/tmp/static'
 
         self.foo_repo = self.Repo.create({'name': 'bla@example.com:foo/bar'})
@@ -226,8 +228,8 @@ class Test_Repo_Scheduler(RunbotCase):
     @patch('odoo.addons.runbot.models.build.runbot_build._kill')
     @patch('odoo.addons.runbot.models.build.runbot_build._schedule')
     def test_repo_scheduler(self, mock_schedule, mock_kill, mock_reap):
-        mock_fqdn = self.start_patcher('fqdn_patcher')
-        mock_fqdn.return_value = 'test_host'
+        #mock_fqdn = self.patchers['fqdn_patcher']
+        #mock_fqdn.return_value = 'test_host'
         self.env['ir.config_parameter'].set_param('runbot.runbot_workers', 6)
         builds = []
         # create 6 builds that are testing on the host to verify that
@@ -239,7 +241,7 @@ class Test_Repo_Scheduler(RunbotCase):
                 'port': '1234',
                 'build_type': 'normal',
                 'local_state': 'testing',
-                'host': 'test_host'
+                'host': 'host.runbot.com'
             })
             builds.append(build)
         # now the pending build that should stay unasigned
@@ -274,5 +276,5 @@ class Test_Repo_Scheduler(RunbotCase):
         self.foo_repo._scheduler()
         build.invalidate_cache()
         scheduled_build.invalidate_cache()
-        self.assertEqual(build.host, 'test_host')
+        self.assertEqual(build.host, 'host.runbot.com')
         self.assertFalse(scheduled_build.host)
