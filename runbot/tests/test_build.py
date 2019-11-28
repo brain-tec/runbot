@@ -31,6 +31,8 @@ class Test_Build(RunbotCase):
             'repo_id': self.repo.id,
             'name': 'refs/heads/11.0'
         })
+        self.start_patcher('isdir', 'odoo.addons.runbot.common.os.path.isdir', True)
+        self.start_patcher('isfile', 'odoo.addons.runbot.common.os.path.isfile', True)
 
     def test_base_fields(self):
         build = self.create_build({
@@ -95,10 +97,8 @@ class Test_Build(RunbotCase):
         modules_to_test = build._get_modules_to_test(self, modules_patterns='*, -hw_*, hw_explicit')
         self.assertEqual(modules_to_test, sorted(['good_module', 'bad_module', 'other_good', 'l10n_be', 'hwgood', 'hw_explicit', 'other_mod_1', 'other_mod_2']))
 
-    @patch('odoo.addons.runbot.models.build.os.path.isfile')
-    def test_build_cmd_log_db(self, mock_is_file):
+    def test_build_cmd_log_db(self, ):
         """ test that the logdb connection URI is taken from the .odoorc file """
-        mock_is_file.return_value = True
         uri = 'postgres://someone:pass@somewhere.com/db'
         self.env['ir.config_parameter'].sudo().set_param("runbot.runbot_logdb_uri", uri)
         build = self.create_build({
@@ -109,12 +109,8 @@ class Test_Build(RunbotCase):
         cmd = build._cmd(py_version=3)
         self.assertIn('log-db = %s' % uri, cmd.get_config())
 
-    @patch('odoo.addons.runbot.models.build.os.path.isdir')
-    @patch('odoo.addons.runbot.models.build.os.path.isfile')
-    def test_build_cmd_server_path_no_dep(self, mock_is_file, mock_is_dir):
+    def test_build_cmd_server_path_no_dep(self):
         """ test that the server path and addons path """
-        mock_is_file.return_value = True
-        mock_is_dir.return_value = True
         build = self.create_build({
             'branch_id': self.branch.id,
             'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
@@ -127,9 +123,7 @@ class Test_Build(RunbotCase):
         addons_path_pos = cmd.index('--addons-path') + 1
         self.assertEqual(cmd[addons_path_pos], 'bar/addons,bar/core/addons')
 
-    @patch('odoo.addons.runbot.models.build.os.path.isdir')
-    @patch('odoo.addons.runbot.models.build.os.path.isfile')
-    def test_build_cmd_server_path_with_dep(self, mock_is_file, mock_is_dir):
+    def test_build_cmd_server_path_with_dep(self):
         """ test that the server path and addons path """
 
         def is_file(file):
@@ -145,8 +139,9 @@ class Test_Build(RunbotCase):
             self.assertTrue(any([path in file for path in paths]))  # checking that addons path existence check looks ok
             return True
 
-        mock_is_file.side_effect = is_file
-        mock_is_dir.side_effect = is_dir
+        self.patchers['isfile'].side_effect = is_file
+        self.patchers['isdir'].side_effect = is_dir
+
         repo_ent = self.env['runbot.repo'].create({
             'name': 'bla@example.com:foo/bar-ent',
             'server_files': '',
@@ -175,17 +170,14 @@ class Test_Build(RunbotCase):
         self.assertEqual('bar/server.py', cmd[1])
         self.assertEqual('python3', cmd[0])
 
-    @patch('odoo.addons.runbot.models.build.os.path.isdir')
-    @patch('odoo.addons.runbot.models.build.os.path.isfile')
-    def test_build_cmd_server_path_with_dep_collision(self, mock_is_file, mock_is_dir):
+    def test_build_cmd_server_path_with_dep_collision(self):
         """ test that the server path and addons path """
 
         def is_file(file):
             self.assertIn('sources/bar/dfdfcfcf0000ffffffffffffffffffffffffffff/server.py', file)
             return True
 
-        mock_is_file.side_effect = is_file
-        mock_is_dir.return_value = True
+        self.patchers['isfile'].side_effect = is_file
         repo_ent = self.env['runbot.repo'].create({
             'name': 'bla@example.com:foo-ent/bar',
             'server_files': '',
