@@ -104,7 +104,7 @@ class TestBuildConfigStep(common.TransactionCase):
         mock_local_pg_createdb.return_value = True
 
         def docker_run(cmd, log_path, build_dir, *args, **kwargs):
-            cmds = cmd.split(' && ')
+            cmds = cmd.build().split(' && ')
             self.assertEqual(cmds[0], 'sudo pip3 install -r bar/requirements.txt')
             self.assertEqual(cmds[1].split(' bar/server.py')[0], 'python3 -m coverage run --branch --source /data/build --omit *__manifest__.py')
             self.assertEqual(cmds[2].split(' ; ')[0], 'python3 -m coverage html -d /data/build/coverage --ignore-errors')
@@ -146,7 +146,7 @@ class TestBuildConfigStep(common.TransactionCase):
         mock_grep.return_value = True
 
         def docker_run(cmd, log_path, build_dir, *args, **kwargs):
-            cmds = cmd.split(' && ')
+            cmds = cmd.build().split(' && ')
             self.assertEqual(cmds[1].split(' bar/server.py')[0], 'python3')
             tags = cmds[1].split('--test-tags ')[1].split(' ')[0]
             self.assertEqual(tags, '/module,:class.method')
@@ -156,7 +156,7 @@ class TestBuildConfigStep(common.TransactionCase):
 
         config_step.enable_auto_tags =True
         def docker_run(cmd, log_path, build_dir, *args, **kwargs):
-            cmds = cmd.split(' && ')
+            cmds = cmd.build().split(' && ')
             self.assertEqual(cmds[1].split(' bar/server.py')[0], 'python3')
             tags = cmds[1].split('--test-tags ')[1].split(' ')[0]
             self.assertEqual(tags, '/module,:class.method,-:otherclass.othertest')
