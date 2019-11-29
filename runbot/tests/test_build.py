@@ -125,7 +125,13 @@ class Test_Build(RunbotCase):
         """ test that the server path and addons path """
 
         def is_file(file):
-            self.assertIn('sources/bar/dfdfcfcf0000ffffffffffffffffffffffffffff/server.py', file)
+            self.assertIn(file, [
+                '/tmp/runbot_test/static/sources/bar-ent/d0d0caca0000ffffffffffffffffffffffffffff/requirements.txt',
+                '/tmp/runbot_test/static/sources/bar/dfdfcfcf0000ffffffffffffffffffffffffffff/requirements.txt',
+                '/tmp/runbot_test/static/sources/bar/dfdfcfcf0000ffffffffffffffffffffffffffff/server.py'
+            ])
+            if file == '/tmp/runbot_test/static/sources/bar-ent/d0d0caca0000ffffffffffffffffffffffffffff/requirements.txt':
+                return False
             return True
 
         def is_dir(file):
@@ -172,7 +178,12 @@ class Test_Build(RunbotCase):
         """ test that the server path and addons path """
 
         def is_file(file):
-            self.assertIn('sources/bar/dfdfcfcf0000ffffffffffffffffffffffffffff/server.py', file)
+            self.assertIn(file, [
+                '/tmp/runbot_test/static/sources/bar/dfdfcfcf0000ffffffffffffffffffffffffffff/requirements.txt',
+                '/tmp/runbot_test/static/sources/bar/d0d0caca0000ffffffffffffffffffffffffffff/requirements.txt',
+                '/tmp/runbot_test/static/sources/bar/dfdfcfcf0000ffffffffffffffffffffffffffff/server.py'])
+            if file == '/tmp/runbot_test/static/sources/bar/dfdfcfcf0000ffffffffffffffffffffffffffff/requirements.txt':
+                return False
             return True
 
         self.patchers['isfile'].side_effect = is_file
