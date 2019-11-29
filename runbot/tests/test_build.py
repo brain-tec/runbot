@@ -31,8 +31,6 @@ class Test_Build(RunbotCase):
             'repo_id': self.repo.id,
             'name': 'refs/heads/11.0'
         })
-        self.start_patcher('isdir', 'odoo.addons.runbot.common.os.path.isdir', True)
-        self.start_patcher('isfile', 'odoo.addons.runbot.common.os.path.isfile', True)
 
     def test_base_fields(self):
         build = self.create_build({

@@ -62,9 +62,11 @@ def now():
 
 
 def grep(filename, string):
-    if os.path.isfile(filename):
-        return open(filename).read().find(string) != -1
-    return False
+    return find(filename, string) != -1
+
+
+def find(filename, string):
+    return open(filename).read().find(string)
 
 
 def uniq_list(l):

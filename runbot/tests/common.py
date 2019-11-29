@@ -21,19 +21,25 @@ class RunbotCase(TransactionCase):
         self.patchers = {}
 
         def git_side_effect(cmd):
-            if re.match(r'show (--pretty="%H -- %s" )?-s (.*)', ' '.join(cmd)):
+            if cmd[:2] == ['show', '-s'] or cmd[:3] == ['show', '--pretty="%H -- %s"', '-s']:
                 return 'commit message for %s' % cmd[-1]
+            if cmd[:2] == ['cat-file', '-e']:
+                return True
             else:
                 print('Unsupported mock command %s' % cmd)
 
         self.start_patcher('git_patcher', 'odoo.addons.runbot.models.repo.runbot_repo._git', side_effect=git_side_effect)
         self.start_patcher('fqdn_patcher', 'odoo.addons.runbot.common.socket.getfqdn', 'host.runbot.com')
-        self.start_patcher('grep_patcher', 'odoo.addons.runbot.models.build.grep', True)
+        self.start_patcher('grep_patcher', 'odoo.addons.runbot.common.find', 0)
         self.start_patcher('github_patcher', 'odoo.addons.runbot.models.repo.runbot_repo._github', {})
         self.start_patcher('is_on_remote_patcher', 'odoo.addons.runbot.models.branch.runbot_branch._is_on_remote', True)
         self.start_patcher('repo_root_patcher', 'odoo.addons.runbot.models.repo.runbot_repo._root', '/tmp/runbot_test/static')
         self.start_patcher('makedirs', 'odoo.addons.runbot.common.os.makedirs', True)
         self.start_patcher('mkdir', 'odoo.addons.runbot.common.os.mkdir', True)
+        self.start_patcher('mkdir', 'odoo.addons.runbot.common.local_pgadmin_cursor', False)  # avoid to create databases
+        self.start_patcher('isdir', 'odoo.addons.runbot.common.os.path.isdir', True)
+        self.start_patcher('isfile', 'odoo.addons.runbot.common.os.path.isfile', True)
+        self.start_patcher('docker_run', 'odoo.addons.runbot.models.build_config.docker_run')
 
 
     def start_patcher(self, patcher_name, patcher_path, return_value=Dummy, side_effect=Dummy):
