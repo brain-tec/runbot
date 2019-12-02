@@ -1,9 +1,6 @@
 # -*- coding: utf-8 -*-
-from collections import defaultdict
 from odoo.tests.common import TransactionCase
 from unittest.mock import patch
-from subprocess import CalledProcessError
-import re
 
 class Dummy():
     ...
@@ -40,7 +37,8 @@ class RunbotCase(TransactionCase):
         self.start_patcher('isdir', 'odoo.addons.runbot.common.os.path.isdir', True)
         self.start_patcher('isfile', 'odoo.addons.runbot.common.os.path.isfile', True)
         self.start_patcher('docker_run', 'odoo.addons.runbot.models.build_config.docker_run')
-
+        self.start_patcher('docker_ps', 'odoo.addons.runbot.models.repo.docker_ps', [])
+        self.start_patcher('docker_stop', 'odoo.addons.runbot.models.repo.docker_stop')
 
     def start_patcher(self, patcher_name, patcher_path, return_value=Dummy, side_effect=Dummy):
         patcher = patch(patcher_path)
