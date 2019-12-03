@@ -2,14 +2,13 @@
 import fnmatch
 import glob
 import logging
-import os
 import pwd
 import re
 import shutil
 import subprocess
 import time
 import datetime
-from ..common import dt2time, fqdn, now, grep, uniq_list, local_pgadmin_cursor, s2human, Commit, dest_reg
+from ..common import dt2time, fqdn, now, grep, uniq_list, local_pgadmin_cursor, s2human, Commit, dest_reg, os
 from ..container import docker_build, docker_stop, docker_is_running, Command
 from odoo.addons.runbot.models.repo import RunbotException
 from odoo import models, fields, api
@@ -382,10 +381,7 @@ class runbot_build(models.Model):
 
     def _get_params(self):
         message = False
-        try:
-            message = self.repo_id._git(['show', '-s', self.name])
-        except CalledProcessError:
-            pass  # todo remove this try catch and make correct patch for _git
+        message = self.repo_id._git(['show', '-s', self.name])
         params = defaultdict(lambda: defaultdict(str))
         if message:
             regex = re.compile(r'^[\t ]*Runbot-dependency: ([A-Za-z0-9\-_]+/[A-Za-z0-9\-_]+):([0-9A-Fa-f\-]*) *(#.*)?$', re.M)  # dep:repo:hash #comment
@@ -691,7 +687,7 @@ class runbot_build(models.Model):
 
     def _get_available_modules(self, commit):
         for manifest_file_name in commit.repo.manifest_files.split(','):  # '__manifest__.py' '__openerp__.py'
-            for addons_path in commit.repo.addons_paths.split(','):  # '' 'addons' 'odoo/addons'
+            for addons_path in (commit.repo.addons_paths or '').split(','):  # '' 'addons' 'odoo/addons'
                 sep = os.path.join(addons_path, '*')
                 for manifest_path in glob.glob(commit._source_path(sep, manifest_file_name)):
                     module = os.path.basename(os.path.dirname(manifest_path))
@@ -866,7 +862,7 @@ class runbot_build(models.Model):
     def _get_addons_path(self, commits=None):
         for commit in (commits or self._get_all_commit()):
             source_path = self._docker_source_folder(commit)
-            for addons_path in commit.repo.addons_paths.split(','):
+            for addons_path in (commit.repo.addons_paths or '').split(','):
                 if os.path.isdir(commit._source_path(addons_path)):
                     yield os.path.join(source_path, addons_path).strip(os.sep)
 
@@ -887,11 +883,16 @@ class runbot_build(models.Model):
         build = self
         python_params = python_params or []
         py_version = py_version if py_version is not None else build._get_py_version()
+        pres = []
+        for commit in self._get_all_commit():
+            if os.path.isfile(commit._source_path('requirements.txt')):
+                repo_dir = self._docker_source_folder(commit)
+                requirement_path = os.path.join(repo_dir, 'requirements.txt')
+                pres.append(['sudo', 'pip%s' % py_version, 'install', '-r', '%s' % requirement_path])
+
+        addons_paths = self._get_addons_path()
         (server_commit, server_file) = self._get_server_info()
         server_dir = self._docker_source_folder(server_commit)
-        addons_paths = self._get_addons_path()
-        requirement_path = os.path.join(server_dir, 'requirements.txt')
-        pres = [['sudo', 'pip%s' % py_version, 'install', '-r', '%s' % requirement_path]]
 
         # commandline
         cmd = ['python%s' % py_version] + python_params + [os.path.join(server_dir, server_file), '--addons-path', ",".join(addons_paths)]
@@ -909,24 +910,24 @@ class runbot_build(models.Model):
 
         if local_only:
             if grep(config_path, "--http-interface"):
-                command.add_config_tuple("http-interface", "127.0.0.1")
+                command.add_config_tuple("http_interface", "127.0.0.1")
             elif grep(config_path, "--xmlrpc-interface"):
-                command.add_config_tuple("xmlrpc-interface", "127.0.0.1")
+                command.add_config_tuple("xmlrpc_interface", "127.0.0.1")
 
         if grep(config_path, "log-db"):
             logdb_uri = self.env['ir.config_parameter'].get_param('runbot.runbot_logdb_uri')
             logdb = self.env.cr.dbname
             if logdb_uri and grep(build._server('sql_db.py'), 'allow_uri'):
                 logdb = '%s' % logdb_uri
-            command.add_config_tuple("log-db", "%s" % logdb)
+            command.add_config_tuple("log_db", "%s" % logdb)
             if grep(build._server('tools/config.py'), 'log-db-level'):
-                command.add_config_tuple("log-db-level", '25')
+                command.add_config_tuple("log_db_level", '25')
 
         if grep(config_path, "data-dir"):
             datadir = build._path('datadir')
             if not os.path.exists(datadir):
                 os.mkdir(datadir)
-            command.add_config_tuple("data-dir", '/data/build/datadir')
+            command.add_config_tuple("data_dir", '/data/build/datadir')
 
         return command
 
