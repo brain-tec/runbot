@@ -267,7 +267,7 @@ class runbot_repo(models.Model):
 
         self.env.cr.execute("""
             SELECT DISTINCT ON (branch_id) name, branch_id
-            FROM runbot_build WHERE branch_id in %s ORDER BY branch_id,id DESC;
+            FROM runbot_build WHERE branch_id in %s AND build_type = 'normal' ORDER BY branch_id,id DESC;
         """, (tuple([ref_branches[r[0]] for r in refs]),))
         # generate a set of tuples (branch_id, sha)
         builds_candidates = {(r[1], r[0]) for r in self.env.cr.fetchall()}
@@ -293,6 +293,7 @@ class runbot_repo(models.Model):
                     'committer_email': committer_email,
                     'subject': subject,
                     'date': dateutil.parser.parse(date[:19]),
+                    'build_type': 'normal',
                 }
                 if not branch.sticky:
                     # pending builds are skipped as we have a new ref
@@ -505,11 +506,14 @@ class runbot_repo(models.Model):
             nginx_config = self.env['ir.ui.view'].render_template("runbot.nginx_config", settings)
             os.makedirs(nginx_dir, exist_ok=True)
             content = None
-            with open(os.path.join(nginx_dir, 'nginx.conf'), 'rb') as f:
-                content = f.read()
+            nginx_conf_path = os.path.join(nginx_dir, 'nginx.conf')
+            content = ''
+            if os.path.isfile(nginx_conf_path):
+                with open(nginx_conf_path, 'rb') as f:
+                    content = f.read()
             if content != nginx_config:
                 _logger.debug('reload nginx')
-                with open(os.path.join(nginx_dir, 'nginx.conf'), 'wb') as f:
+                with open(nginx_conf_path, 'wb') as f:
                     f.write(nginx_config)
                 try:
                     pid = int(open(os.path.join(nginx_dir, 'nginx.pid')).read().strip(' \n'))
@@ -647,17 +651,16 @@ class runbot_repo(models.Model):
             # we are comparing cannot_be_deleted_path with to keep to sensure that the algorithm is working, we want to avoid to erase file by mistake
             # note: it is possible that a parent_build is in testing without checkouting sources, but it should be exceptions
             if to_delete:
-                if cannot_be_deleted_path == to_keep:
-                    to_delete = list(to_delete)
-                    to_keep = list(to_keep)
-                    cannot_be_deleted_path = list(cannot_be_deleted_path)
-                    for source_dir in to_delete:
-                        _logger.info('Deleting source: %s' % source_dir)
-                        assert 'static' in source_dir
-                        shutil.rmtree(source_dir)
-                    _logger.info('%s/%s source folder where deleted (%s kept)' % (len(to_delete), len(to_delete+to_keep), len(to_keep)))
-                else:
+                if cannot_be_deleted_path != to_keep:
                     _logger.warning('Inconsistency between sources and database: \n%s \n%s' % (cannot_be_deleted_path-to_keep, to_keep-cannot_be_deleted_path))
+                to_delete = list(to_delete)
+                to_keep = list(to_keep)
+                cannot_be_deleted_path = list(cannot_be_deleted_path)
+                for source_dir in to_delete:
+                    _logger.info('Deleting source: %s' % source_dir)
+                    assert 'static' in source_dir
+                    shutil.rmtree(source_dir)
+                _logger.info('%s/%s source folder where deleted (%s kept)' % (len(to_delete), len(to_delete+to_keep), len(to_keep)))
 
         except:
             _logger.error('An exception occured while cleaning sources')
