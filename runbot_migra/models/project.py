@@ -10,6 +10,15 @@ from odoo import models, fields, api
 _logger = logging.getLogger(__name__)
 
 
+class Version(models.Model):
+
+    _name = "runbot_migra.version"
+    _description = "Odoo versions"
+
+    name = fields.Char('Version')
+    project_ids = fields.Many2many('runbot_migra.project', string='Projects')
+
+
 class Project(models.Model):
 
     _name = "runbot_migra.project"
@@ -26,7 +35,7 @@ class Project(models.Model):
     migration_scripts_branch = fields.Char(default='master')
     migration_scripts_dir = fields.Char(compute='_get_migration_scripts_dir', store=False, readonly=True)
     version_target = fields.Char('Targeted version', help='Final version, used by the update instance')
-    versions = fields.Char('Start versions', help='Comma separated intermediary versions')
+    version_ids = fields.Many2many('runbot_migra.version', string='Version Tags')
     build_ids = fields.One2many('runbot_migra.build', 'project_id', string='Builds')
 
     def _update_repos(self):
@@ -34,6 +43,25 @@ class Project(models.Model):
         repos = self.server_repo | self.addons_repo_ids | self.migration_scripts_repo
         for repo in repos:
             repo._update_git()
+
+    def _rebase_all(self):
+        self.ensure_one()
+        cmd = ['git', 'rebase']
+        # rebase servers worktrees
+        for worktree in [d.path for d in os.scandir(self.servers_dir) if d.is_dir()]:
+            _logger.info('rebasing server worktree %s', worktree)
+            subprocess.check_output(cmd, cwd=worktree)
+
+        # rebase addons worktrees
+        for addon_path in [ap.path for ap in os.scandir(self.addonss_dir) if ap.is_dir()]:
+            for worktree in [d.path for d in os.scandir(addon_path) if d.is_dir()]:
+                _logger.info('rebasing addon worktree %s', worktree)
+                subprocess.check_output(cmd, cwd=worktree)
+
+        # rebase migrations scripts
+        worktree = os.path.join(self.migration_scripts_dir, self.migration_scripts_branch)
+        _logger.info('rebasing migration script worktree %s', worktree)
+        subprocess.check_output(cmd, cwd=worktree)
 
     @api.depends('name')
     def _get_project_dir(self):
@@ -64,7 +92,7 @@ class Project(models.Model):
             _logger.warning('addons path "%s" not found', addons_path)
             return
         for f in os.listdir(addons_path):
-            if os.path.isdir(os.path.join(addons_path, f)):
+            if not f.startswith('.') and os.path.isdir(os.path.join(addons_path, f)):
                 yield f
 
     def _get_hashes(self):
@@ -80,7 +108,7 @@ class Project(models.Model):
         git_dir = self.migration_scripts_dir
         hashes[git_dir] = rev_parse(git_dir)
 
-        for version in [self.version_target] + self.versions.split(','):
+        for version in [self.version_target] + self.version_ids.mapped('name'):
             git_dir = os.path.join(self.servers_dir, version)
             hashes[git_dir] = rev_parse(git_dir)
 
@@ -116,24 +144,26 @@ class Project(models.Model):
         self._update_repos()
 
         # add worktrees if needed
-        for version in [self.version_target] + self.versions.split(','):
+        for version in [self.version_target] + self.version_ids.mapped('name'):
             self.server_repo._add_worktree(os.path.join(self.servers_dir, version), version)
 
         self.migration_scripts_repo._add_worktree(self.migration_scripts_dir, self.migration_scripts_branch)
 
         for addon_repo in self.addons_repo_ids:
             addon_dirname = addon_repo.name.strip('/').split('/')[-1]
-            for version in [self.version_target] + self.versions.split(','):
+            for version in [self.version_target] + self.version_ids.mapped('name'):
                 addon_path = os.path.join(self.addons_dir, addon_dirname)
                 addon_repo._add_worktree(os.path.join(addon_path, version), version)
+
+        self._rebase_all()
 
         addons = self._get_addons(self.version_target)
 
         # #### TO REMOVE ####
-        addons = addons[:8]  # LIMIT TO 4 ADDONS
+        # addons = addons[:8]  # LIMIT TO 4 ADDONS
         # ###################
 
-        for version in [v.strip() for v in self.versions.strip().split(',')]:
+        for version in [v.strip() for v in self.version_ids.mapped('name')]:
             for addon in addons:
                 src_db_name = '%s-upddb-%s' % (version, addon)
                 target_db_name = '%s-%s-upddb-%s' % (self.version_target, version, addon)

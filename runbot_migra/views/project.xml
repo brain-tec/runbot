@@ -10,7 +10,7 @@
                     </div>
                     <group>
                       <field name="version_target"/>
-                      <field name="versions"/>
+                      <field name="version_ids" widget="many2many_tags"/>
                     </group>
                     <separator string="Repositories"/>
                       <group>
@@ -19,6 +19,9 @@
                       <group>
                         <field name="migration_scripts_repo" string="Migration Scripts Repo"/>
                         <field name="migration_scripts_branch" string="Migration Scrips Branch"/>
+                      </group>
+                      <group>
+                        <field name="active"/>
                       </group>
                     <field name="addons_repo_ids" string="Other addons repos">
                         <tree editable="bottom">

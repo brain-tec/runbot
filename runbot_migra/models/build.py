@@ -8,7 +8,7 @@ import psycopg2
 import subprocess
 
 from odoo import models, fields, api
-from ..container import Command, docker_run, docker_ps, docker_is_running
+from ..container import Command, docker_run, docker_ps, docker_is_running, docker_build
 
 
 _logger = logging.getLogger(__name__)
@@ -127,11 +127,22 @@ class Build(models.Model):
             for f in fnmatch.filter(os.listdir(build.logs_dir), '*%s.txt*' % build.name):
                 os.unlink(os.path.join(build.logs_dir, f))
 
+    def build_docker_container(self):
+        self.ensure_one()
+        try:
+            _logger.info('Building docker image')
+            log_path = os.path.join(self.logs_dir, 'docker_build.txt')
+            docker_build(log_path, self.build_dir)
+        except Exception:
+            _logger.exception('Failed to build docker containe')
+
     def _launch_odoo(self, db_name, modules_to_install, log_path, version):
         self.ensure_one()
         py_version = '3'
         pres = []
         posts = []
+
+        self.build_docker_container()
 
         ro_volumes = {'addons/%s' % '/'.join(a.split('/')[-2:-1]): a for a in self._get_addons_dirs(version)}
 
