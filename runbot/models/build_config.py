@@ -9,6 +9,7 @@ from ..container import docker_run, docker_get_gateway_ip, Command
 from odoo import models, fields, api
 from odoo.exceptions import UserError, ValidationError
 from odoo.tools.safe_eval import safe_eval, test_python_expr
+from odoo.addons.runbot.models.repo import RunbotException
 
 _logger = logging.getLogger(__name__)
 
@@ -243,7 +244,13 @@ class ConfigStep(models.Model):
             'grep': grep,
             'rfind': rfind,
         }
-        return safe_eval(self.sudo().python_code.strip(), eval_ctx, mode="exec", nocopy=True)
+        try:
+            safe_eval(self.sudo().python_code.strip(), eval_ctx, mode="exec", nocopy=True)
+        except RunbotException as e:
+            message = e.args[0]
+            build._log("run", message, level='ERROR')
+            build._kill(result='ko')
+
 
     def _is_docker_step(self):
         if not self:

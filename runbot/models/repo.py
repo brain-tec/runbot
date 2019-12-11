@@ -409,6 +409,7 @@ class runbot_repo(models.Model):
         repo = self
         if not os.path.isdir(os.path.join(repo.path, 'refs')):
             _logger.info("Cloning repository '%s' in '%s'" % (repo.name, repo.path))
+            #time.sleep(10)
             subprocess.call(['git', 'clone', '--bare', repo.name, repo.path])
 
     def _update_git(self, force):
@@ -476,6 +477,7 @@ class runbot_repo(models.Model):
         available_slots = workers - nb_testing
         reserved_slots = Build.search_count(domain_host + [('local_state', '=', 'pending')])
         assignable_slots = (available_slots - reserved_slots) if not assigned_only else 0
+
         if available_slots > 0:
             if assignable_slots > 0:  # note: slots have been addapt to be able to force host on pending build. Normally there is no pending with host.
                 # commit transaction to reduce the critical section duration
@@ -512,6 +514,7 @@ class runbot_repo(models.Model):
                     return self.env.cr.fetchall()
 
                 allocated = allocate_builds("""AND runbot_build.build_type != 'scheduled'""", assignable_slots)
+
                 if allocated:
                     _logger.debug('Normal builds %s where allocated to runbot' % allocated)
                 weak_slot = assignable_slots - len(allocated) - 1
@@ -647,35 +650,41 @@ class runbot_repo(models.Model):
         icp = self.env['ir.config_parameter']
         update_frequency = int(icp.get_param('runbot.runbot_update_frequency', default=10))
         while time.time() - start_time < timeout:
-            repos = self.search([('mode', '!=', 'disabled')])
-            try:
-                repos._scheduler(host)
-                host.last_success = fields.Datetime.now()
-                self.env.cr.commit()
-                self.env.reset()
-                self = self.env()[self._name]
-                self._reload_nginx()
+            if self._scheduler_loop_turn(host):
                 time.sleep(update_frequency)
-            except TransactionRollbackError: # can lead to psycopg2.InternalError'>: "current transaction is aborted, commands ignored until end of transaction block
-                _logger.exception('Trying to rollback')
-                self.env.cr.rollback()
-                self.env.reset()
-                time.sleep(random.uniform(0, 3))
-            except Exception as e:
-                with registry(self._cr.dbname).cursor() as cr:  # user another cursor since transaction will be rollbacked
-                    message = str(e)
-                    chost = host.with_env(self.env(cr=cr))
-                    if chost.last_exception == message:
-                        chost.exception_count += 1
-                    else:
-                        chost.with_env(self.env(cr=cr)).last_exception = str(e)
-                        chost.exception_count = 1
-                raise
 
-        if host.last_exception:
-            host.last_exception = ""
-            host.exception_count = 0
         host.last_end_loop = fields.Datetime.now()
+
+    def _scheduler_loop_turn(self, host):
+        repos = self.search([('mode', '!=', 'disabled')])
+        try:
+            repos._scheduler(host)
+            host.last_success = fields.Datetime.now()
+            self.env.cr.commit()
+            self.env.reset()
+            self = self.env()[self._name]
+            self._reload_nginx()
+            self.env.cr.commit()
+            self.env.reset()
+        except Exception as e:
+            self.env.cr.rollback()
+            self.env.reset()
+            _logger.exception(e)
+            message = str(e)
+            if host.last_exception == message:
+                host.exception_count += 1
+            else:
+                host.last_exception = str(e)
+                host.exception_count = 1
+            self.env.cr.commit()
+            self.env.reset()
+            time.sleep(random.uniform(0, 3))
+            return False
+        else:
+            if host.last_exception:
+                host.last_exception = ""
+                host.exception_count = 0
+            return True
 
     def _source_cleanup(self):
         try:
