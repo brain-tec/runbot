@@ -38,8 +38,10 @@ class RunbotClient():
                 host.set_psql_conn_count()
                 logging.info('Host %s running with %s slots on pid %s%s', host.name, host.get_nb_worker(), os.getpid(), ' (assigned only)' if host.assigned_only else '')
             count += 1
-            if self.env['runbot.repo']._scheduler_loop_turn(host):
-                self.sleep(1)
+            sleep_time = self.env['runbot.repo']._scheduler_loop_turn(host)
+            self.env.cr.commit()
+            self.env.reset()
+            self.sleep(sleep_time)
             if self.ask_interrupt.is_set():
                 return
 

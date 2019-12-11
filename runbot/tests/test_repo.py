@@ -293,8 +293,8 @@ class Test_Repo_Scheduler(RunbotCase):
             'local_state': 'pending',
         })
         builds.append(build)
-
-        self.foo_repo._scheduler()
+        host = self.env['runbot.host']._get_current()
+        self.foo_repo._scheduler(host)
 
         build.invalidate_cache()
         scheduled_build.invalidate_cache()
@@ -304,7 +304,7 @@ class Test_Repo_Scheduler(RunbotCase):
         # give some room for the pending build
         self.Build.search([('name', '=', 'a')]).write({'local_state': 'done'})
 
-        self.foo_repo._scheduler()
+        self.foo_repo._scheduler(host)
         build.invalidate_cache()
         scheduled_build.invalidate_cache()
         self.assertEqual(build.host, 'host.runbot.com')

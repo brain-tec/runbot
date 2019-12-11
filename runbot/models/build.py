@@ -571,14 +571,42 @@ class runbot_build(models.Model):
         self.ensure_one()
         return '%s_%s' % (self.dest, self.active_step.name)
 
+    def _init_pendings(self):
+        for build in self:
+            if build.local_state != 'pending':
+                raise UserError("Build %s is not pending" % build.id)
+            if not build.host:
+                raise UserError("Build %s does not have an host" % build.id)
+            # allocate port and schedule first job
+            values = {
+                'host': fqdn(), # or ip? of false?
+                'port': self._find_port(),
+                'job_start': now(),
+                'build_start': now(),
+                'job_end': False,
+            }
+            values.update(build._next_job_values())
+            build.write(values)
+            if not build.active_step:
+                build._log('_schedule', 'No job in config, doing nothing')
+                continue
+            try:
+                build._log('_schedule', 'Init build environment with config %s ' % build.config_id.name)
+                # notify pending build - avoid confusing users by saying nothing
+                build._github_status()
+                os.makedirs(build._path('logs'), exist_ok=True)
+                build._log('_schedule', 'Building docker image')
+                docker_build(build._path('logs', 'docker_build.txt'), build._path())
+            except Exception:
+                _logger.exception('Failed initiating build %s', build.dest)
+                build._log('_schedule', 'Failed initiating build')
+                build._kill(result='ko')
+                continue
+
     def _schedule(self):
         """schedule the build"""
         icp = self.env['ir.config_parameter']
-        # For retro-compatibility, keep this parameter in seconds
-
         for build in self:
-            self.env.cr.commit()  # commit between each build to minimise transactionnal errors due to state computations
-            self.invalidate_cache()
             if build.requested_action == 'deathrow':
                 result = None
                 if build.local_state != 'running' and build.global_result not in ('warn', 'ko'):
@@ -615,34 +643,7 @@ class runbot_build(models.Model):
                         build.write({'requested_action': False, 'local_state': 'done'})
                 continue
 
-            if build.local_state == 'pending':
-                # allocate port and schedule first job
-                port = self._find_port()
-                values = {
-                    'host': fqdn(), # or ip? of false? 
-                    'port': port,
-                    'job_start': now(),
-                    'build_start': now(),
-                    'job_end': False,
-                }
-                values.update(build._next_job_values())
-                build.write(values)
-                if not build.active_step:
-                    build._log('_schedule', 'No job in config, doing nothing')
-                    continue
-                try:
-                    build._log('_schedule', 'Init build environment with config %s ' % build.config_id.name)
-                    # notify pending build - avoid confusing users by saying nothing
-                    build._github_status()
-                    os.makedirs(build._path('logs'), exist_ok=True)
-                    build._log('_schedule', 'Building docker image')
-                    docker_build(build._path('logs', 'docker_build.txt'), build._path())
-                except Exception:
-                    _logger.exception('Failed initiating build %s', build.dest)
-                    build._log('_schedule', 'Failed initiating build')
-                    build._kill(result='ko')
-                    continue
-            else:  # testing/running build
+            if build.local_state != 'pending':
                 if build.local_state == 'testing':
                     # failfast in case of docker error (triggered in database)
                     if build.triggered_result:
