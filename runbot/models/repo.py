@@ -509,18 +509,26 @@ class runbot_repo(models.Model):
         # terminate and reap doomed build
         domain_host = self.build_domain_host(host)
         Build = self.env['runbot.build']
-        build_ids = Build.search(domain_host + [('local_state', '=', 'running'), ('keep_running', '!=', True)], order='job_start desc').ids
-        # sort builds: the last build of each sticky branch then the rest
-        sticky = {}
-        non_sticky = []
-        for build in Build.browse(build_ids):
-            if build.branch_id.sticky and build.branch_id.id not in sticky:
-                sticky[build.branch_id.id] = build.id
-            else:
-                non_sticky.append(build.id)
-        build_ids = list(sticky.values())
-        build_ids += non_sticky
-        # terminate extra running builds
+        # some builds are marked as keep running
+        cannot_be_killed_ids = Build.search(domain_host + [('keep_running', '!=', True)]).ids
+        # we want to keep one build running per sticky, no mather which host
+        sticky_branches_ids = self.env['runbot.branch'].search([('sticky', '=', True)]).ids
+        self.env.cr.execute("""
+            SELECT id FROM runbot_build
+            WHERE id in (
+                SELECT max(id) FROM runbot_build 
+                GROUP BY branch_id 
+                WHERE branch_id = ANY(%s)
+                AND local_state = 'running'
+                )
+            AND host = '%s'
+            ORDER BY id DESC
+            """, [sticky_branches_ids, host.name]
+        )
+        cannot_be_killed_ids += self.env.cr.fetchall()
+        cannot_be_killed_ids = cannot_be_killed_ids[:running_max]  # ensure that we don't try to keep more than we can handle
+
+        build_ids = Build.search(domain_host + [('local_state', '=', 'running'), ('id', 'not in', cannot_be_killed)], order='job_start desc').ids
         Build.browse(build_ids)[running_max:]._kill()
         Build.browse(build_ids)._reap()
 
