@@ -839,16 +839,6 @@ class runbot_build(models.Model):
             'line': '0',
         })
 
-    def _reap(self):
-        while True:
-            try:
-                pid, status, rusage = os.wait3(os.WNOHANG)
-            except OSError:
-                break
-            if pid == 0:
-                break
-            _logger.debug('reaping: pid: %s status: %s', pid, status)
-
     def _kill(self, result=None):
         host = fqdn()
         for build in self:

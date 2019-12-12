@@ -530,7 +530,6 @@ class runbot_repo(models.Model):
 
         build_ids = Build.search(domain_host + [('local_state', '=', 'running'), ('id', 'not in', cannot_be_killed)], order='job_start desc').ids
         Build.browse(build_ids)[running_max:]._kill()
-        Build.browse(build_ids)._reap()
 
     def _allocate_builds(self, host, nb_slots, domain=None):
         if nb_slots <= 0:

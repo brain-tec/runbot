@@ -75,7 +75,7 @@ class Runbot(Controller):
                         max(case when br_bu.row = 4 then br_bu.build_id end)
                     FROM (
                         SELECT 
-                            br.id AS branch_id, 
+                            br.id AS branch_id,
                             bu.id AS build_id,
                             row_number() OVER (PARTITION BY branch_id) AS row
                         FROM 
