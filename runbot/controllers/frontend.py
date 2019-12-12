@@ -162,23 +162,12 @@ class Runbot(Controller):
 
         show_rebuild_button = Build.search([('branch_id', '=', build.branch_id.id), ('parent_id', '=', False)], limit=1) == build
 
-        domain = [('build_id', '=', build.real_build.id)]
-        log_type = request.params.get('type', '')
-        if log_type:
-            domain.append(('type', '=', log_type))
-        level = request.params.get('level', '')
-        if level:
-            domain.append(('level', '=', level.upper()))
-        if search:
-            domain.append(('message', 'ilike', search))
-        logging_ids = Logging.sudo().search(domain, limit=10000)
-
         context = {
             'repo': build.repo_id,
             'build': build,
             'fqdn': fqdn(),
             'br': {'branch': build.branch_id},
-            'show_rebuild_button': show_rebuild_button
+            'show_rebuild_button': show_rebuild_button,
         }
         return request.render("runbot.build", context)
 

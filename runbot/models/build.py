@@ -49,7 +49,7 @@ class runbot_build(models.Model):
     committer_email = fields.Char('Committer Email')
     subject = fields.Text('Subject')
     sequence = fields.Integer('Sequence')
-    log_ids = fields.One2many('ir.logging', compute='_compute_log_ids', readonly=1, store=False)
+    log_ids = fields.One2many('ir.logging', 'build_id', string='Logs')
 
     # state machine
 
@@ -192,13 +192,6 @@ class runbot_build(models.Model):
     def _compute_real_build(self):
         for build in self:
             build.real_build = build.duplicate_id or build
-
-    def _compute_log_ids(self):
-        Logging = self.env['ir.logging']
-        for build in self:
-            build_ids = [build.real_build.id] + build.children_ids.ids
-            domain = [('build_id', 'in', build_ids)]
-            build.log_ids = Logging.sudo().search(domain).ids
 
     def copy(self, values=None):
         raise UserError("Cannot duplicate build!")
