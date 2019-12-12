@@ -194,10 +194,11 @@ class runbot_build(models.Model):
             build.real_build = build.duplicate_id or build
 
     def _compute_log_ids(self):
-        Logging = request.env['ir.logging']
+        Logging = self.env['ir.logging']
         for build in self:
-            domain = [('build_id', '=', build.real_build.id)]
-            build.log_ids = Logging.sudo().search(domain)
+            build_ids = [build.real_build.id] + build.children_ids.ids
+            domain = [('build_id', 'in', build_ids)]
+            build.log_ids = Logging.sudo().search(domain).ids
 
     def copy(self, values=None):
         raise UserError("Cannot duplicate build!")
