@@ -160,9 +160,8 @@ class Runbot(Controller):
         if not build.exists():
             return request.not_found()
 
-        # other builds
-        build_ids = Build.search([('branch_id', '=', build.branch_id.id)], limit=100)
-        other_builds = Build.browse(build_ids)
+        show_rebuild_button = Build.search([('branch_id', '=', build.branch_id.id), ('parent_id', '=', False)], limit=1) == build
+
         domain = [('build_id', '=', build.real_build.id)]
         log_type = request.params.get('type', '')
         if log_type:
@@ -179,9 +178,7 @@ class Runbot(Controller):
             'build': build,
             'fqdn': fqdn(),
             'br': {'branch': build.branch_id},
-            'logs': Logging.sudo().browse(logging_ids).ids,
-            'other_builds': other_builds.ids,
-            'bu_index': 0 if build == build_ids[0] else -1
+            'show_rebuild_button': show_rebuild_button
         }
         return request.render("runbot.build", context)
 
@@ -357,4 +354,3 @@ class Runbot(Controller):
 
         context = {'pager': pager, 'builds': builds}
         return request.render("runbot.branch", context)
-
