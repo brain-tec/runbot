@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from odoo.http import Controller, request, route
+from collections import defaultdict
 
 
 class RunbotMigration(Controller):
@@ -18,9 +19,14 @@ class RunbotMigration(Controller):
             return request.not_found()
 
         hashes = project._get_hashes()
+        addons_builds = defaultdict(dict)
+        for b in project.build_ids:
+            addons_builds[b.addon][b.version_src] = b
+
         context = {
             'project': project,
             'hashes': hashes,
+            'addons_builds': addons_builds,
         }
         return request.render("runbot_migra.project", context)
 

@@ -44,24 +44,25 @@ class Project(models.Model):
         for repo in repos:
             repo._update_git()
 
-    def _rebase_all(self):
+    def _reset_worktrees(self):
         self.ensure_one()
-        cmd = ['git', 'rebase']
         # rebase servers worktrees
-        for worktree in [d.path for d in os.scandir(self.servers_dir) if d.is_dir()]:
-            _logger.info('rebasing server worktree %s', worktree)
-            subprocess.check_output(cmd, cwd=worktree)
+        for worktree in [d for d in os.scandir(self.servers_dir) if d.is_dir()]:
+            _logger.info('resetting server worktree %s', worktree.path)
+            cmd = ['git', 'reset', '--hard', worktree.name]
+            subprocess.check_output(cmd, cwd=worktree.path)
 
         # rebase addons worktrees
-        for addon_path in [ap.path for ap in os.scandir(self.addonss_dir) if ap.is_dir()]:
-            for worktree in [d.path for d in os.scandir(addon_path) if d.is_dir()]:
-                _logger.info('rebasing addon worktree %s', worktree)
-                subprocess.check_output(cmd, cwd=worktree)
+        for addon_path in [ap.path for ap in os.scandir(self.addons_dir) if ap.is_dir()]:
+            for worktree in [d for d in os.scandir(addon_path) if d.is_dir()]:
+                _logger.info('ressetting addon worktree %s', worktree.path)
+                cmd = ['git', 'reset', '--hard', worktree.name]
+                subprocess.check_output(cmd, cwd=worktree.path)
 
         # rebase migrations scripts
-        worktree = os.path.join(self.migration_scripts_dir, self.migration_scripts_branch)
-        _logger.info('rebasing migration script worktree %s', worktree)
-        subprocess.check_output(cmd, cwd=worktree)
+        _logger.info('ressetting migration script worktree %s', self.migration_scripts_dir)
+        cmd = ['git', 'reset', '--hard', self.migration_scripts_branch]
+        subprocess.check_output(cmd, cwd=self.migration_scripts_dir)
 
     @api.depends('name')
     def _get_project_dir(self):
@@ -101,7 +102,11 @@ class Project(models.Model):
             if not git_dir.endswith('.git'):
                 git_dir = os.path.join(git_dir, '.git')
             cmd = ['git', '--git-dir=%s' % git_dir, 'rev-parse', 'HEAD']
-            return subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode()
+            try:
+                res = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode()
+            except subprocess.CalledProcessError:
+                res = 'Not a git dir'
+            return res
 
         self.ensure_one()
         hashes = {}
@@ -155,7 +160,12 @@ class Project(models.Model):
                 addon_path = os.path.join(self.addons_dir, addon_dirname)
                 addon_repo._add_worktree(os.path.join(addon_path, version), version)
 
-        self._rebase_all()
+        self._reset_worktrees()
+
+        # create a broken symlink
+        symlink_target = os.path.join(self.servers_dir, self.version_target, 'odoo/addons/base/maintenance')
+        if not os.path.islink(symlink_target):
+            os.symlink('/data/build/migration_scripts',  symlink_target)
 
         addons = self._get_addons(self.version_target)
 

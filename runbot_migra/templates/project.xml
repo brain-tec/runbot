@@ -32,28 +32,48 @@
         <section class="row">
           <h2>Project <t t-esc="project.name"/></h2>
             <section>
-              <h3>Hashes</h3>
-              <dl class="row small">
-                <t t-foreach="hashes" t-as="hash">
-                  <dt class="col-sm-3"><t t-esc="'/'.join(hash.split('/')[-2:])"/></dt>
-                  <dd class="col-sm-9"><t t-esc="hashes[hash]"/></dd>
-                </t>
-              </dl>
+              <div class="row">
+                <div class="col-sm-6">
+                  <h3>Hashes</h3>
+                  <dl class="row small">
+                    <t t-foreach="hashes" t-as="hash">
+                      <dt class="col-sm-3"><t t-esc="'/'.join(hash.split('/')[-2:])"/></dt>
+                      <dd class="col-sm-9"><t t-esc="hashes[hash]"/></dd>
+                    </t>
+                  </dl>
+                </div>
+                <div class="col-sm-6">
+                  <h3>Results</h3>
+                  <p class="text-success">Successful builds: <t t-esc=" project.build_ids.search_count([('result', '=', 'ok')])"/></p>
+                  <p class="text-danger">Failed builds: <t t-esc=" project.build_ids.search_count([('result', '=', 'ko')])"/></p>
+                </div>
+              </div>
             </section>
-            <t t-foreach="project.build_ids" t-as="build">
-              <t t-set="klass"></t>
-              <t t-if="build.result == 'ko'"><t t-set="klass">text-danger</t></t>
-              <t t-if="build.result == 'ok'"><t t-set="klass">text-success</t></t>
-              <t t-if="build.state == 'migrate'"><t t-set="klass">text-info</t></t>
-              <section class="col-md-12">
-                <ul style="display: flex;" t-attf-class="list-unstyled {{klass}}">
-                   <li style="flex: 1;"><t t-esc="build.addon"/></li>
-                   <li style="flex: 1;"><a t-attf-href="/migrabot/build/{{build.id}}"><t t-esc="build.name"/></a></li>
-                   <li style="flex: 1;"><t t-esc="build.result"/></li>
-                   <li style="flex: 1;"><t t-esc="build.state"/></li>
+            <section class="col-md-12">
+              <ul style="display: flex;" t-attf-class="list-unstyled">
+                <li style="flex: 1;"><span  class="font-weight-bold">Addon</span></li>
+                <t t-foreach="project.version_ids.mapped('name')" t-as="version">
+                  <li style="flex: 1;"><span class="font-weight-bold"><t t-esc="version"/></span></li>
+                </t>
+              </ul>
+            <t t-foreach="addons_builds" t-as="addon_build">
+                <ul style="display: flex;" t-attf-class="list-unstyled">
+                  <li style="flex: 1;"><t t-esc="addon_build"/></li>
+                  <t t-foreach="project.version_ids.mapped('name')" t-as="version">
+                    <t t-set="build" t-value="addons_builds[addon_build][version]"/>
+                    <t t-set="klass">text-success</t>
+                    <t t-if="build.result == 'ko'"><t t-set="klass">text-danger</t></t>
+                    <t t-if="build.state != 'done'"><t t-set="klass">text-info</t></t>
+                    <t t-if="build.state == 'done'">
+                      <li style="flex: 1;"><a t-attf-class="{{klass}}" t-attf-href="/migrabot/build/{{build.id}}"><t t-esc="build.result"/></a></li>
+                    </t>
+                    <t t-else="">
+                      <li style="flex: 1;"><span t-attf-class="{{klass}}">Still building <t t-esc="build.state"/></span></li>
+                    </t>
+                  </t>
                 </ul>
-              </section>
             </t>
+            </section>
         </section>
        </div>
       </t>
