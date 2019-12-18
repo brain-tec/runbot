@@ -179,6 +179,7 @@ class Build(models.Model):
 
         # update res_partner when l10_n
         if self.addon.startswith('l10n_') and self.state == 'addon' and self.template_db:
+            _logger.info('Changing res_partner country in  DB %s', db_name)
             country_code = self.addon.split('_')[1]
             pres = [
                 ['psql', '-d', '"%s"' % self.template_db, '-c', "\"UPDATE res_partner SET country_id = (SELECT id FROM res_country WHERE lower(code)='%s')\"" % country_code,
@@ -201,19 +202,19 @@ class Build(models.Model):
         self.ensure_one()
         # start init phase
         self.state = 'base'
-        if not self._db_exists(self.name):
-            _logger.info('Creating DB %s', self.name)
+        db_name = '%s-base' % self.name
+        if not self._db_exists(db_name):
+            _logger.info('Creating DB %s', db_name)
             log_path = os.path.join(self.build_dir, 'logs', 'base_%s.txt' % self.name)
-            db_name = '%s-base' % self.name
             self._launch_odoo(db_name, 'base', log_path, self.version_src)
 
-    def _update_addon_build(self):
-        _logger.info('Changing res_partner country in  DB %s', self.name)
+    def _install_addon_build(self):
         # ensure that install is finished
         if self.container_name and docker_is_running(self.container_name):
             return
         self.state = 'addon'
         self.template_db = '%s-base' % self.name
+        self._dropdb(self.name)
         log_path = os.path.join(self.build_dir, 'logs', 'addon_%s.txt' % self.name)
         self._launch_odoo(self.name, self.addon, log_path, self.version_src)
 
@@ -248,9 +249,9 @@ class Build(models.Model):
 
         for init_build in self.search([('state', '=', 'base')], limit=self._get_free_docker_slots()):
             try:
-                init_build._update_addon_build()
+                init_build._install_addon_build()
             except Exception:
-                _logger.error('Update Addon Build failed: %s', init_build.name)
+                _logger.error('Install Addon Build failed: %s', init_build.name)
                 raise
 
         for init_build in self.search([('state', '=', 'addon')], limit=self._get_free_docker_slots()):
