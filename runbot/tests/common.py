@@ -27,7 +27,6 @@ class RunbotCase(TransactionCase):
 
         self.start_patcher('git_patcher', 'odoo.addons.runbot.models.repo.runbot_repo._git', side_effect=git_side_effect)
         self.start_patcher('fqdn_patcher', 'odoo.addons.runbot.common.socket.getfqdn', 'host.runbot.com')
-        self.start_patcher('find_patcher', 'odoo.addons.runbot.common.find', 0)
         self.start_patcher('github_patcher', 'odoo.addons.runbot.models.repo.runbot_repo._github', {})
         self.start_patcher('is_on_remote_patcher', 'odoo.addons.runbot.models.branch.runbot_branch._is_on_remote', True)
         self.start_patcher('repo_root_patcher', 'odoo.addons.runbot.models.repo.runbot_repo._root', '/tmp/runbot_test/static')
@@ -37,6 +36,7 @@ class RunbotCase(TransactionCase):
         self.start_patcher('isdir', 'odoo.addons.runbot.common.os.path.isdir', True)
         self.start_patcher('isfile', 'odoo.addons.runbot.common.os.path.isfile', True)
         self.start_patcher('docker_run', 'odoo.addons.runbot.models.build_config.docker_run')
+        self.start_patcher('docker_build', 'odoo.addons.runbot.models.build.docker_build')
         self.start_patcher('docker_ps', 'odoo.addons.runbot.models.repo.docker_ps', [])
         self.start_patcher('docker_stop', 'odoo.addons.runbot.models.repo.docker_stop')
 

@@ -52,7 +52,13 @@ class RunboHost(models.Model):
         icp = self.env['ir.config_parameter']
         return self.nb_worker or int(icp.sudo().get_param('runbot.runbot_workers', default=6))
 
+    def get_running_max(self):
+        icp = self.env['ir.config_parameter']
+        return int(icp.get_param('runbot.runbot_running_max', default=75))
+
     def set_psql_conn_count(self):
+
+        _logger.debug('Updating psql connection count...')
         self.ensure_one()
         with local_pgadmin_cursor() as local_cr:
             local_cr.execute("SELECT sum(numbackends) FROM pg_stat_database;")
