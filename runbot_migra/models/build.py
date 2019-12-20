@@ -121,7 +121,7 @@ class Build(models.Model):
         max_running = int(self.env['ir.config_parameter'].get_param('runbot_migra.max_running', 4))
         running_dockers = [docker_name for docker_name in docker_ps() if '-upddb-' in docker_name]
         free = max_running - len(running_dockers)
-        return free if free > 0 else 0
+        return free if free > 0 else 0.1
 
     def _clean(self):
         for build in self:

@@ -30,7 +30,7 @@
       <t t-call="website.layout">
        <div class="container-fluid">
         <section class="row">
-          <h2>Project <t t-esc="project.name"/></h2>
+          <h2>Project <t t-esc="project.name"/>&amp;nbsp;<small>(<t t-esc="project.migration_scripts_branch"/>)</small></h2>
             <section>
               <div class="row">
                 <div class="col-sm-6">
@@ -43,13 +43,31 @@
                   </dl>
                 </div>
                 <div class="col-sm-6">
-                  <h3>Results</h3>
-                  <p class="text-success">Successful builds: <t t-esc=" project.build_ids.search_count([('result', '=', 'ok')])"/></p>
-                  <p class="text-danger">Failed builds: <t t-esc=" project.build_ids.search_count([('result', '=', 'ko')])"/></p>
+                  <dl class="row small">
+                    <t t-foreach="project.version_ids" t-as="v">
+                          <dt class="col-sm-3"><h4><t t-esc="v.name"/></h4></dt>
+                          <dd class="col-sm-9">
+                            <h4>
+                              <span class="badge badge-success"><t t-esc="project.build_ids.search_count([('result', '=', 'ok'), ('version_src', '=', v.name)])"/></span>
+                              <span class="badge badge-danger"><t t-esc="project.build_ids.search_count([('result', '=', 'ko'), ('version_src', '=', v.name)])"/></span>
+                            </h4>
+                          </dd>
+                    </t>
+                    <dt class="col-sm-3"><h4>Total</h4></dt>
+                    <dd class="col-sm-9">
+                      <h4>
+                        <span class="badge badge-success"><t t-esc="project.build_ids.search_count([('result', '=', 'ok')])"/></span>
+                        <span class="badge badge-danger"><t t-esc="project.build_ids.search_count([('result', '=', 'ko')])"/></span>
+                      </h4>
+                    </dd>
+                  </dl>
                 </div>
               </div>
             </section>
             <section class="col-md-12">
+              <div class="row">
+              <div class="col-md-2"></div>
+              <div class="col-md-8">
               <ul style="display: flex;" t-attf-class="list-unstyled">
                 <li style="flex: 1;"><span  class="font-weight-bold">Addon</span></li>
                 <t t-foreach="project.version_ids.mapped('name')" t-as="version">
@@ -57,7 +75,7 @@
                 </t>
               </ul>
             <t t-foreach="addons_builds" t-as="addon_build">
-                <ul style="display: flex;" t-attf-class="list-unstyled">
+                <ul style="display: flex;" t-attf-class="list-unstyled list-group list-group-horizontal">
                   <li style="flex: 1;"><t t-esc="addon_build"/></li>
                   <t t-foreach="project.version_ids.mapped('name')" t-as="version">
                     <t t-set="build" t-value="addons_builds[addon_build][version]"/>
@@ -73,6 +91,9 @@
                   </t>
                 </ul>
             </t>
+          </div>
+          <div class="col-md-2"></div>
+        </div>
             </section>
         </section>
        </div>
