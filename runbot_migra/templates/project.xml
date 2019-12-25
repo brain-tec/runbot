@@ -48,16 +48,16 @@
                           <dt class="col-sm-3"><h4><t t-esc="v.name"/></h4></dt>
                           <dd class="col-sm-9">
                             <h4>
-                              <span class="badge badge-success"><t t-esc="project.build_ids.search_count([('result', '=', 'ok'), ('version_src', '=', v.name)])"/></span>
-                              <span class="badge badge-danger"><t t-esc="project.build_ids.search_count([('result', '=', 'ko'), ('version_src', '=', v.name)])"/></span>
+                              <span class="badge badge-success"><t t-esc="project.build_ids.search_count([('project_id', '=', project.id), ('result', '=', 'ok'), ('version_src', '=', v.name)])"/></span>
+                              <span class="badge badge-danger"><t t-esc="project.build_ids.search_count([('project_id', '=', project.id), ('result', '=', 'ko'), ('version_src', '=', v.name)])"/></span>
                             </h4>
                           </dd>
                     </t>
                     <dt class="col-sm-3"><h4>Total</h4></dt>
                     <dd class="col-sm-9">
                       <h4>
-                        <span class="badge badge-success"><t t-esc="project.build_ids.search_count([('result', '=', 'ok')])"/></span>
-                        <span class="badge badge-danger"><t t-esc="project.build_ids.search_count([('result', '=', 'ko')])"/></span>
+                        <span class="badge badge-success"><t t-esc="project.build_ids.search_count([('project_id', '=', project.id), ('result', '=', 'ok')])"/></span>
+                        <span class="badge badge-danger"><t t-esc="project.build_ids.search_count([('project_id', '=', project.id), ('result', '=', 'ko')])"/></span>
                       </h4>
                     </dd>
                   </dl>

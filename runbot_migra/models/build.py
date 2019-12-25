@@ -163,8 +163,6 @@ class Build(models.Model):
                          '--log-handler=odoo.modules.graph:CRITICAL', '--log-handler=odoo.modules.migration:DEBUG', ' --log-handler=odoo.tools.misc:INFO',
                          '--log-handler=odoo.addons.base.maintenance.migrations:DEBUG']
 
-        if self.template_db:
-            odoo_cmd += ['--db-template=%s' % self.template_db]
         odoo_cmd += ['--stop-after-init']
         odoo_cmd += ['--max-cron-threads=0']
         odoo_cmd += ['--addons-path', ','.join(['/data/build/odoo/addons'] + ['%s' % k for k in ro_volumes.keys()])]
@@ -196,6 +194,9 @@ class Build(models.Model):
                 hash = self._git_rev_parse(os.path.join(v, '.git'), 'HEAD')
                 lf.write("commit for %s: %s\n" % (k, hash))
 
+        # pre-create database if template is specified
+        if self.template_db:
+            self._createdb(db_name, template=self.template_db)
         return docker_run(docker_command.build(), log_path, self.build_dir, self.container_name, ro_volumes=ro_volumes)
 
     def _base_build(self):
