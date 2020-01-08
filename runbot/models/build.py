@@ -142,6 +142,13 @@ class runbot_build(models.Model):
             max_days += int(self.gc_delay if self.gc_delay else 0)
             build.gc_date = ref_date + datetime.timedelta(days=(max_days))
 
+    def _get_top_parent(self):
+        self.ensure_one()
+        build = self
+        while build.parent_id:
+            build = build.parent_id
+        return build
+
     def _get_youngest_state(self, states):
         index = min([self._get_state_score(state) for state in states])
         return state_order[index]
