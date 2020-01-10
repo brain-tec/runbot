@@ -316,8 +316,8 @@ class runbot_build(models.Model):
             build_by_old_values = defaultdict(lambda: self.env['runbot.build'])
             for record in self:
                 build_by_old_values[record.local_state] += record
-            for local_state, builds in build_by_old_values.items():
-                builds._update_nb_children(values.get('local_state'), local_state)
+            #for local_state, builds in build_by_old_values.items():
+            #    builds._update_nb_children(values.get('local_state'), local_state)
         assert 'state' not in values
         local_result = values.get('local_result')
         for build in self:
