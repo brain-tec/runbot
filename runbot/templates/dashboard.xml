@@ -178,9 +178,9 @@
                   <t t-if="host.nb_testing > host.sudo().get_nb_worker()"><t t-set="klass">danger</t></t>
                   <span t-attf-class="label label-{{klass}}"><span t-esc="host.nb_testing"/>/<span t-esc="host.sudo().get_nb_worker()"/></span>
                   <t t-esc="host.nb_running"/>
-                  <t t-set="succes_time" t-value="int(datetime.datetime.now().timestamp() - datetime.datetime.strptime(host.last_success, '%Y-%m-%d %H:%M:%S').timestamp())"/>
-                  <t t-set="start_time" t-value="int(datetime.datetime.now().timestamp() - datetime.datetime.strptime(host.last_start_loop, '%Y-%m-%d %H:%M:%S').timestamp())"/>
-                  <t t-set="end_time" t-value="int(datetime.datetime.now().timestamp() - datetime.datetime.strptime(host.last_end_loop, '%Y-%m-%d %H:%M:%S').timestamp())"/>
+                  <t t-set="succes_time" t-value="int(datetime.datetime.now().timestamp() - host.last_success.timestamp())"/>
+                  <t t-set="start_time" t-value="int(datetime.datetime.now().timestamp() - host.last_start_loop.timestamp())"/>
+                  <t t-set="end_time" t-value="int(datetime.datetime.now().timestamp() - host.last_end_loop.timestamp())"/>
 
                   <t t-set="klass">success</t>
                   <t t-if="succes_time > 30"><t t-set="klass">info</t></t>

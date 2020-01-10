@@ -1,0 +1,12 @@
+<odoo>
+    <record id="website.homepage_page" model="website.page">
+        <field name="url">/home</field>
+    </record>
+
+    <!--<record id="website.redirect_runbot" model="website.redirect">
+        <field name="name">/</field>
+        <field name="redirect_type">301</field>
+        <field name="url_from">/</field>
+        <field name="url_to">/runbot</field>
+    </record>-->
+</odoo>
