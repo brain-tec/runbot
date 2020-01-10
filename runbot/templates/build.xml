@@ -40,13 +40,6 @@
                 </t>
             </small>
         </t>
-        <t t-set="nb_sum" t-value="bu.nb_pending+bu.nb_testing+bu.nb_running"/>
-        <t t-if="nb_sum > 1"><!-- maybe only display this info if > 3 -->
-          <span t-attf-title="{{bu.nb_pending}} pending, {{bu.nb_testing}} testing, {{bu.nb_running}} running">
-            <t t-esc="nb_sum"/>
-            <i class="fa fa-cogs"/>
-          </span>
-        </t>
     </template>
     <template id="runbot.build_button">
         <div t-attf-class="pull-right">
@@ -89,7 +82,7 @@
                     <li t-if="bu.global_state not in ('testing', 'waiting', 'pending')" class="divider"></li>
                     <li><a t-attf-href="/runbot/build/{{bu['id']}}">Logs <i class="fa fa-file-text-o"/></a></li>
                     <t t-set="log_url" t-value="'http://%s' % bu.real_build.host if bu.real_build.host != fqdn else ''"/>
-                    <t t-if="bu.real_build.host" t-foreach="bu.log_list.split(',')" t-as="log_name" >
+                    <t t-if="bu.real_build.host" t-foreach="(bu.log_list or '').split(',')" t-as="log_name" >
                       <li><a t-attf-href="{{log_url}}/runbot/static/build/#{bu['real_build'].dest}/logs/#{log_name}.txt">Full <t t-esc="log_name"/> logs <i class="fa fa-file-text-o"/></a></li>
                     </t>
                     <li t-if="bu.coverage and bu.real_build.host"><a t-attf-href="http://{{bu.real_build.host}}/runbot/static/build/#{bu['real_build'].dest}/coverage/index.html">Coverage <i class="fa fa-file-text-o"/></a></li>

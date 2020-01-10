@@ -2,7 +2,7 @@
 <odoo>
     <data>
       <!-- Replace default menu ( Home / Contactus and co...) with 5 first repos) -->
-      <template id="inherits_branch_in_menu" inherit_id="website.layout" name="Inherits Show top 4 repo in menu aand dropdown">
+      <template id="inherits_branch_in_menu" inherit_id="website.layout" name="Inherits Show top 6 repo in menu and dropdown">
           <xpath expr="//footer" position="replace">
           </xpath>
           <xpath expr="//nav" position="replace">
@@ -16,13 +16,13 @@
                   <div class="collapse navbar-collapse" id="top_menu_collapse">
                       <ul class="nav navbar-nav ml-auto text-right" id="top_menu">
                          <t t-if="repos" >
-                              <t t-foreach="repos[:4]" t-as="re">
+                              <t t-foreach="repos[:6]" t-as="re">
                                   <li ><a t-attf-href="/runbot/repo/{{slug(re)}}?search={{request.params.get('search', '')}}"><i class='fa fa-github' /> <t t-esc="re.short_name"/></a></li>
                               </t>
-                              <li t-if="len(repos)>4" class="dropdown">
+                              <li t-if="len(repos)>6" class="dropdown">
                                 <a href="#" class="dropdown-toggle" data-toggle="dropdown" aria-expanded="false"><i class="fa fa-plus"/></a>
                                 <ul class="dropdown-menu">
-                                  <t t-foreach='repos[4:]' t-as='re'>
+                                  <t t-foreach='repos[6:]' t-as='re'>
                                       <li><a t-attf-href="/runbot/repo/{{slug(re)}}"><t t-esc="re.short_name"/></a></li>
                                   </t>
                                 </ul>
@@ -131,6 +131,7 @@
                                      <t t-call="runbot.build_button">
                                       <t t-set="klass">btn-group-sm</t>
                                       <t t-set="show_rebuild_button" t-value="bu==br['builds'][0]"></t>
+                                      <t t-set="show_commit_button" t-value="True"/>
                                      </t>
                                      <t t-if="bu['build_type']=='scheduled'"><i class="fa fa-moon-o" t-att-title="bu.build_type_label()" t-att-aria-label="bu.build_type_label()"/></t>
                                      <t t-if="bu['build_type'] in ('rebuild', 'indirect')"><i class="fa fa-recycle" t-att-title="bu.build_type_label()" t-att-aria-label="bu.build_type_label()"/></t>
