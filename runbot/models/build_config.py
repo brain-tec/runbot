@@ -33,7 +33,7 @@ class Config(models.Model):
     group_name = fields.Char('Group name', related='group.name')
     monitoring_view_id = fields.Many2one('ir.ui.view', 'Monitoring view')
 
-    @api.model
+    @api.model_create_single
     def create(self, values):
         res = super(Config, self).create(values)
         res._check_step_ids_order()
@@ -164,7 +164,7 @@ class ConfigStep(models.Model):
         copy._write({'protected': False})
         return copy
 
-    @api.model
+    @api.model_create_single
     def create(self, values):
         self._check(values)
         return super(ConfigStep, self).create(values)
@@ -575,7 +575,7 @@ class ConfigStepOrder(models.Model):
     def _onchange_step_id(self):
         self.sequence = self.step_id.default_sequence
 
-    @api.model
+    @api.model_create_single
     def create(self, values):
         if 'sequence' not in values and values.get('step_id'):
             values['sequence'] = self.env['runbot.build.config.step'].browse(values.get('step_id')).default_sequence
