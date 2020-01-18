@@ -53,6 +53,14 @@ class Test_Build(RunbotCase):
         build._compute_domain()
         self.assertEqual(build.domain, 'runbot99.example.org:1234')
 
+        # test json stored _data field and data property
+        self.assertEqual(build.config_data, {})
+        build.config_data = {'restore_url': 'foobar'}
+        self.assertEqual(build.config_data, {'restore_url': 'foobar'})
+        build.config_data['test_info'] = 'dummy'
+        self.assertEqual(build.config_data, {"restore_url": "foobar", "test_info": "dummy"})
+        del build.config_data['restore_url']
+        self.assertEqual(build.config_data, {"test_info": "dummy"})
         other = self.create_build({
             'branch_id': self.branch.id,
             'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
@@ -68,6 +76,52 @@ class Test_Build(RunbotCase):
         # test that a build cannot have local state 'duplicate' without a duplicate_id
         with self.assertRaises(AssertionError):
             builds.write({'local_state': 'duplicate'})
+
+        # test non initialized json stored _data field and data property
+        other.config_data['test_info'] = 'foo'
+        self.assertEqual(other.config_data, {'test_info': 'foo'})
+        (build|other).write({'config_data': {'test_write': 'written'}})
+        build.config_data['test_build'] = 'foo'
+        other.config_data['test_other'] = 'bar'
+        self.assertEqual(build.config_data, {'test_write': 'written', 'test_build': 'foo'})
+        self.assertEqual(other.config_data, {'test_write': 'written', 'test_other': 'bar'})
+        build.flush()
+        build.env.cr.execute("SELECT config_data, config_data->'test_write' AS written, config_data->'test_build' AS test_build FROM runbot_build WHERE id = %s", [build.id])
+        self.assertEqual([({'test_write': 'written', 'test_build': 'foo'}, 'written', 'foo')], self.env.cr.fetchall())
+
+    def test_config_data_duplicate(self):
+
+        build = self.create_build({
+            'branch_id': self.branch.id,
+            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+        })
+
+        build2 = self.create_build({
+            'branch_id': self.branch.id,
+            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+        })
+        self.assertEqual(build2.duplicate_id, build)
+
+        build3 = self.create_build({
+            'branch_id': self.branch.id,
+            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'config_data': {'test':'aa'},
+        })
+        self.assertFalse(build3.duplicate_id)
+        build4 = self.create_build({
+            'branch_id': self.branch.id,
+            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'config_data': {'test':'aa'},
+        })
+        self.assertEqual(build4.duplicate_id, build3)
+
+        build5 = self.create_build({
+            'branch_id': self.branch.id,
+            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'config_data': {'test':'bb'},
+        })
+        self.assertFalse(build5.duplicate_id)
+
 
     @patch('odoo.addons.runbot.models.build.runbot_build._get_repo_available_modules')
     def test_filter_modules(self, mock_get_repo_mods):
@@ -236,15 +290,6 @@ class Test_Build(RunbotCase):
         })
         self.assertEqual(build.config_id, self.branch.config_id, "config_id should be the same as the branch")
 
-    def test_build_from_branch_no_build(self):
-        """test build is not even created when branch no_build is True"""
-        self.branch.no_build = True
-        build = self.create_build({
-            'branch_id': self.branch.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-        })
-        self.assertEqual(build, self.Build, "build should be an empty recordset")
-
     def test_build_config_can_be_set(self):
         """test build config_id can be set to something different than the one on the branch"""
         self.branch.config_id = self.env.ref('runbot.runbot_build_config_default')
@@ -327,68 +372,66 @@ class Test_Build(RunbotCase):
             'extra_params': '5',
         })
 
-        def assert_state(nb_pending, nb_testing, nb_running, global_state, build):
-            self.assertEqual(build.nb_pending, nb_pending)
-            self.assertEqual(build.nb_testing, nb_testing)
-            self.assertEqual(build.nb_running, nb_running)
+        def assert_state(global_state, build):
             self.assertEqual(build.global_state, global_state)
 
-        assert_state(5, 0, 0, 'pending', build1)
-        assert_state(3, 0, 0, 'pending', build1_1)
-        assert_state(1, 0, 0, 'pending', build1_2)
-        assert_state(1, 0, 0, 'pending', build1_1_1)
-        assert_state(1, 0, 0, 'pending', build1_1_2)
+        assert_state('pending', build1)
+        assert_state('pending', build1_1)
+        assert_state('pending', build1_2)
+        assert_state('pending', build1_1_1)
+        assert_state('pending', build1_1_2)
 
         build1.local_state = 'testing'
         build1_1.local_state = 'testing'
         build1.local_state = 'done'
         build1_1.local_state = 'done'
 
-        assert_state(3, 0, 0, 'waiting', build1)
-        assert_state(2, 0, 0, 'waiting', build1_1)
-        assert_state(1, 0, 0, 'pending', build1_2)
-        assert_state(1, 0, 0, 'pending', build1_1_1)
-        assert_state(1, 0, 0, 'pending', build1_1_2)
+        assert_state('waiting', build1)
+        assert_state('waiting', build1_1)
+        assert_state('pending', build1_2)
+        assert_state('pending', build1_1_1)
+        assert_state('pending', build1_1_2)
 
         build1_1_1.local_state = 'testing'
 
-        assert_state(2, 1, 0, 'waiting', build1)
-        assert_state(1, 1, 0, 'waiting', build1_1)
-        assert_state(1, 0, 0, 'pending', build1_2)
-        assert_state(0, 1, 0, 'testing', build1_1_1)
-        assert_state(1, 0, 0, 'pending', build1_1_2)
+        assert_state('waiting', build1)
+        assert_state('waiting', build1_1)
+        assert_state('pending', build1_2)
+        assert_state('testing', build1_1_1)
+        assert_state('pending', build1_1_2)
 
         build1_2.local_state = 'testing'
 
-        assert_state(1, 2, 0, 'waiting', build1)
-        assert_state(1, 1, 0, 'waiting', build1_1)
-        assert_state(0, 1, 0, 'testing', build1_2)
-        assert_state(0, 1, 0, 'testing', build1_1_1)
-        assert_state(1, 0, 0, 'pending', build1_1_2)
+        assert_state('waiting', build1)
+        assert_state('waiting', build1_1)
+        assert_state('testing', build1_2)
+        assert_state('testing', build1_1_1)
+        assert_state('pending', build1_1_2)
 
         build1_2.local_state = 'testing'  # writing same state a second time
 
-        assert_state(1, 2, 0, 'waiting', build1)
-        assert_state(1, 1, 0, 'waiting', build1_1)
-        assert_state(0, 1, 0, 'testing', build1_2)
-        assert_state(0, 1, 0, 'testing', build1_1_1)
-        assert_state(1, 0, 0, 'pending', build1_1_2)
+        assert_state('waiting', build1)
+        assert_state('waiting', build1_1)
+        assert_state('testing', build1_2)
+        assert_state('testing', build1_1_1)
+        assert_state('pending', build1_1_2)
 
         build1_1_2.local_state = 'done'
         build1_1_1.local_state = 'done'
         build1_2.local_state = 'done'
 
-        assert_state(0, 0, 0, 'done', build1)
-        assert_state(0, 0, 0, 'done', build1_1)
-        assert_state(0, 0, 0, 'done', build1_2)
-        assert_state(0, 0, 0, 'done', build1_1_1)
-        assert_state(0, 0, 0, 'done', build1_1_2)
+        assert_state('done', build1)
+        assert_state('done', build1_1)
+        assert_state('done', build1_2)
+        assert_state('done', build1_1_1)
+        assert_state('done', build1_1_2)
 
     def test_duplicate_childrens(self):
         build_old = self.create_build({
             'branch_id': self.branch_10.id,
             'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
             'extra_params': '0',
+            'local_state': 'done'
         })
         build_parent = self.create_build({
             'branch_id': self.branch_10.id,
@@ -404,8 +447,7 @@ class Test_Build(RunbotCase):
         build_parent.local_state = 'done'
         self.assertEqual(build_child.local_state, 'duplicate')
         self.assertEqual(build_child.duplicate_id, build_old)
-        self.assertEqual(build_parent.nb_pending, 0)
-        self.assertEqual(build_parent.nb_testing, 0)
+        self.assertEqual(build_child.global_state, 'done')
         self.assertEqual(build_parent.global_state, 'done')
 
 
@@ -734,6 +776,10 @@ class TestClosestBranch(RunbotCase):
             'repo_id': self.community_repo.id,
             'name': 'refs/pull/123456'
         })
+
+        # trigger compute and ensure that mock_github is used. (using correct side effect would work too)
+        self.assertEqual(server_pr.pull_head_name, 'foo-dev:bar_branch')
+
         mock_github.return_value = {
             'head': {'label': 'foo-dev:foobar_branch'},
             'base': {'ref': '10.0'},
@@ -743,6 +789,8 @@ class TestClosestBranch(RunbotCase):
             'repo_id': self.enterprise_repo.id,
             'name': 'refs/pull/789101'
         })
+        self.assertEqual(addons_pr.pull_head_name, 'foo-dev:foobar_branch')
+        closest = addons_pr._get_closest_branch(self.community_repo.id)
         self.assertEqual((self.branch_odoo_10, 'pr_target'), addons_pr._get_closest_branch(self.community_repo.id))
 
     def test_closest_branch_05_master(self):

@@ -10,6 +10,7 @@ import time
 import datetime
 from ..common import dt2time, fqdn, now, grep, uniq_list, local_pgadmin_cursor, s2human, Commit, dest_reg, os
 from ..container import docker_build, docker_stop, docker_state, Command
+from ..fields import JsonDictField
 from odoo.addons.runbot.models.repo import RunbotException
 from odoo import models, fields, api
 from odoo.exceptions import UserError, ValidationError
@@ -32,12 +33,16 @@ def make_selection(array):
 
 class runbot_build(models.Model):
     _name = "runbot.build"
+    _description = "Build"
+
+    _parent_store = True
     _order = 'id desc'
     _rec_name = 'id'
 
     branch_id = fields.Many2one('runbot.branch', 'Branch', required=True, ondelete='cascade', index=True)
     repo_id = fields.Many2one(related='branch_id.repo_id', readonly=True, store=True)
     name = fields.Char('Revno', required=True)
+    description = fields.Char('Description', help='Informative description')
     host = fields.Char('Host')
     port = fields.Integer('Port')
     dest = fields.Char(compute='_compute_dest', type='char', string='Dest', readonly=1, store=True)
@@ -51,20 +56,21 @@ class runbot_build(models.Model):
     sequence = fields.Integer('Sequence')
     log_ids = fields.One2many('ir.logging', 'build_id', string='Logs')
     error_log_ids = fields.One2many('ir.logging', 'build_id', domain=[('level', 'in', ['WARNING', 'ERROR', 'CRITICAL'])], string='Error Logs')
+    config_data = JsonDictField('Json Data')
 
     # state machine
 
     global_state = fields.Selection(make_selection(state_order), string='Status', compute='_compute_global_state', store=True)
-    local_state = fields.Selection(make_selection(state_order), string='Build Status', default='pending', required=True, oldname='state', index=True)
+    local_state = fields.Selection(make_selection(state_order), string='Build Status', default='pending', required=True, index=True)
     global_result = fields.Selection(make_selection(result_order), string='Result', compute='_compute_global_result', store=True)
-    local_result = fields.Selection(make_selection(result_order), string='Build Result', oldname='result')
+    local_result = fields.Selection(make_selection(result_order), string='Build Result')
     triggered_result = fields.Selection(make_selection(result_order), string='Triggered Result')  # triggered by db only
 
     requested_action = fields.Selection([('wake_up', 'To wake up'), ('deathrow', 'To kill')], string='Action requested', index=True)
 
     nb_pending = fields.Integer("Number of pending in queue", default=0)
     nb_testing = fields.Integer("Number of test slot use", default=0)
-    nb_running = fields.Integer("Number of test slot use", default=0)
+    nb_running = fields.Integer("Number of run slot use", default=0)
 
     # should we add a stored field for children results?
     active_step = fields.Many2one('runbot.build.config.step', 'Active step')
@@ -74,7 +80,7 @@ class runbot_build(models.Model):
     build_start = fields.Datetime('Build start')
     build_end = fields.Datetime('Build end')
     job_time = fields.Integer(compute='_compute_job_time', string='Job time')
-    build_time = fields.Integer(compute='_compute_build_time', string='Job time')
+    build_time = fields.Integer(compute='_compute_build_time', string='Build time')
     build_age = fields.Integer(compute='_compute_build_age', string='Build age')
     duplicate_id = fields.Many2one('runbot.build', 'Corresponding Build', index=True)
     revdep_build_ids = fields.Many2many('runbot.build', 'runbot_rev_dep_builds',
@@ -91,6 +97,7 @@ class runbot_build(models.Model):
                                   default='normal',
                                   string='Build type')
     parent_id = fields.Many2one('runbot.build', 'Parent Build', index=True)
+    parent_path = fields.Char('Parent path', index=True)
     # should we add a has children stored boolean?
     hidden = fields.Boolean("Don't show build on main page", default=False)  # index?
     children_ids = fields.One2many('runbot.build', 'parent_id')
@@ -116,18 +123,25 @@ class runbot_build(models.Model):
         for build in self:
             build.log_list = ','.join({step.name for step in build.config_id.step_ids() if step._has_log()})
 
-    @api.depends('nb_testing', 'nb_pending', 'local_state', 'duplicate_id.global_state')
+    @api.depends('children_ids.global_state', 'local_state', 'duplicate_id.global_state')
     def _compute_global_state(self):
-        # could we use nb_pending / nb_testing ? not in a compute, but in a update state method
         for record in self:
             if record.duplicate_id:
                 record.global_state = record.duplicate_id.global_state
+            elif record.global_state == 'done' and self.local_state == 'done':
+                # avoid to recompute if done, mostly important whith many orphan childrens
+                record.global_state = 'done'
             else:
                 waiting_score = record._get_state_score('waiting')
-                if record._get_state_score(record.local_state) < waiting_score or record.nb_pending + record.nb_testing == 0:
-                    record.global_state = record.local_state
+                children_ids = [child for child in record.children_ids if not child.orphan_result]
+                if record._get_state_score(record.local_state) > waiting_score and children_ids:  # if finish, check children
+                    children_state = record._get_youngest_state([child.global_state for child in children_ids])
+                    if record._get_state_score(children_state) > waiting_score:
+                        record.global_state = record.local_state
+                    else:
+                        record.global_state = 'waiting'
                 else:
-                    record.global_state = 'waiting'
+                    record.global_state = record.local_state
 
     def _get_youngest_state(self, states):
         index = min([self._get_state_score(state) for state in states])
@@ -166,24 +180,7 @@ class runbot_build(models.Model):
     def _get_result_score(self, result):
         return result_order.index(result)
 
-    def _update_nb_children(self, new_state, old_state=None):
-        # could be interresting to update state in batches.
-        tracked_count_list = ['pending', 'testing', 'running']
-        if (new_state not in tracked_count_list and old_state not in tracked_count_list) or new_state == old_state:
-            return
-
-        for record in self:
-            values = {}
-            if old_state in tracked_count_list:
-                values['nb_%s' % old_state] = record['nb_%s' % old_state] - 1
-            if new_state in tracked_count_list:
-                values['nb_%s' % new_state] = record['nb_%s' % new_state] + 1
-
-            record.write(values)
-            if record.parent_id:
-                record.parent_id._update_nb_children(new_state, old_state)
-
-    @api.depends('real_build.active_step')
+    @api.depends('active_step', 'duplicate_id.active_step')
     def _compute_job(self):
         for build in self:
             build.job = build.real_build.active_step.name
@@ -196,23 +193,22 @@ class runbot_build(models.Model):
     def copy(self, values=None):
         raise UserError("Cannot duplicate build!")
 
+    @api.model_create_single
     def create(self, vals):
-        branch = self.env['runbot.branch'].search([('id', '=', vals.get('branch_id', False))])  # branche 10174?
-        if branch.no_build:
-            return self.env['runbot.build']
-        vals['config_id'] = vals['config_id'] if 'config_id' in vals else branch.config_id.id
+        if not 'config_id' in vals:
+            branch = self.env['runbot.branch'].browse(vals.get('branch_id'))
+            vals['config_id'] = branch.config_id.id
         build_id = super(runbot_build, self).create(vals)
-        build_id._update_nb_children(build_id.local_state)
-        extra_info = {'sequence': build_id.id if not build_id.sequence else build_id.sequence}
-        context = self.env.context
+        extra_info = {}
+        if not build_id.sequence:
+            extra_info['sequence'] = build_id.id
 
         # compute dependencies
         repo = build_id.repo_id
         dep_create_vals = []
-        nb_deps = len(repo.dependency_ids)
-        params = build_id._get_params()
         build_id._log('create', 'Build created') # mainly usefull to log creation time
         if not vals.get('dependency_ids'):
+            params = build_id._get_params() # calling git show, dont call that if not usefull.
             for extra_repo in repo.dependency_ids:
                 repo_name = extra_repo.short_name
                 last_commit = params['dep'][repo_name]  # not name
@@ -241,11 +237,10 @@ class runbot_build(models.Model):
                     'dependency_hash': last_commit,
                     'match_type': match_type,
                 })
+            for dep_vals in dep_create_vals:
+                self.env['runbot.build.dependency'].sudo().create(dep_vals)
 
-        for dep_vals in dep_create_vals:
-            self.env['runbot.build.dependency'].sudo().create(dep_vals)
-
-        if not context.get('force_rebuild'):  # not vals.get('build_type') == rebuild': could be enough, but some cron on runbot are using this ctx key, to do later
+        if not self.env.context.get('force_rebuild') and not vals.get('build_type') == 'rebuild':
             # detect duplicate
             duplicate_id = None
             domain = [
@@ -257,8 +252,11 @@ class runbot_build(models.Model):
                 '|', ('local_result', '=', False), ('local_result', '!=', 'skipped'),  # had to reintroduce False posibility for selections
                 ('config_id', '=', build_id.config_id.id),
                 ('extra_params', '=', build_id.extra_params),
+                ('config_data', '=', build_id.config_data or False),
             ]
             candidates = self.search(domain)
+
+            nb_deps = len(repo.dependency_ids)
             if candidates and nb_deps:
                 # check that all depedencies are matching.
 
@@ -298,7 +296,9 @@ class runbot_build(models.Model):
                     continue
                 docker_source_folders.add(docker_source_folder)
 
-        build_id.write(extra_info)
+        if extra_info:
+            build_id.write(extra_info)
+
         if build_id.local_state == 'duplicate' and build_id.duplicate_id.global_state in ('running', 'done'):
             build_id._github_status()
         return build_id
@@ -309,15 +309,14 @@ class runbot_build(models.Model):
             build_by_old_values = defaultdict(lambda: self.env['runbot.build'])
             for record in self:
                 build_by_old_values[record.local_state] += record
-            for local_state, builds in build_by_old_values.items():
-                builds._update_nb_children(values.get('local_state'), local_state)
-        assert 'state' not in values
         local_result = values.get('local_result')
         for build in self:
             assert not local_result or local_result == self._get_worst_result([build.local_result, local_result])  # dont write ok on a warn/error build
         res = super(runbot_build, self).write(values)
         for build in self:
             assert bool(not build.duplicate_id) ^ (build.local_state == 'duplicate')  # don't change duplicate state without removing duplicate id.
+        if 'log_counter' in values: # not 100% usefull but more correct ( see test_ir_logging)
+            self.flush()
         return res
 
     def update_build_end(self):
@@ -360,6 +359,8 @@ class runbot_build(models.Model):
                 build.job_time = int(dt2time(build.job_end) - dt2time(build.job_start))
             elif build.job_start:
                 build.job_time = int(time.time() - dt2time(build.job_start))
+            else:
+                build.job_time = 0
 
     @api.depends('build_start', 'build_end', 'duplicate_id.build_time')
     def _compute_build_time(self):
@@ -370,6 +371,8 @@ class runbot_build(models.Model):
                 build.build_time = int(dt2time(build.build_end) - dt2time(build.build_start))
             elif build.build_start:
                 build.build_time = int(time.time() - dt2time(build.build_start))
+            else:
+                build.build_time = 0
 
     @api.depends('job_start', 'duplicate_id.build_age')
     def _compute_build_age(self):
@@ -379,6 +382,8 @@ class runbot_build(models.Model):
                 build.build_age = build.duplicate_id.build_age
             elif build.job_start:
                 build.build_age = int(time.time() - dt2time(build.build_start))
+            else:
+                build.build_age = 0
 
     def _get_params(self):
         try:
@@ -428,6 +433,7 @@ class runbot_build(models.Model):
                     values.update({
                         'config_id': build.config_id.id,
                         'extra_params': build.extra_params,
+                        'config_data': build.config_data,
                         'orphan_result': build.orphan_result,
                         'dependency_ids': build._copy_dependency_ids(),
                     })
@@ -663,14 +669,14 @@ class runbot_build(models.Model):
                     build._log('_schedule', '%s time exceeded (%ss)' % (build.active_step.name if build.active_step else "?", build.job_time))
                     build._kill(result='killed')
                 continue
-            elif _docker_state == 'UNKNOWN' and (build.local_state == 'running' or build.active_step._is_docker_step()):
+            elif _docker_state in ('UNKNOWN', 'GHOST') and (build.local_state == 'running' or build.active_step._is_docker_step()):
                 if build.job_time < 5:
                     continue
                 elif build.job_time < 60:
-                    _logger.debug('container "%s" seems too take a while to start', build._get_docker_name())
+                    _logger.debug('container "%s" seems too take a while to start :%s' % (build.job_time, build._get_docker_name()))
                     continue
                 else:
-                    build._log('_schedule', 'Docker not started after 60 seconds, skipping', level='ERROR')
+                    build._log('_schedule', 'Docker with state %s not started after 60 seconds, skipping' % _docker_state, level='ERROR')
             # No job running, make result and select nex job
             build_values = {
                 'job_end': now(),
@@ -830,7 +836,7 @@ class runbot_build(models.Model):
         self._local_pg_dropdb(dbname)
         _logger.debug("createdb %s", dbname)
         with local_pgadmin_cursor() as local_cr:
-            local_cr.execute("""CREATE DATABASE "%s" TEMPLATE template0 LC_COLLATE 'C' ENCODING 'unicode'""" % dbname)
+            local_cr.execute("""CREATE DATABASE "%s" TEMPLATE template1 LC_COLLATE 'C' ENCODING 'unicode'""" % dbname)
 
     def _log(self, func, message, level='INFO', log_type='runbot', path='runbot'):
         self.ensure_one()
@@ -863,8 +869,9 @@ class runbot_build(models.Model):
             build._github_status()
             self.invalidate_cache()
 
-    def _ask_kill(self):
-        # todo xdo, should we kill or skip children builds? it looks like yes, but we need to be carefull if subbuild can be duplicates
+    def _ask_kill(self, lock=True):
+        if lock:
+            self.env.cr.execute("""SELECT id FROM runbot_build WHERE parent_path like %s FOR UPDATE""", ['%s%%' % self.parent_path])
         self.ensure_one()
         user = request.env.user if request else self.env.user
         uid = user.id
@@ -883,7 +890,7 @@ class runbot_build(models.Model):
             build._log('_ask_kill', 'Killing build %s, requested by %s (user #%s)' % (build.dest, user.name, uid))
         for child in build.children_ids:  # should we filter build that are target of a duplicate_id?
             if not child.duplicate_id:
-                child._ask_kill()
+                child._ask_kill(lock=False)
 
     def _wake_up(self):
         build = self.real_build
