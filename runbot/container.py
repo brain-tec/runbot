@@ -14,7 +14,7 @@ import datetime
 import io
 import json
 import logging
-import os
+from .common import os
 import shutil
 import subprocess
 import time
@@ -56,7 +56,7 @@ class Command():
         return self.cmd[key]
 
     def __add__(self, l):
-        return Command(self.pres, self.cmd + l, self.posts, self.finals)
+        return Command(self.pres, self.cmd + l, self.posts, self.finals, self.config_tuples)
 
     def __str__(self):
         return ' '.join(self)
@@ -74,6 +74,7 @@ class Command():
         return ' ; '.join(cmd_chain)
 
     def add_config_tuple(self, option, value):
+        assert '-' not in option
         self.config_tuples.append((option, value))
 
     def get_config(self, starting_config=''):
@@ -127,7 +128,8 @@ def docker_run(run_cmd, log_path, build_dir, container_name, exposed_ports=None,
         cmd_object = Command([], run_cmd.split(' '), [])
     _logger.debug('Docker run command: %s', run_cmd)
     logs = open(log_path, 'w')
-    run_cmd = 'cd /data/build && %s' % run_cmd
+    run_cmd = 'cd /data/build;touch start-%s;%s;cd /data/build;touch end-%s' % (container_name, run_cmd, container_name)
+    docker_clear_state(container_name, build_dir)  # ensure that no state are remaining
     logs.write("Docker command:\n%s\n=================================================\n" % cmd_object)
     # create start script
     docker_command = [
@@ -164,17 +166,33 @@ def docker_run(run_cmd, log_path, build_dir, container_name, exposed_ports=None,
     docker_command.extend(['odoo:runbot_tests', '/bin/bash', '-c', "%s" % run_cmd])
     docker_run = subprocess.Popen(docker_command, stdout=logs, stderr=logs, preexec_fn=preexec_fn, close_fds=False, cwd=build_dir)
     _logger.info('Started Docker container %s', container_name)
-    return docker_run.pid
+    return
 
-def docker_stop(container_name):
+def docker_stop(container_name, build_dir=None):
     """Stops the container named container_name"""
     _logger.info('Stopping container %s', container_name)
-    dstop = subprocess.run(['docker', 'stop', container_name])
+    if build_dir:
+        end_file = os.path.join(build_dir, 'end-%s' % container_name)
+        subprocess.run(['touch', end_file])
+    else:
+        _logger.info('Stopping docker without defined build_dir')
+    subprocess.run(['docker', 'stop', container_name])
 
 def docker_is_running(container_name):
-    """Return True if container is still running"""
     dinspect = subprocess.run(['docker', 'container', 'inspect', container_name], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
     return True if dinspect.returncode == 0 else False
+
+def docker_state(container_name, build_dir):
+    started = os.path.exists(os.path.join(build_dir, 'start-%s' % container_name))
+    ended = os.path.exists(os.path.join(build_dir, 'end-%s' % container_name))
+    return 'END' if ended else 'RUNNING' if started else 'UNKNOWN'
+
+def docker_clear_state(container_name, build_dir):
+    """Return True if container is still running"""
+    if os.path.exists(os.path.join(build_dir, 'start-%s' % container_name)):
+        os.remove(os.path.join(build_dir, 'start-%s' % container_name))
+    if os.path.exists(os.path.join(build_dir, 'end-%s' % container_name)):
+        os.remove(os.path.join(build_dir, 'end-%s' % container_name))
 
 def docker_get_gateway_ip():
     """Return the host ip of the docker default bridge gateway"""
@@ -250,7 +268,7 @@ def tests(args):
         python_params = ['-m', 'flamegraph', '-o', flame_log]
     odoo_cmd = ['python%s' % py_version ] + python_params + ['/data/build/odoo-bin', '-d %s' % args.db_name, '--addons-path=/data/build/addons', '-i', args.odoo_modules,  '--test-enable', '--stop-after-init', '--max-cron-threads=0']
     cmd = Command(pres, odoo_cmd, posts)
-    cmd.add_config_tuple('data-dir', '/data/build/datadir')
+    cmd.add_config_tuple('data_dir', '/data/build/datadir')
     cmd.add_config_tuple('db_user', '%s' % os.getlogin())
 
     if args.dump:

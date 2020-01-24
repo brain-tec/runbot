@@ -3,7 +3,6 @@ import datetime
 import dateutil
 import json
 import logging
-import os
 import random
 import re
 import requests
@@ -18,9 +17,11 @@ from odoo.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT
 from odoo import models, fields, api, registry
 from odoo.modules.module import get_module_resource
 from odoo.tools import config
-from ..common import fqdn, dt2time, Commit, dest_reg
+from odoo.osv import expression
+from ..common import fqdn, dt2time, Commit, dest_reg, os
 from ..container import docker_ps, docker_stop
 from psycopg2.extensions import TransactionRollbackError
+
 _logger = logging.getLogger(__name__)
 
 class RunbotException(Exception):
@@ -42,8 +43,8 @@ class runbot_repo(models.Model):
                              ('hook', 'Hook')],
                             default='poll',
                             string="Mode", required=True, help="hook: Wait for webhook on /runbot/hook/<id> i.e. github push event")
-    hook_time = fields.Float('Last hook time')
-    get_ref_time = fields.Float('Last refs db update')
+    hook_time = fields.Float('Last hook time', compute='_compute_hook_time')
+    get_ref_time = fields.Float('Last refs db update', compute='_compute_get_ref_time')
     duplicate_id = fields.Many2one('runbot.repo', 'Duplicate repo', help='Repository for finding duplicate builds')
     modules = fields.Char("Modules to install", help="Comma-separated list of modules to install and test.")
     modules_auto = fields.Selection([('none', 'None (only explicit modules list)'),
@@ -77,6 +78,58 @@ class runbot_repo(models.Model):
     def _inverse_config_id(self):
         for repo in self:
             repo.repo_config_id = repo.config_id
+
+    def _compute_get_ref_time(self):
+        self.env.cr.execute("""
+            SELECT repo_id, time FROM runbot_repo_reftime
+            WHERE id IN (
+                SELECT max(id) FROM runbot_repo_reftime 
+                WHERE repo_id = any(%s) GROUP BY repo_id
+            )
+        """, [self.ids])
+        times = dict(self.env.cr.fetchall())
+        for repo in self:
+            repo.get_ref_time = times.get(repo.id, 0)
+
+    def _compute_hook_time(self):
+        self.env.cr.execute("""
+            SELECT repo_id, time FROM runbot_repo_hooktime
+            WHERE id IN (
+                SELECT max(id) FROM runbot_repo_hooktime 
+                WHERE repo_id = any(%s) GROUP BY repo_id
+            )
+        """, [self.ids])
+        times = dict(self.env.cr.fetchall())
+
+        for repo in self:
+            repo.hook_time = times.get(repo.id, 0)
+
+    def write(self, values):
+        # hooktime and reftime table are here to avoid sql update on repo.
+        # using inverse will still trigger write_date and write_uid update.
+        # this hack allows to avoid that
+
+        hook_time = values.pop('hook_time', None)
+        get_ref_time = values.pop('get_ref_time', None)
+        for repo in self:
+            if hook_time:
+                self.env['runbot.repo.hooktime'].create({'time': hook_time, 'repo_id': repo.id})
+            if get_ref_time:
+                self.env['runbot.repo.reftime'].create({'time': get_ref_time, 'repo_id': repo.id})
+        if values:
+            super().write(values)
+
+    def _gc_times(self):
+        self.env.cr.execute("""
+            DELETE from runbot_repo_reftime WHERE id NOT IN (
+                SELECT max(id) FROM runbot_repo_reftime GROUP BY repo_id
+            )
+        """)
+        self.env.cr.execute("""
+            DELETE from runbot_repo_hooktime WHERE id NOT IN (
+                SELECT max(id) FROM runbot_repo_hooktime GROUP BY repo_id
+            )
+        """)
 
     def _root(self):
         """Return root directory of repository"""
@@ -149,7 +202,7 @@ class runbot_repo(models.Model):
                 except:
                     pass
                 if not self._hash_exists(sha):
-                    raise RunbotException("Commit %s is unreachable. Did you force push the branch since build creation?" % commit)
+                    raise RunbotException("Commit %s is unreachable. Did you force push the branch since build creation?" % sha)
 
         _logger.info('git export: checkouting to %s (new)' % export_path)
         os.makedirs(export_path)
@@ -159,7 +212,15 @@ class runbot_repo(models.Model):
         p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
         (out, err) = p2.communicate()
         if err:
-            raise RunbotException("Archive %s failed. Did you force push the branch since build creation? (%s)" % (commit, err))
+            raise RunbotException("Archive %s failed. Did you force push the branch since build creation? (%s)" % (sha, err))
+
+        # migration scripts link if necessary
+        icp = self.env['ir.config_parameter']
+        ln_param = icp.get_param('runbot_migration_ln', default='')
+        migration_repo_id = int(icp.get_param('runbot_migration_repo_id', default=0))
+        if ln_param and migration_repo_id and self.server_files:
+            scripts_dir = self.env['runbot.repo'].browse(migration_repo_id)._get_repo_name_part()
+            os.symlink('/data/build/%s' % scripts_dir,  self._source_path(sha, ln_param))
 
         # TODO get result and fallback on cleaing in case of problem
         return export_path
@@ -220,7 +281,7 @@ class runbot_repo(models.Model):
         """
         self.ensure_one()
 
-        get_ref_time = self._get_fetch_head_time()
+        get_ref_time = round(self._get_fetch_head_time(), 4)
         if not self.get_ref_time or get_ref_time > self.get_ref_time:
             self.get_ref_time = get_ref_time
             fields = ['refname', 'objectname', 'committerdate:iso8601', 'authorname', 'authoremail', 'subject', 'committername', 'committeremail']
@@ -268,7 +329,7 @@ class runbot_repo(models.Model):
 
         self.env.cr.execute("""
             SELECT DISTINCT ON (branch_id) name, branch_id
-            FROM runbot_build WHERE branch_id in %s ORDER BY branch_id,id DESC;
+            FROM runbot_build WHERE branch_id in %s AND build_type = 'normal' ORDER BY branch_id,id DESC;
         """, (tuple([ref_branches[r[0]] for r in refs]),))
         # generate a set of tuples (branch_id, sha)
         builds_candidates = {(r[1], r[0]) for r in self.env.cr.fetchall()}
@@ -282,8 +343,10 @@ class runbot_repo(models.Model):
 
             # create build (and mark previous builds as skipped) if not found
             if not (branch.id, sha) in builds_candidates:
-                if branch.no_auto_build or branch.no_build or branch.repo_id.no_build:
+                if branch.no_auto_build or branch.no_build or (branch.repo_id.no_build and not branch.rebuild_requested):
                     continue
+                if branch.rebuild_requested:
+                    branch.rebuild_requested = False
                 _logger.debug('repo %s branch %s new build found revno %s', self.name, branch.name, sha)
                 build_info = {
                     'branch_id': branch.id,
@@ -294,6 +357,7 @@ class runbot_repo(models.Model):
                     'committer_email': committer_email,
                     'subject': subject,
                     'date': dateutil.parser.parse(date[:19]),
+                    'build_type': 'normal',
                 }
                 if not branch.sticky:
                     # pending builds are skipped as we have a new ref
@@ -316,7 +380,7 @@ class runbot_repo(models.Model):
                 new_build = Build.create(build_info)
                 # create a reverse dependency build if needed
                 if branch.sticky:
-                    for rev_repo in self.search([('dependency_ids', 'in', self.id)]):
+                    for rev_repo in self.search([('dependency_ids', 'in', self.id), ('no_build', '=', False)]):
                         # find the latest build with the same branch name
                         latest_rev_build = Build.search([('build_type', '=', 'normal'), ('hidden', '=', 'False'), ('repo_id.id', '=', rev_repo.id), ('branch_id.branch_name', '=', branch.branch_name)], order='id desc', limit=1)
                         if latest_rev_build:
@@ -396,97 +460,130 @@ class runbot_repo(models.Model):
             except Exception:
                 _logger.exception('Fail to update repo %s', repo.name)
 
-    @api.multi
-    def _scheduler(self, host=None):
-        """Schedule builds for the repository"""
-        ids = self.ids
-        if not ids:
-            return
-        icp = self.env['ir.config_parameter']
-        host = host or self.env['runbot.host']._get_current()
-        workers = host.get_nb_worker()
-        running_max = int(icp.get_param('runbot.runbot_running_max', default=75))
-        assigned_only = host.assigned_only
-
-        Build = self.env['runbot.build']
-        domain = [('repo_id', 'in', ids)]
-        domain_host = domain + [('host', '=', host.name)]
-
-        # schedule jobs (transitions testing -> running, kill jobs, ...)
-        build_ids = Build.search(domain_host + ['|', ('local_state', 'in', ['testing', 'running']), ('requested_action', 'in', ['wake_up', 'deathrow'])])
-        build_ids._schedule()
+    def _commit(self):
         self.env.cr.commit()
         self.invalidate_cache()
+        self.env.reset()
 
-        # launch new tests
+    @api.multi
+    def _scheduler(self, host):
+        nb_workers = host.get_nb_worker()
 
-        nb_testing = Build.search_count(domain_host + [('local_state', '=', 'testing')])
-        available_slots = workers - nb_testing
-        reserved_slots = Build.search_count(domain_host + [('local_state', '=', 'pending')])
-        assignable_slots = (available_slots - reserved_slots) if not assigned_only else 0
-        if available_slots > 0:
-            if assignable_slots > 0:  # note: slots have been addapt to be able to force host on pending build. Normally there is no pending with host.
-                # commit transaction to reduce the critical section duration
-                def allocate_builds(where_clause, limit):
-                    self.env.cr.commit()
-                    self.invalidate_cache()
-                    # self-assign to be sure that another runbot instance cannot self assign the same builds
-                    query = """UPDATE
-                                    runbot_build
-                                SET
-                                    host = %%(host)s
-                                WHERE
-                                    runbot_build.id IN (
-                                        SELECT runbot_build.id
-                                        FROM runbot_build
-                                        LEFT JOIN runbot_branch
-                                        ON runbot_branch.id = runbot_build.branch_id
-                                        WHERE
-                                            runbot_build.repo_id IN %%(repo_ids)s
-                                            AND runbot_build.local_state = 'pending'
-                                            AND runbot_build.host IS NULL
-                                            %s
-                                        ORDER BY
-                                            array_position(array['normal','rebuild','indirect','scheduled']::varchar[], runbot_build.build_type) ASC,
-                                            runbot_branch.sticky DESC,
-                                            runbot_branch.priority DESC,
-                                            runbot_build.sequence ASC
-                                        FOR UPDATE OF runbot_build SKIP LOCKED
-                                        LIMIT %%(limit)s
-                                    )
-                                RETURNING id""" % where_clause
+        for build in self._get_builds_with_requested_actions(host):
+            build._process_requested_actions()
+            self._commit()
+        for build in self._get_builds_to_schedule(host):
+            build._schedule()
+            self._commit()
+        self._assign_pending_builds(host, nb_workers, [('build_type', '!=', 'scheduled')])
+        self._commit()
+        self._assign_pending_builds(host, nb_workers-1 or nb_workers)
+        self._commit()
+        for build in self._get_builds_to_init(host):
+            build._init_pendings(host)
+            self._commit()
+        self._gc_running(host)
+        self._commit()
+        self._reload_nginx()
 
-                    self.env.cr.execute(query, {'repo_ids': tuple(ids), 'host': host.name, 'limit': limit})
-                    return self.env.cr.fetchall()
+    def build_domain_host(self, host, domain=None):
+        domain = domain or []
+        return [('repo_id', 'in', self.ids), ('host', '=', host.name)] + domain
 
-                allocated = allocate_builds("""AND runbot_build.build_type != 'scheduled'""", assignable_slots)
-                if allocated:
-                    _logger.debug('Normal builds %s where allocated to runbot' % allocated)
-                weak_slot = assignable_slots - len(allocated) - 1
-                if weak_slot > 0:
-                    allocated = allocate_builds('', weak_slot)
-                    if allocated:
-                        _logger.debug('Scheduled builds %s where allocated to runbot' % allocated)
+    def _get_builds_with_requested_actions(self, host):
+        return self.env['runbot.build'].search(self.build_domain_host(host, [('requested_action', 'in', ['wake_up', 'deathrow'])]))
 
-            pending_build = Build.search(domain_host + [('local_state', '=', 'pending')], limit=available_slots)
-            if pending_build:
-                pending_build._schedule()
+    def _get_builds_to_schedule(self, host):
+        return self.env['runbot.build'].search(self.build_domain_host(host, [('local_state', 'in', ['testing', 'running'])]))
 
+    def _assign_pending_builds(self, host, nb_workers, domain=None):
+        if not self.ids or host.assigned_only or nb_workers <= 0:
+            return
+        domain_host = self.build_domain_host(host)
+        reserved_slots = self.env['runbot.build'].search_count(domain_host + [('local_state', 'in', ('testing', 'pending'))])
+        assignable_slots = (nb_workers - reserved_slots)
+        if assignable_slots > 0:
+            allocated = self._allocate_builds(host, assignable_slots, domain)
+            if allocated:
+                _logger.debug('Builds %s where allocated to runbot' % allocated)
+
+    def _get_builds_to_init(self, host):
+        domain_host = self.build_domain_host(host)
+        used_slots = self.env['runbot.build'].search_count(domain_host + [('local_state', '=', 'testing')])
+        available_slots = host.get_nb_worker() - used_slots
+        if available_slots <= 0:
+            return self.env['runbot.build']
+        return self.env['runbot.build'].search(domain_host + [('local_state', '=', 'pending')], limit=available_slots)
+
+    def _gc_running(self, host):
+        running_max = host.get_running_max()
         # terminate and reap doomed build
-        build_ids = Build.search(domain_host + [('local_state', '=', 'running'), ('keep_running', '!=', True)], order='job_start desc').ids
-        # sort builds: the last build of each sticky branch then the rest
-        sticky = {}
-        non_sticky = []
-        for build in Build.browse(build_ids):
-            if build.branch_id.sticky and build.branch_id.id not in sticky:
-                sticky[build.branch_id.id] = build.id
-            else:
-                non_sticky.append(build.id)
-        build_ids = list(sticky.values())
-        build_ids += non_sticky
-        # terminate extra running builds
+        domain_host = self.build_domain_host(host)
+        Build = self.env['runbot.build']
+        # some builds are marked as keep running
+        cannot_be_killed_ids = Build.search(domain_host + [('keep_running', '!=', True)]).ids
+        # we want to keep one build running per sticky, no mather which host
+        sticky_branches_ids = self.env['runbot.branch'].search([('sticky', '=', True)]).ids
+        # search builds on host on sticky branches, order by position in branch history
+        if sticky_branches_ids:
+            self.env.cr.execute("""
+                SELECT
+                    id
+                FROM (
+                    SELECT
+                        bu.id AS id,
+                        bu.host as host,
+                        row_number() OVER (PARTITION BY branch_id order by bu.id desc) AS row
+                    FROM
+                        runbot_branch br INNER JOIN runbot_build bu ON br.id=bu.branch_id
+                    WHERE
+                        br.id in %s AND (bu.hidden = 'f' OR bu.hidden IS NULL)
+                    ) AS br_bu
+                WHERE
+                    row <= 4 AND host = %s
+                ORDER BY row, id desc
+                """, [tuple(sticky_branches_ids), host.name]
+            )
+            cannot_be_killed_ids += self.env.cr.fetchall()
+        cannot_be_killed_ids = cannot_be_killed_ids[:running_max]  # ensure that we don't try to keep more than we can handle
+
+        build_ids = Build.search(domain_host + [('local_state', '=', 'running'), ('id', 'not in', cannot_be_killed_ids)], order='job_start desc').ids
         Build.browse(build_ids)[running_max:]._kill()
-        Build.browse(build_ids)._reap()
+
+    def _allocate_builds(self, host, nb_slots, domain=None):
+        if nb_slots <= 0:
+            return []
+        non_allocated_domain = [('repo_id', 'in', self.ids), ('local_state', '=', 'pending'), ('host', '=', False)]
+        if domain:
+            non_allocated_domain = expression.AND([non_allocated_domain, domain])
+        e = expression.expression(non_allocated_domain, self.env['runbot.build'])
+        assert e.get_tables() == ['"runbot_build"']
+        where_clause, where_params = e.to_sql()
+
+        # self-assign to be sure that another runbot instance cannot self assign the same builds
+        query = """UPDATE
+                        runbot_build
+                    SET
+                        host = %%s
+                    WHERE
+                        runbot_build.id IN (
+                            SELECT runbot_build.id
+                            FROM runbot_build
+                            LEFT JOIN runbot_branch
+                            ON runbot_branch.id = runbot_build.branch_id
+                            WHERE
+                                %s
+                            ORDER BY
+                                array_position(array['normal','rebuild','indirect','scheduled']::varchar[], runbot_build.build_type) ASC,
+                                runbot_branch.sticky DESC,
+                                runbot_branch.priority DESC,
+                                runbot_build.sequence ASC
+                            FOR UPDATE OF runbot_build SKIP LOCKED
+                            LIMIT %%s
+                        )
+                    RETURNING id""" % where_clause
+        self.env.cr.execute(query, [host.name] + where_params + [nb_slots])
+        return self.env.cr.fetchall()
 
     def _domain(self):
         return self.env.get('ir.config_parameter').get_param('runbot.runbot_domain', fqdn())
@@ -506,11 +603,14 @@ class runbot_repo(models.Model):
             nginx_config = self.env['ir.ui.view'].render_template("runbot.nginx_config", settings)
             os.makedirs(nginx_dir, exist_ok=True)
             content = None
-            with open(os.path.join(nginx_dir, 'nginx.conf'), 'rb') as f:
-                content = f.read()
+            nginx_conf_path = os.path.join(nginx_dir, 'nginx.conf')
+            content = ''
+            if os.path.isfile(nginx_conf_path):
+                with open(nginx_conf_path, 'rb') as f:
+                    content = f.read()
             if content != nginx_config:
                 _logger.debug('reload nginx')
-                with open(os.path.join(nginx_dir, 'nginx.conf'), 'wb') as f:
+                with open(nginx_conf_path, 'wb') as f:
                     f.write(nginx_config)
                 try:
                     pid = int(open(os.path.join(nginx_dir, 'nginx.pid')).read().strip(' \n'))
@@ -538,6 +638,7 @@ class runbot_repo(models.Model):
         """This method have to be called from a dedicated cron on a runbot
         in charge of orchestration.
         """
+
         if hostname != fqdn():
             return 'Not for me'
 
@@ -549,21 +650,22 @@ class runbot_repo(models.Model):
             repos = self.search([('mode', '!=', 'disabled')])
             repos._update(force=False)
             repos._create_pending_builds()
-
-            self.env.cr.commit()
-            self.invalidate_cache()
+            self._commit()
             time.sleep(update_frequency)
 
     def _cron_fetch_and_build(self, hostname):
         """ This method have to be called from a dedicated cron
         created on each runbot instance.
         """
+
         if hostname != fqdn():
             return 'Not for me'
+
         host = self.env['runbot.host']._get_current()
         host.set_psql_conn_count()
         host.last_start_loop = fields.Datetime.now()
-        self.env.cr.commit()
+        
+        self._commit()
         start_time = time.time()
         # 1. source cleanup
         # -> Remove sources when no build is using them
@@ -572,52 +674,40 @@ class runbot_repo(models.Model):
         # 2. db and log cleanup
         # -> Keep them as long as possible
         self.env['runbot.build']._local_cleanup()
-
         # 3. docker cleanup
-        docker_ps_result = docker_ps()
-        containers = {int(dc.split('-', 1)[0]):dc for dc in docker_ps_result if dest_reg.match(dc)}
-        if containers:
-            candidates = self.env['runbot.build'].search([('id', 'in', list(containers.keys())), ('local_state', '=', 'done')])
-            for c in candidates:
-                _logger.info('container %s found running with build state done', containers[c.id])
-                docker_stop(containers[c.id])
-        ignored = {dc for dc in docker_ps_result if not dest_reg.match(dc)}
-        if ignored:
-            _logger.debug('docker (%s) not deleted because not dest format', " ".join(list(ignored)))
+        self.env['runbot.repo']._docker_cleanup()
 
         timeout = self._get_cron_period()
         icp = self.env['ir.config_parameter']
         update_frequency = int(icp.get_param('runbot.runbot_update_frequency', default=10))
         while time.time() - start_time < timeout:
-            repos = self.search([('mode', '!=', 'disabled')])
-            try:
-                repos._scheduler(host)
-                host.last_success = fields.Datetime.now()
-                self.env.cr.commit()
-                self.env.reset()
-                self = self.env()[self._name]
-                self._reload_nginx()
-                time.sleep(update_frequency)
-            except TransactionRollbackError: # can lead to psycopg2.InternalError'>: "current transaction is aborted, commands ignored until end of transaction block
-                _logger.exception('Trying to rollback')
-                self.env.cr.rollback()
-                self.env.reset()
-                time.sleep(random.uniform(0, 3))
-            except Exception as e:
-                with registry(self._cr.dbname).cursor() as cr:  # user another cursor since transaction will be rollbacked
-                    message = str(e)
-                    chost = host.with_env(self.env(cr=cr))
-                    if chost.last_exception == message:
-                        chost.exception_count += 1
-                    else:
-                        chost.with_env(self.env(cr=cr)).last_exception = str(e)
-                        chost.exception_count = 1
-                raise
+            time.sleep(self._scheduler_loop_turn(host, update_frequency))
 
-        if host.last_exception:
-            host.last_exception = ""
-            host.exception_count = 0
         host.last_end_loop = fields.Datetime.now()
+
+    def _scheduler_loop_turn(self, host, default_sleep=1):
+        repos = self.search([('mode', '!=', 'disabled')])
+        try:
+            repos._scheduler(host)
+            host.last_success = fields.Datetime.now()
+            self._commit()
+        except Exception as e:
+            self.env.cr.rollback()
+            self.env.reset()
+            _logger.exception(e)
+            message = str(e)
+            if host.last_exception == message:
+                host.exception_count += 1
+            else:
+                host.last_exception = str(e)
+                host.exception_count = 1
+            self._commit()
+            return random.uniform(0, 3)
+        else:
+            if host.last_exception:
+                host.last_exception = ""
+                host.exception_count = 0
+            return default_sleep
 
     def _source_cleanup(self):
         try:
@@ -645,18 +735,45 @@ class runbot_repo(models.Model):
             # we are comparing cannot_be_deleted_path with to keep to sensure that the algorithm is working, we want to avoid to erase file by mistake
             # note: it is possible that a parent_build is in testing without checkouting sources, but it should be exceptions
             if to_delete:
-                if cannot_be_deleted_path == to_keep:
-                    to_delete = list(to_delete)
-                    to_keep = list(to_keep)
-                    cannot_be_deleted_path = list(cannot_be_deleted_path)
-                    for source_dir in to_delete:
-                        _logger.info('Deleting source: %s' % source_dir)
-                        assert 'static' in source_dir
-                        shutil.rmtree(source_dir)
-                    _logger.info('%s/%s source folder where deleted (%s kept)' % (len(to_delete), len(to_delete+to_keep), len(to_keep)))
-                else:
+                if cannot_be_deleted_path != to_keep:
                     _logger.warning('Inconsistency between sources and database: \n%s \n%s' % (cannot_be_deleted_path-to_keep, to_keep-cannot_be_deleted_path))
-
+                to_delete = list(to_delete)
+                to_keep = list(to_keep)
+                cannot_be_deleted_path = list(cannot_be_deleted_path)
+                for source_dir in to_delete:
+                    _logger.info('Deleting source: %s' % source_dir)
+                    assert 'static' in source_dir
+                    shutil.rmtree(source_dir)
+                _logger.info('%s/%s source folder where deleted (%s kept)' % (len(to_delete), len(to_delete+to_keep), len(to_keep)))
         except:
             _logger.error('An exception occured while cleaning sources')
             pass
+
+    def _docker_cleanup(self):
+        _logger.info('Docker cleaning')
+        docker_ps_result = docker_ps()
+        containers = {int(dc.split('-', 1)[0]):dc for dc in docker_ps_result if dest_reg.match(dc)}
+        if containers:
+            candidates = self.env['runbot.build'].search([('id', 'in', list(containers.keys())), ('local_state', '=', 'done')])
+            for c in candidates:
+                _logger.info('container %s found running with build state done', containers[c.id])
+                docker_stop(containers[c.id], c._path())
+        ignored = {dc for dc in docker_ps_result if not dest_reg.match(dc)}
+        if ignored:
+            _logger.debug('docker (%s) not deleted because not dest format', " ".join(list(ignored)))
+
+
+class RefTime(models.Model):
+    _name = "runbot.repo.reftime"
+    _log_access = False
+
+    time = fields.Float('Time', index=True, required=True)
+    repo_id = fields.Many2one('runbot.repo', 'Repository', required=True, ondelete='cascade')
+
+
+class HookTime(models.Model):
+    _name = "runbot.repo.hooktime"
+    _log_access = False
+
+    time = fields.Float('Time')
+    repo_id = fields.Many2one('runbot.repo', 'Repository', required=True, ondelete='cascade')
