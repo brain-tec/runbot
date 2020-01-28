@@ -1728,8 +1728,8 @@ class Batch(models.Model):
             gh = meta[pr.repository]['gh']
 
             _logger.info(
-                "Staging pr %s:%s for target %s; squash=%s",
-                pr.repository.name, pr.number, pr.target.name, pr.squash
+                "Staging pr %s for target %s; squash=%s",
+                pr.display_name, pr.target.name, pr.squash
             )
 
             target = 'tmp.{}'.format(pr.target.name)
@@ -1737,9 +1737,8 @@ class Batch(models.Model):
             try:
                 method, new_heads[pr] = pr._stage(gh, target, related_prs=(prs - pr))
                 _logger.info(
-                    "Staged pr %s:%s to %s by %s: %s -> %s",
-                    pr.repository.name, pr.number,
-                    pr.target.name, method,
+                    "Staged pr %s to %s by %s: %s -> %s",
+                    pr.display_name, pr.target.name, method,
                     original_head, new_heads[pr]
                 )
             except (exceptions.MergeError, AssertionError) as e:
