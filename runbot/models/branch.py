@@ -4,6 +4,7 @@ import re
 import time
 from subprocess import CalledProcessError
 from odoo import models, fields, api
+from odoo.osv import expression
 
 _logger = logging.getLogger(__name__)
 _re_patch = re.compile(r'.*patch-\d+$')
@@ -23,6 +24,7 @@ class runbot_branch(models.Model):
     branch_url = fields.Char(compute='_get_branch_url', string='Branch url', readonly=1)
     pull_head_name = fields.Char(compute='_get_branch_infos', string='PR HEAD name', readonly=1, store=True)
     target_branch_name = fields.Char(compute='_get_branch_infos', string='PR target branch', store=True)
+    pull_branch_name = fields.Char(compute='_compute_pull_branch_name', string='Branch display name')
     sticky = fields.Boolean('Sticky')
     closest_sticky = fields.Many2one('runbot.branch', compute='_compute_closest_sticky', string='Closest sticky')
     defined_sticky = fields.Many2one('runbot.branch', string='Force sticky')
@@ -101,13 +103,17 @@ class runbot_branch(models.Model):
         for branch in self:
             branch.branch_config_id = branch.config_id
 
+    def _compute_pull_branch_name(self):
+        for branch in self:
+            branch.pull_branch_name = branch.pull_head_name.split(':')[-1] if branch.pull_head_name else branch.branch_name
+
     @api.depends('name')
-    def _get_branch_infos(self):
+    def _get_branch_infos(self, pull_info=None):
         """compute branch_name, branch_url, pull_head_name and target_branch_name based on name"""
         for branch in self:
             if branch.name:
                 branch.branch_name = branch.name.split('/')[-1]
-                pi = branch._get_pull_info()
+                pi = pull_info or branch._get_pull_info()
                 if pi:
                     branch.target_branch_name = pi['base']['ref']
                     if not _re_patch.match(pi['head']['label']):
@@ -115,6 +121,10 @@ class runbot_branch(models.Model):
                         branch.pull_head_name = pi['head']['label']
             else:
                 branch.branch_name = ''
+
+    def recompute_infos(self):
+        """ public method to recompute infos on demand """
+        self._get_branch_infos()
 
     @api.depends('branch_name')
     def _get_branch_url(self):
@@ -146,6 +156,35 @@ class runbot_branch(models.Model):
         except CalledProcessError:
             return False
         return True
+
+    def _get_last_branch_name_builds(self):
+        # naive way to find corresponding build, only matching branch name or pr pull_head_name and target_branch_name.
+        self.ensure_one()
+        domain = []
+        if self.pull_head_name:
+            domain = [('pull_head_name', 'like', '%%:%s' % self.pull_head_name.split(':')[-1]), ('target_branch_name', '=', self.target_branch_name)] # pr matching pull head name
+        else:
+            domain = [('name', '=', self.name)]
+        #domain += [('id', '!=', self.branch_id.id)]
+
+        e = expression.expression(domain, self)
+        where_clause, where_params = e.to_sql()
+
+        repo_ids = tuple(self.env['runbot.repo'].search([]).ids) # access rights
+        query = """
+            SELECT max(b.id)
+            FROM runbot_build b
+            WHERE b.branch_id IN (
+                SELECT id from runbot_branch WHERE %s
+            )
+            AND b.build_type IN ('normal', 'rebuild')
+            AND b.repo_id in %%s
+            GROUP BY b.repo_id
+        """ % where_clause
+
+        self.env.cr.execute(query, where_params + [repo_ids])
+        results = [r[0] for r in self.env.cr.fetchall()]
+        return self.env['runbot.build'].browse(results)
 
     @api.model_create_single
     def create(self, vals):

@@ -13,12 +13,13 @@ import odoo
 from test_utils import re_matches, get_partner, _simple_init
 
 @pytest.fixture
-def repo(project, make_repo):
+def repo(env, project, make_repo, users, setreviewers):
     r = make_repo('repo')
     project.write({'repo_ids': [(0, 0, {
         'name': r.name,
         'required_statuses': 'legal/cla,ci/runbot'
     })]})
+    setreviewers(*project.repo_ids)
     return r
 
 def test_trivial_flow(env, repo, page, users, config):
@@ -464,7 +465,7 @@ def test_staging_ci_timeout(env, repo, config):
     timeout = env['runbot_merge.project'].search([]).ci_timeout
 
     pr1.staging_id.staged_at = odoo.fields.Datetime.to_string(datetime.datetime.now() - datetime.timedelta(minutes=2*timeout))
-    env.run_crons('runbot_merge.merge_cron')
+    env.run_crons('runbot_merge.merge_cron', 'runbot_merge.staging_cron')
     assert pr1.state == 'error', "timeout should fail the PR"
 
 def test_timeout_bump_on_pending(env, repo, config):
@@ -716,6 +717,31 @@ class TestPREdition:
             prx.base = 'master'
         assert pr.squash
 
+    @pytest.mark.xfail(reason="github doesn't allow retargeting closed PRs", strict=True)
+    def test_retarget_closed(self, env, repo):
+        branch_1 = env['runbot_merge.branch'].create({
+            'name': '1.0',
+            'project_id': env['runbot_merge.project'].search([]).id,
+        })
+
+        with repo:
+            # master is 1 commit ahead of 1.0
+            [m] = repo.make_commits(None, repo.Commit('initial', tree={'1': '1'}), ref='heads/1.0')
+            repo.make_commits(m, repo.Commit('second', tree={'m': 'm'}), ref='heads/master')
+
+            [c] = repo.make_commits(m, repo.Commit('first', tree={'m': 'm3'}), ref='heads/abranch')
+            prx = repo.make_pr(title='title', body='body', target='1.0', head=c)
+        env.run_crons()
+        pr = env['runbot_merge.pull_requests'].search([
+            ('repository.name', '=', repo.name),
+            ('number', '=', prx.number)
+        ])
+        assert pr.target == branch_1
+        with repo:
+            prx.close()
+        with repo:
+            prx.base = 'master'
+
     def test_retarget_from_disabled(self, env, repo):
         """ Retargeting a PR from a disabled branch should not duplicate the PR
         """
@@ -937,6 +963,49 @@ def test_reopen_state(env, repo):
     assert pr.state == 'validated', \
         "if a PR is reopened and had a CI'd head, it should be validated immediately"
 
+def test_reopen_merged_pr(env, repo, config, users):
+    """ Reopening a *merged* PR should cause us to immediately close it again,
+    and insult whoever did it
+    """
+    with repo:
+        [m] = repo.make_commits(
+            None,
+            repo.Commit('initial', tree={'0': '0'}),
+            ref = 'heads/master'
+        )
+
+        [c] = repo.make_commits(
+            m, repo.Commit('second', tree={'0': '1'}),
+            ref='heads/abranch'
+        )
+        prx = repo.make_pr(target='master', head='abranch')
+        repo.post_status(c, 'success', 'legal/cla')
+        repo.post_status(c, 'success', 'ci/runbot')
+        prx.post_comment('hansen r+', config['role_reviewer']['token'])
+    env.run_crons()
+
+    with repo:
+        repo.post_status('staging.master', 'success', 'legal/cla')
+        repo.post_status('staging.master', 'success', 'ci/runbot')
+    env.run_crons()
+    pr = env['runbot_merge.pull_requests'].search([
+        ('repository.name', '=', repo.name),
+        ('number', '=', prx.number)
+    ])
+    assert prx.state == 'closed'
+    assert pr.state == 'merged'
+
+    repo.add_collaborator(users['other'], config['role_other']['token'])
+    with repo:
+        prx.open(config['role_other']['token'])
+    env.run_crons()
+    assert prx.state == 'closed'
+    assert pr.state == 'merged'
+    assert prx.comments == [
+        (users['reviewer'], 'hansen r+'),
+        (users['user'], "@%s ya silly goose you can't reopen a PR that's been merged PR." % users['other'])
+    ]
+
 class TestNoRequiredStatus:
     def test_basic(self, env, repo, config):
         """ check that mergebot can work on a repo with no CI at all
@@ -1068,7 +1137,7 @@ class TestRetry:
             ('repository.name', '=', repo.name),
             ('number', '=', prx.number)
         ]).state == 'ready'
-        env.run_crons('runbot_merge.merge_cron')
+        env.run_crons('runbot_merge.merge_cron', 'runbot_merge.staging_cron')
 
         staging_head2 = repo.commit('heads/staging.master')
         assert staging_head2 != staging_head
@@ -1496,7 +1565,7 @@ class TestMergeMethod:
 
             c0 = repo.make_commit(m, 'C0', None, tree={'a': 'b'})
             prx = repo.make_pr(title="gibberish", body="blahblah", target='master', head=c0)
-        env.run_crons('runbot_merge.merge_cron')
+        env.run_crons('runbot_merge.merge_cron', 'runbot_merge.staging_cron')
 
         with repo:
             repo.post_status(prx.head, 'success', 'legal/cla')
@@ -1538,7 +1607,7 @@ class TestMergeMethod:
 
             c0 = repo.make_commit(m, 'C0', None, tree={'a': 'b'})
             prx = repo.make_pr(title="gibberish", body=None, target='master', head=c0)
-        env.run_crons('runbot_merge.merge_cron')
+        env.run_crons('runbot_merge.merge_cron', 'runbot_merge.staging_cron')
 
         with repo:
             repo.post_status(prx.head, 'success', 'legal/cla')
@@ -2067,6 +2136,55 @@ class TestPRUpdate(object):
         assert pr_id.state == 'validated'
         assert pr_id.head == c2
 
+    def test_update_closed(self, env, repo):
+        with repo:
+            [m] = repo.make_commits(None, repo.Commit('initial', tree={'m': 'm'}), ref='heads/master')
+
+            [c] = repo.make_commits(m, repo.Commit('first', tree={'m': 'm3'}), ref='heads/abranch')
+            prx = repo.make_pr(title='title', body='body', target='master', head=c)
+        env.run_crons()
+        pr = env['runbot_merge.pull_requests'].search([
+            ('repository.name', '=', repo.name),
+            ('number', '=', prx.number)
+        ])
+        with repo:
+            prx.close()
+
+        with repo:
+            c2 = repo.make_commit(c, 'xxx', None, tree={'m': 'm4'})
+            repo.update_ref(prx.ref, c2)
+
+        assert pr.state == 'closed'
+        assert pr.head == c
+
+        with repo:
+            prx.open()
+        assert pr.state == 'opened'
+        assert pr.head == c2
+
+    @pytest.mark.xfail(reason="github doesn't allow reopening force-pushed PRs", strict=True)
+    def test_force_update_closed(self, env, repo):
+        with repo:
+            [m] = repo.make_commits(None, repo.Commit('initial', tree={'m': 'm'}), ref='heads/master')
+
+            [c] = repo.make_commits(m, repo.Commit('first', tree={'m': 'm3'}), ref='heads/abranch')
+            prx = repo.make_pr(title='title', body='body', target='master', head=c)
+        env.run_crons()
+        pr = env['runbot_merge.pull_requests'].search([
+            ('repository.name', '=', repo.name),
+            ('number', '=', prx.number)
+        ])
+        with repo:
+            prx.close()
+
+        with repo:
+            c2 = repo.make_commit(m, 'xxx', None, tree={'m': 'm4'})
+            repo.update_ref(prx.ref, c2, force=True)
+
+        with repo:
+            prx.open()
+        assert pr.head == c2
+
 class TestBatching(object):
     def _pr(self, repo, prefix, trees, *, target='master', user, reviewer,
             statuses=(('ci/runbot', 'success'), ('legal/cla', 'success'))
@@ -2379,7 +2497,7 @@ class TestBatching(object):
         with repo:
             repo.post_status(h, 'success', 'ci/runbot')
             repo.post_status(h, 'success', 'legal/cla')
-        env.run_crons('runbot_merge.process_updated_commits', 'runbot_merge.merge_cron')
+        env.run_crons('runbot_merge.process_updated_commits', 'runbot_merge.merge_cron', 'runbot_merge.staging_cron')
         assert pr2.state == 'merged'
 
 class TestReviewing(object):
@@ -2507,10 +2625,14 @@ class TestReviewing(object):
             prx = repo.make_pr(title='title', body='body', target='master', head=c1)
             repo.post_status(prx.head, 'success', 'legal/cla')
             repo.post_status(prx.head, 'success', 'ci/runbot')
-            prx.post_comment('hansen delegate=%s' % users['other'], config['role_reviewer']['token'])
-            prx.post_comment('hansen r+', config['role_user']['token'])
+            # flip case to check that github login is case-insensitive
+            other = ''.join(c.lower() if c.isupper() else c.upper() for c in users['other'])
+            prx.post_comment('hansen delegate=%s' % other, config['role_reviewer']['token'])
         env.run_crons()
 
+        with repo:
+            # check this is ignored
+            prx.post_comment('hansen r+', config['role_user']['token'])
         assert prx.user == users['user']
         assert env['runbot_merge.pull_requests'].search([
             ('repository.name', '=', repo.name),
@@ -2518,6 +2640,7 @@ class TestReviewing(object):
         ]).state == 'validated'
 
         with repo:
+            # check this works
             prx.post_comment('hansen r+', config['role_other']['token'])
         assert env['runbot_merge.pull_requests'].search([
             ('repository.name', '=', repo.name),
@@ -2630,7 +2753,7 @@ class TestUnknownPR:
         ])
         assert pr.state == 'ready'
 
-        env.run_crons('runbot_merge.merge_cron')
+        env.run_crons('runbot_merge.merge_cron', 'runbot_merge.staging_cron')
         assert pr.staging_id
 
     def test_rplus_unmanaged(self, env, repo, users, config):
@@ -2902,6 +3025,40 @@ class TestRMinus:
 
         assert pr2.state == 'validated', "state should have been reset"
         assert not env['runbot_merge.split'].search([]), "there should be no split left"
+
+    def test_rminus_p0(self, env, repo, config, users):
+        """ In and of itself r- doesn't do anything on p=0 since they bypass
+        approval, so unstage and downgrade to p=1.
+        """
+
+        with repo:
+            m = repo.make_commit(None, 'initial', None, tree={'m': 'm'})
+            repo.make_ref('heads/master', m)
+
+            c = repo.make_commit(m, 'first', None, tree={'m': 'c'})
+            prx = repo.make_pr(title='title', body=None, target='master', head=c)
+            repo.post_status(prx.head, 'success', 'ci/runbot')
+            repo.post_status(prx.head, 'success', 'legal/cla')
+            prx.post_comment('hansen p=0', config['role_reviewer']['token'])
+        env.run_crons()
+
+        pr = env['runbot_merge.pull_requests'].search([
+            ('repository.name', '=', repo.name),
+            ('number', '=', prx.number),
+        ])
+        assert pr.priority == 0
+        assert pr.staging_id
+
+        with repo:
+            prx.post_comment('hansen r-', config['role_reviewer']['token'])
+        env.run_crons()
+        assert not pr.staging_id, "pr should have been unstaged"
+        assert pr.priority == 1, "priority should have been downgraded"
+        assert prx.comments == [
+            (users['reviewer'], 'hansen p=0'),
+            (users['reviewer'], 'hansen r-'),
+            (users['user'], "PR priority reset to 1, as pull requests with priority 0 ignore review state."),
+        ]
 
 class TestComments:
     def test_address_method(self, repo, env, config):

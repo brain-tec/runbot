@@ -64,22 +64,21 @@ class Project(models.Model):
              "will lead to webhook rejection. Should only use ASCII."
     )
 
-    def _check_progress(self, commit=False):
-        for project in self.search([]):
-            for staging in project.mapped('branch_ids.active_staging_id'):
-                staging.check_status()
-                if commit:
-                    self.env.cr.commit()
+    def _create_stagings(self, commit=False):
+        pass
 
-            for branch in project.branch_ids:
+    def _check_stagings(self, commit=False):
+        for staging in self.search([]).mapped('branch_ids.active_staging_id'):
+            staging.check_status()
+            if commit:
+                self.env.cr.commit()
+
+    def _create_stagings(self, commit=False):
+        for branch in self.search([]).mapped('branch_ids'):
+            if not branch.active_staging_id:
                 branch.try_staging()
                 if commit:
                     self.env.cr.commit()
-
-        # I have no idea why this is necessary for tests to pass, the only
-        # DB update done not through the ORM is when receiving a notification
-        # that a PR has been closed
-        self.invalidate_cache()
 
     def _send_feedback(self):
         Repos = self.env['runbot_merge.repository']
@@ -221,6 +220,12 @@ class Repository(models.Model):
         default='legal/cla,ci/runbot'
     )
     branch_filter = fields.Char(default='[(1, "=", 1)]', help="Filter branches valid for this repository")
+    substitutions = fields.Text(
+        "label substitutions",
+        help="""sed-style substitution patterns applied to the label on input, one per line.
+
+All substitutions are tentatively applied sequentially to the input.
+""")
 
     def github(self, token_field='github_token'):
         return github.GH(self.project_id[token_field], self.name)
@@ -292,6 +297,18 @@ class Repository(models.Model):
         branches = self.env['runbot_merge.branch'].search
         return self.filtered(lambda r: branch in branches(ast.literal_eval(r.branch_filter)))
 
+    def _remap_label(self, label):
+        for line in filter(None, (self.substitutions or '').splitlines()):
+            sep = line[0]
+            _, pattern, repl, flags = line.split(sep)
+            label = re.sub(
+                pattern, repl, label,
+                count=0 if 'g' in flags else 1,
+                flags=(re.MULTILINE if 'm' in flags.lower() else 0)
+                    | (re.IGNORECASE if 'i' in flags.lower() else 0)
+            )
+        return label
+
 class Branch(models.Model):
     _name = _description = 'runbot_merge.branch'
     _order = 'sequence, name'
@@ -338,6 +355,7 @@ class Branch(models.Model):
           AND pr.state != 'merged'
           AND pr.state != 'closed'
         GROUP BY
+            pr.target,
             CASE
                 WHEN pr.label SIMILAR TO '%%:patch-[[:digit:]]+'
                     THEN pr.id::text
@@ -810,8 +828,16 @@ class PullRequests(models.Model):
                         msg = "This PR is already reviewed, reviewing it again is useless."
                 elif not param and is_author:
                     newstate = RMINUS.get(self.state)
-                    if newstate:
-                        self.state = newstate
+                    if self.priority == 0 or newstate:
+                        if newstate:
+                            self.state = newstate
+                        if self.priority == 0:
+                            self.priority = 1
+                            Feedback.create({
+                                'repository': self.repository.id,
+                                'pull_request': self.number,
+                                'message': "PR priority reset to 1, as pull requests with priority 0 ignore review state.",
+                            })
                         self.unstage("unreview (r-) by %s", author.github_login)
                         ok = True
                     else:
@@ -881,7 +907,11 @@ class PullRequests(models.Model):
         if not self:
             return ACL(False, False, False)
 
-        is_admin = (user.reviewer and self.author != user) or (user.self_reviewer and self.author == user)
+        is_admin = self.env['res.partner.review'].search_count([
+            ('partner_id', '=', user.id),
+            ('repository_id', '=', self.repository.id),
+            ('review', '=', True) if self.author != user else ('self_review', '=', True),
+        ]) == 1
         is_reviewer = is_admin or self in user.delegate_reviewer
         # TODO: should delegate reviewers be able to retry PRs?
         is_author = is_reviewer or self.author == user
@@ -992,7 +1022,7 @@ class PullRequests(models.Model):
             message += '\n\n' + body
         return self.env['runbot_merge.pull_requests'].create({
             'number': description['number'],
-            'label': description['head']['label'],
+            'label': repo._remap_label(description['head']['label']),
             'author': author.id,
             'target': branch.id,
             'repository': repo.id,

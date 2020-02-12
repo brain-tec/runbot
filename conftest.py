@@ -123,18 +123,37 @@ def rolemap(config):
     return rolemap
 
 @pytest.fixture
-def users(env, config, rolemap):
+def partners(env, config, rolemap):
+    m = dict.fromkeys(rolemap.keys(), env['res.partner'])
     for role, login in rolemap.items():
         if role in ('user', 'other'):
             continue
 
-        env['res.partner'].create({
+        m[role] = env['res.partner'].create({
             'name': config['role_' + role].get('name', login),
             'github_login': login,
-            'reviewer': role == 'reviewer',
-            'self_reviewer': role == 'self_reviewer',
         })
+    return m
 
+@pytest.fixture
+def setreviewers(partners):
+    def _(*repos):
+        partners['reviewer'].write({
+            'review_rights': [
+                (0, 0, {'repository_id': repo.id, 'review': True})
+                for repo in repos
+            ]
+        })
+        partners['self_reviewer'].write({
+            'review_rights': [
+                (0, 0, {'repository_id': repo.id, 'self_review': True})
+                for repo in repos
+            ]
+        })
+    return _
+
+@pytest.fixture
+def users(partners, rolemap):
     return rolemap
 
 @pytest.fixture(scope='session')
@@ -229,7 +248,7 @@ class DbDict(dict):
             '-d', db, '-i', module,
             '--max-cron-threads', '0',
             '--stop-after-init'
-        ])
+        ], check=True)
         self[module] = db
         return db
 
@@ -401,6 +420,20 @@ class Repo:
             'subscribed': False,
             'ignored': True,
         })
+
+    def add_collaborator(self, login, token):
+        # send invitation to user
+        r = self._session.put('https://api.github.com/repos/{}/collaborators/{}'.format(self.name, login))
+        assert r.ok, r.json()
+        # accept invitation on behalf of user
+        r = requests.patch('https://api.github.com/user/repository_invitations/{}'.format(r.json()['id']), headers={
+            'Authorization': 'token ' + token
+        })
+        assert r.ok, r.json()
+        # sanity check that user is part of collaborators
+        r = self._session.get('https://api.github.com/repos/{}/collaborators'.format(self.name))
+        assert r.ok, r.json()
+        assert any(login == c['login'] for c in r.json())
 
     def _get_session(self, token):
         s = self._session
@@ -809,15 +842,18 @@ class PR:
         )
         assert r.status_code == 204, r.json()
 
-    def _set_prop(self, prop, value):
+    def _set_prop(self, prop, value, token=None):
         assert self.repo.hook
+        headers = {}
+        if token:
+            headers['Authorization'] = 'token ' + token
         r = self.repo._session.patch('https://api.github.com/repos/{}/pulls/{}'.format(self.repo.name, self.number), json={
             prop: value
-        })
+        }, headers=headers)
         assert 200 <= r.status_code < 300, r.json()
 
-    def open(self):
-        self._set_prop('state', 'open')
+    def open(self, token=None):
+        self._set_prop('state', 'open', token=token)
 
     def close(self):
         self._set_prop('state', 'closed')
@@ -936,17 +972,23 @@ class Environment:
         wait_for_hook()
 
 class Model:
-    __slots__ = ['_env', '_model', '_ids', '_fields']
+    __slots__ = ['env', '_name', '_ids', '_fields']
     def __init__(self, env, model, ids=(), fields=None):
-        object.__setattr__(self, '_env', env)
-        object.__setattr__(self, '_model', model)
+        object.__setattr__(self, 'env', env)
+        object.__setattr__(self, '_name', model)
         object.__setattr__(self, '_ids', tuple(ids or ()))
 
-        object.__setattr__(self, '_fields', fields or self._env(self._model, 'fields_get', attributes=['type', 'relation']))
+        object.__setattr__(self, '_fields', fields or self.env(self._name, 'fields_get', attributes=['type', 'relation']))
 
     @property
     def ids(self):
         return self._ids
+
+    @property
+    def _env(self): return self.env
+
+    @property
+    def _model(self): return self._name
 
     def __bool__(self):
         return bool(self._ids)
