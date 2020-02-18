@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-from collections import defaultdict
-from unittest.mock import patch
-from odoo.tests import common
+import datetime
 
+from unittest.mock import patch
+
+from odoo import fields
 from .common import RunbotCase
+
 
 def rev_parse(repo, branch_name):
     """
@@ -13,6 +15,7 @@ def rev_parse(repo, branch_name):
     """
     head_hash = 'rp_%s_%s_head' % (repo.name.split(':')[1], branch_name.split('/')[-1])
     return head_hash
+
 
 class Test_Build(RunbotCase):
 
@@ -300,6 +303,96 @@ class Test_Build(RunbotCase):
         })
         self.assertEqual(build.config_id, self.env.ref('runbot.runbot_build_config_default_no_run'), "config_id should be the one set on the build")
 
+    def test_build_gc_date(self):
+        """ test build gc date and gc_delay"""
+        self.branch.config_id = self.env.ref('runbot.runbot_build_config_default')
+        build = self.create_build({
+            'branch_id': self.branch.id,
+            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'local_state': 'done'
+        })
+
+        child_build = self.create_build({
+            'branch_id': self.branch.id,
+            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'extra_params': '2',
+            'parent_id': build.id,
+            'local_state': 'done'
+        })
+
+        # verify that the gc_day is set 30 days later (29 days since we should be a few microseconds later)
+        delta = fields.Datetime.from_string(build.gc_date) - datetime.datetime.now()
+        self.assertEqual(delta.days, 29)
+        child_delta = fields.Datetime.from_string(child_build.gc_date) - datetime.datetime.now()
+        self.assertEqual(child_delta.days, 14)
+
+        # Keep child build ten days more
+        child_build.gc_delay = 10
+        child_delta = fields.Datetime.from_string(child_build.gc_date) - datetime.datetime.now()
+        self.assertEqual(child_delta.days, 24)
+
+        # test the real _local_cleanup method
+        self.stop_patcher('_local_cleanup_patcher')
+        self.start_patcher('build_local_pgadmin_cursor_patcher', 'odoo.addons.runbot.models.build.local_pgadmin_cursor')
+        self.start_patcher('build_os_listdirr_patcher', 'odoo.addons.runbot.models.build.os.listdir')
+        dbname = '%s-foobar' % build.dest
+        self.start_patcher('list_local_dbs_patcher', 'odoo.addons.runbot.models.build.list_local_dbs', return_value=[dbname])
+
+        build._local_cleanup()
+        self.assertFalse(self.patchers['_local_pg_dropdb_patcher'].called)
+        build.job_end = datetime.datetime.now() - datetime.timedelta(days=31)
+        build._local_cleanup()
+        self.patchers['_local_pg_dropdb_patcher'].assert_called_with(dbname)
+
+    def test_repo_gc_testing(self):
+        """ test that builds are killed when room is needed on a host """
+        host = self.env['runbot.host'].create({
+            'name': 'runbot_xxx',
+            'nb_worker': 2
+        })
+
+        build_other_host = self.create_build({
+            'branch_id': self.branch.id,
+            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'local_state': 'testing',
+            'host': 'runbot_yyy'
+        })
+
+        child_build = self.create_build({
+            'branch_id': self.branch.id,
+            'name': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            'local_state': 'testing',
+            'host': 'runbot_xxx',
+            'extra_params': '2',
+            'parent_id': build_other_host.id
+        })
+
+        self.branch.repo_id._gc_testing(host)
+        self.assertFalse(build_other_host.requested_action)
+        self.assertFalse(child_build.requested_action)
+
+        build_same_branch = self.create_build({
+            'branch_id': self.branch_11.id,
+            'name': 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            'local_state': 'testing',
+            'host': 'runbot_xxx',
+        })
+
+        self.branch.repo_id._gc_testing(host)
+        self.assertFalse(build_same_branch.requested_action)
+
+        build_pending = self.create_build({
+            'branch_id': self.branch.id,
+            'name': 'deadbeafffffffffffffffffffffffffffffffff',
+            'local_state': 'pending',
+        })
+
+        self.branch.repo_id._gc_testing(host)
+        self.assertEqual(build_other_host.requested_action, 'deathrow')
+        self.assertEqual(child_build.requested_action, 'deathrow')
+        self.assertFalse(build_same_branch.requested_action)
+        self.assertFalse(build_pending.requested_action)
+
     @patch('odoo.addons.runbot.models.build._logger')
     def test_build_skip(self, mock_logger):
         """test build is skipped"""
@@ -324,14 +417,25 @@ class Test_Build(RunbotCase):
         mock_logger.debug.assert_called_with(log_first_part, 'A good reason')
 
     def test_ask_kill_duplicate(self):
-        """ Test that the _ask_kill method works on duplicate"""
+        """ Test that the _ask_kill method works on duplicate when they are related PR/branch"""
+
+        branch = self.Branch.create({
+            'repo_id': self.repo.id,
+            'name': 'refs/heads/master-test-branch-xxx'
+        })
+
+        pr = self.Branch.create({
+            'repo_id': self.repo.id,
+            'name': 'refs/pull/1234',
+            'pull_head_name': 'odoo:master-test-branch-xxx'
+        })
 
         build1 = self.create_build({
-            'branch_id': self.branch_10.id,
+            'branch_id': branch.id,
             'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
         })
         build2 = self.create_build({
-            'branch_id': self.branch_10.id,
+            'branch_id': pr.id,
             'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
         })
         build2.write({'local_state': 'duplicate', 'duplicate_id': build1.id}) # this may not be usefull if we detect duplicate in same repo.
