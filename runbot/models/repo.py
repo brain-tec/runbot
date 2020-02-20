@@ -372,7 +372,7 @@ class runbot_repo(models.Model):
                 if branch.sticky:
                     for rev_repo in self.search([('dependency_ids', 'in', self.id), ('no_build', '=', False)]):
                         # find the latest build with the same branch name
-                        latest_rev_build = Build.search([('build_type', '=', 'normal'), ('hidden', '=', 'False'), ('repo_id.id', '=', rev_repo.id), ('branch_id.branch_name', '=', branch.branch_name)], order='id desc', limit=1)
+                        latest_rev_build = Build.search([('build_type', '=', 'normal'), ('hidden', '=', False), ('repo_id.id', '=', rev_repo.id), ('branch_id.branch_name', '=', branch.branch_name)], order='id desc', limit=1)
                         if latest_rev_build:
                             _logger.debug('Reverse dependency build %s forced in repo %s by commit %s', latest_rev_build.dest, rev_repo.name, sha[:6])
                             indirect = latest_rev_build._force(message='Rebuild from dependency %s commit %s' % (self.name, sha[:6]))
@@ -545,14 +545,12 @@ class runbot_repo(models.Model):
         # decide if we need room
         Build = self.env['runbot.build']
         domain_host = self.build_domain_host(host)
-        testing_builds = Build.search(domain_host + [('local_state', 'in', ['testing', 'pending'])])
+        testing_builds = Build.search(domain_host + [('local_state', 'in', ['testing', 'pending']), ('requested_action', '!=', 'deathrow')])
         used_slots = len(testing_builds)
         available_slots = host.get_nb_worker() - used_slots
         nb_pending = Build.search_count([('local_state', '=', 'pending'), ('host', '=', False)])
         if available_slots > 0 or nb_pending == 0:
             return
-        builds_to_kill = self.env['runbot.build']
-        builds_to_skip = self.env['runbot.build']
         for build in testing_builds:
             top_parent = build._get_top_parent()
             if not build.branch_id.sticky:
