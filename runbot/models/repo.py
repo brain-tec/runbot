@@ -328,7 +328,7 @@ class runbot_repo(models.Model):
 
         self.env.cr.execute("""
             SELECT DISTINCT ON (branch_id) name, branch_id
-            FROM runbot_build WHERE branch_id in %s AND build_type = 'normal' ORDER BY branch_id,id DESC;
+            FROM runbot_build WHERE branch_id in %s AND build_type = 'normal' AND parent_id is null ORDER BY branch_id,id DESC;
         """, (tuple([ref_branches[r[0]] for r in refs]),))
         # generate a set of tuples (branch_id, sha)
         builds_candidates = {(r[1], r[0]) for r in self.env.cr.fetchall()}
@@ -367,21 +367,7 @@ class runbot_repo(models.Model):
                     if builds_to_skip:
                         build_info['sequence'] = builds_to_skip[0].sequence
 
-                new_build = Build.create(build_info)
-                # create a reverse dependency build if needed
-                if branch.sticky:
-                    for rev_repo in self.search([('dependency_ids', 'in', self.id), ('no_build', '=', False)]):
-                        # find the latest build with the same branch name
-                        latest_rev_build = Build.search([('build_type', '=', 'normal'), ('hidden', '=', False), ('repo_id.id', '=', rev_repo.id), ('branch_id.branch_name', '=', branch.branch_name)], order='id desc', limit=1)
-                        if latest_rev_build:
-                            _logger.debug('Reverse dependency build %s forced in repo %s by commit %s', latest_rev_build.dest, rev_repo.name, sha[:6])
-                            indirect = latest_rev_build._force(message='Rebuild from dependency %s commit %s' % (self.name, sha[:6]))
-                            if not indirect:
-                                _logger.exception('Failed to create indirect for %s from %s in repo %s', new_build, latest_rev_build, rev_repo)
-                            else:
-                                indirect.build_type = 'indirect'
-                                new_build.revdep_build_ids += indirect
-
+                Build.create(build_info)
 
     def _create_pending_builds(self):
         """ Find new commits in physical repos"""
