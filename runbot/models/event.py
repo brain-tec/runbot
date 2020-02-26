@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 
 import logging
+import markdown
 
 from odoo import models, fields, api, tools
 
 _logger = logging.getLogger(__name__)
 
-TYPES = [(t, t.capitalize()) for t in 'client server runbot subbuild link'.split()]
+TYPES = [(t, t.capitalize()) for t in 'client server runbot subbuild link markdown'.split()]
 
 
 class runbot_event(models.Model):
@@ -71,6 +72,9 @@ FOR EACH ROW EXECUTE PROCEDURE runbot_set_logging_build();
 
         """)
 
+    def markdown(self):
+        self.ensure_one()
+        return markdown.markdown(self.message)
 
 class RunbotErrorLog(models.Model):
     _name = "runbot.error.log"
