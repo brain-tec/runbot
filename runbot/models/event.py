@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 
 import logging
+import re
 
-from odoo import models, fields, api, tools
+from odoo import models, fields, tools
+from werkzeug import utils
 
 _logger = logging.getLogger(__name__)
 
-TYPES = [(t, t.capitalize()) for t in 'client server runbot subbuild link'.split()]
+TYPES = [(t, t.capitalize()) for t in 'client server runbot subbuild link markdown'.split()]
 
 
 class runbot_event(models.Model):
@@ -70,6 +72,34 @@ CREATE TRIGGER runbot_new_logging BEFORE INSERT ON ir_logging
 FOR EACH ROW EXECUTE PROCEDURE runbot_set_logging_build();
 
         """)
+
+    def _markdown(self):
+        """ Pseudo markdown parser for message.
+            :param icon_class: class to use for links icon. None means no icon
+        """
+        self.ensure_one()
+        if self.type != 'markdown':
+            return self.message
+
+        text = utils.escape(self.message)
+        patterns = {
+                r'\*\*(.+?)\*\*': '<strong>\g<1></strong>',
+                r'~~(.+?)~~': '<del>\g<1></del>',  # it's not official markdown but who cares
+                r'__(.+?)__': '<ins>\g<1></ins>',  # same here, maybe we should change the method name
+                r'`(.+?)`': '<code>\g<1></code>',
+        }
+
+        for p, b in patterns.items():
+            text = re.sub(p, b, text, flags=re.DOTALL)
+
+        # icons
+        re_icon = re.compile(r'@icon-([a-zA-Z0-9-]+)')
+        text = re_icon.sub('<i class="fa fa-\g<1>"></i>', text)
+
+        # links
+        re_links = re.compile(r'\[(.+?)\]\((.+?)\)')
+        text = re_links.sub('<a href="\g<2>">\g<1></a>', text)
+        return text
 
 
 class RunbotErrorLog(models.Model):
