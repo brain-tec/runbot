@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 
 import logging
-import markdown
 
 from odoo import models, fields, api, tools
 
@@ -74,7 +73,20 @@ FOR EACH ROW EXECUTE PROCEDURE runbot_set_logging_build();
 
     def markdown(self):
         self.ensure_one()
-        return markdown.markdown(self.message)
+        text = self.message
+        patterns = {
+                '**': ('<strong>', '</strong>'),
+                '~~': ('<del>', '</del>'),  # it's not official markdown but who cares
+                '__': ('<ins>', '</ins>'),  # same here, maybe we should change the method name
+                '`': ('<code>', '</code>'),
+        }
+        n = 0
+        for p,b in patterns.items():
+            while p in text:
+                text = text.replace(p, b[n % 2], 1)
+                n += 1
+        return text
+
 
 class RunbotErrorLog(models.Model):
     _name = "runbot.error.log"
