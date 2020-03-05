@@ -324,6 +324,20 @@ class PullRequests(models.Model):
                         pr.state = newstate
                         pr.reviewed_by = author
                         # TODO: logging & feedback
+            elif token == 'close':
+                close = False
+                message = "I'm sorry, @{}. I can't close this PR for you."
+                if self.source_id._pr_acl(author).is_reviewer:
+                    close = True
+                    message = None
+
+                Feedback.create({
+                    'repository': self.repository.id,
+                    'pull_request': self.number,
+                    'message': message,
+                    'close': close,
+                    'token_field': 'fp_github_token',
+                })
             elif token == 'up' and next(tokens, None) == 'to':
                 limit = next(tokens, None)
                 if not self._pr_acl(author).is_author:
@@ -906,18 +920,31 @@ stderr:
             new = configured.stdout().rev_parse('HEAD').stdout.decode()
             logger.info('%s: success -> %s', commit_sha, new)
 
+    def _build_merge_message(self, message, related_prs=()):
+        msg = super()._build_merge_message(message, related_prs=related_prs)
+
+        # ensures all reviewers in the review path are on the PR in order:
+        # original reviewer, then last conflict reviewer, then current PR
+        reviewers = (self | self._get_root() | self.source_id)\
+            .mapped('reviewed_by.formatted_email')
+
+        sobs = msg.headers.getlist('signed-off-by')
+        msg.headers.remove('signed-off-by')
+        msg.headers.extend(
+            ('signed-off-by', signer)
+            for signer in sobs
+            if signer not in reviewers
+        )
+        msg.headers.extend(
+            ('signed-off-by', reviewer)
+            for reviewer in reversed(reviewers)
+        )
+
+        return msg
+
     def _make_fp_message(self, commit):
         cmap = json.loads(self.commits_map)
         msg = self._parse_commit_message(commit['commit']['message'])
-        # original signed-off-er should be retained but didn't necessarily
-        # sign off here, so convert signed-off-by to something else
-        sob = msg.headers.getlist('signed-off-by')
-        if sob:
-            msg.headers.remove('signed-off-by')
-            msg.headers.extend(
-                ('original-signed-off-by', v)
-                for v in sob
-            )
         # write the *merged* commit as "original", not the PR's
         msg.headers['x-original-commit'] = cmap.get(commit['sha'], commit['sha'])
         # don't stringify so caller can still perform alterations
