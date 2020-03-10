@@ -26,7 +26,7 @@ class Config(models.Model):
 
     name = fields.Char('Config name', required=True, unique=True, track_visibility='onchange', help="Unique name for config please use trigram as postfix for custom configs")
     description = fields.Char('Config description')
-    step_order_ids = fields.One2many('runbot.build.config.step.order', 'config_id')
+    step_order_ids = fields.One2many('runbot.build.config.step.order', 'config_id', copy=True)
     update_github_state = fields.Boolean('Notify build state to github', default=False, track_visibility='onchange')
     protected = fields.Boolean('Protected', default=False, track_visibility='onchange')
     group = fields.Many2one('runbot.build.config', 'Configuration group', help="Group of config's and config steps")
@@ -55,7 +55,7 @@ class Config(models.Model):
 
     def step_ids(self):
         self.ensure_one()
-        return [ordered_step.step_id for ordered_step in self.step_order_ids]
+        return [ordered_step.step_id for ordered_step in self.step_order_ids.sorted('sequence')]
 
     def _check_step_ids_order(self):
         install_job = False
@@ -205,7 +205,7 @@ class ConfigStep(models.Model):
     def _run(self, build):
         log_path = build._path('logs', '%s.txt' % self.name)
         build.write({'job_start': now(), 'job_end': False})  # state, ...
-        build._log('run', 'Starting step %s from config %s' % (self.name, build.config_id.name), level='SEPARATOR')
+        build._log('run', 'Starting step **%s** from config **%s**' % (self.name, build.config_id.name), type='markdown', level='SEPARATOR')
         return self._run_step(build, log_path)
 
     def _run_step(self, build, log_path):
