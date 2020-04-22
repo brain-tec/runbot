@@ -27,7 +27,7 @@ class Runbot(Controller):
         return pending_count, level, scheduled_count
 
     @route(['/runbot', '/runbot/projects/<model("runbot.project.category"):category>'], website=True, auth='public', type='http')
-    def projects(self, category=None, more=False, search='', refresh='', **kwargs):
+    def projects(self, category=None, more=False, mode = '', search='', refresh='', **kwargs):
         search = search if len(search) < 60 else search[:60]
         env = request.env
         categories = env['runbot.project.category'].search([])
@@ -45,25 +45,27 @@ class Runbot(Controller):
             'pending_level': level,
             'scheduled_count': scheduled_count,
             'hosts_data': request.env['runbot.host'].search([]),
-            'more': more,
+            'more': more is not False,
         }
 
         if category:
             # basic search to start, only project name. TODO add instance.commits and project pr numbers (all branches names)
 
-            domain = [('category_id', '=', category.id)]
+            domain = [('last_instance', '!=', False),('category_id', '=', category.id)]
             if search:
-                for search_elem in search.split("|"):
-                    domain = expression.OR(domain, [('name', 'like', search_elem)])
+                search_domain = expression.OR([[('name', 'like', search_elem)] for search_elem in search.split("|")])
+                domain = expression.AND([domain, search_domain])
 
+            e = expression.expression(domain, request.env['runbot.project'])
+            where_clause, where_params = e.to_sql()
             env.cr.execute("""
                 SELECT id FROM runbot_project
-                WHERE last_instance is not null
+                WHERE {where_clause}
                 ORDER BY
                     sticky desc,
                     case when sticky then version_number end collate "C" desc,
                     case when not sticky then last_instance end desc
-                LIMIT 100""")
+                LIMIT 100""".format(where_clause=where_clause), where_params)
             # TODO check if where clausse is usefull on complete database
             projects = env['runbot.project'].browse([r[0] for r in env.cr.fetchall()])
 
@@ -73,13 +75,16 @@ class Runbot(Controller):
             })
 
         context.update({'message': request.env['ir.config_parameter'].sudo().get_param('runbot.runbot_message')})
-        return request.render('runbot.projects', context)
+        return request.render('runbot.projects%s' % mode, context) # todo remove mode hack
 
 
-    @route(['/runbot/project/<model("runbot.project"):project>'], website=True, auth='public', type='http')
+    @route([
+        '/runbot/project/<model("runbot.project"):project>',
+        '/runbot/project/<model("runbot.project"):project>/page/<int:page>'
+        ], website=True, auth='public', type='http')
     def project(self, project=None, page=1, limit=50, more=False, **kwargs):
         env = request.env
-        domain =[('project_id','=',project.id), ('hidden', '=', False)]
+        domain = [('project_id', '=', project.id), ('hidden', '=', False)]
         instance_count = request.env['runbot.instance'].search_count(domain)
         pager = request.website.pager(
             url='/runbot/project/%s' % project.id,
@@ -87,112 +92,29 @@ class Runbot(Controller):
             page=page,
             step=50,
         )
-        instances = request.env['runbot.instance'].search(domain, limit=limit, offset=pager.get('offset',0))
+        instances = request.env['runbot.instance'].search(domain, limit=limit, offset=pager.get('offset', 0), order='id desc')
 
-        context = {'project': project, 'instances': instances, 'pager': pager, 'more': more}
+        context = {
+            'project': project,
+            'instances': instances,
+            'pager': pager,
+            'more': more is not False,
+            'categories': request.env['runbot.project.category'].search([]),
+            'category': project.category_id
+            }
 
         return request.render('runbot.project', context)
 
 
     @route(['/runbot/instance/<model("runbot.project.instance"):instance>'], website=True, auth='public', type='http')
     def instance(self, instance=None, more=False, **kwargs):
-        context = {'instance': instance, 'more': more}
-        return request.render('runbot.instance', context)
-
-
-    @route(['/runbot/repo/<model("runbot.repo"):repo>'], website=True, auth='public', type='http')
-    def repo(self, repo=None, search='', refresh='', **kwargs):
-        search = search if len(search) < 60 else search[:60]
-
-        triggers = request.env['runbot.trigger'].search([])
-        if not trigger and triggers:
-            repo = repos[0].id
-
-        pending = self._pending()
         context = {
-            'repos': repos.ids,
-            'repo': repo,
-            'host_stats': [],
-            'pending_total': pending[0],
-            'pending_level': pending[1],
-            'scheduled_count': pending[2],
-            'search': search,
-            'refresh': refresh,
-            'hosts_data': request.env['runbot.host'].search([]),
+            'instance': instance,
+            'more': more is not False,
+            'categories': request.env['runbot.project.category'].search([]),
+            'category': instance.project_id.category_id,
         }
-
-        build_ids = []
-        if repo:
-            domain = [('repo_id', '=', repo.id)]
-            if search:
-                search_domain = []
-                for to_search in search.split("|"):
-                    search_domain = ['|', '|', '|'] + search_domain
-                    search_domain += [('dest', 'ilike', to_search), ('subject', 'ilike', to_search), ('branch_id.branch_name', 'ilike', to_search)]
-                domain += search_domain[1:]
-            domain = expression.AND([domain, [('hidden', '=', False)]]) # don't display children builds on repo view
-            build_ids = build_obj.search(domain, limit=100)
-            branch_ids, build_by_branch_ids = [], {}
-
-            if build_ids:
-                branch_query = """
-                SELECT br.id FROM runbot_branch br INNER JOIN runbot_build bu ON br.id=bu.branch_id WHERE bu.id in %s
-                ORDER BY bu.sequence DESC
-                """
-                sticky_dom = [('repo_id', '=', repo.id), ('sticky', '=', True)]
-                sticky_branch_ids = [] if search else branch_obj.search(sticky_dom).sorted(key=lambda b: (b.branch_name == 'master', b.id), reverse=True).ids
-                request._cr.execute(branch_query, (tuple(build_ids.ids),))
-                branch_ids = uniq_list(sticky_branch_ids + [br[0] for br in request._cr.fetchall()])
-
-                build_query = """
-                    SELECT 
-                        branch_id, 
-                        max(case when br_bu.row = 1 then br_bu.build_id end),
-                        max(case when br_bu.row = 2 then br_bu.build_id end),
-                        max(case when br_bu.row = 3 then br_bu.build_id end),
-                        max(case when br_bu.row = 4 then br_bu.build_id end)
-                    FROM (
-                        SELECT 
-                            br.id AS branch_id, 
-                            bu.id AS build_id,
-                            row_number() OVER (PARTITION BY branch_id) AS row
-                        FROM 
-                            runbot_branch br INNER JOIN runbot_build bu ON br.id=bu.branch_id 
-                        WHERE 
-                            br.id in %s AND (bu.hidden = 'f' OR bu.hidden IS NULL)
-                        GROUP BY br.id, bu.id
-                        ORDER BY br.id, bu.id DESC
-                    ) AS br_bu
-                    WHERE
-                        row <= 4
-                    GROUP BY br_bu.branch_id;
-                """
-                request._cr.execute(build_query, (tuple(branch_ids),))
-                build_by_branch_ids = {
-                    rec[0]: [r for r in rec[1:] if r is not None] for rec in request._cr.fetchall()
-                }
-
-            branches = branch_obj.browse(branch_ids)
-            build_ids = flatten(build_by_branch_ids.values())
-            build_dict = {build.id: build for build in build_obj.browse(build_ids)}
-
-            def branch_info(branch):
-                return {
-                    'branch': branch,
-                    'builds': [build_dict[build_id] for build_id in build_by_branch_ids.get(branch.id) or []]
-                }
-
-            context.update({
-                'branches': [branch_info(b) for b in branches],
-                'qu': QueryURL('/runbot/repo/' + slug(repo), search=search, refresh=refresh),
-                'fqdn': fqdn(),
-            })
-
-        # consider host gone if no build in last 100
-        build_threshold = max(build_ids or [0]) - 100
-
-        context.update({'message': request.env['ir.config_parameter'].sudo().get_param('runbot.runbot_message')})
-        return request.render('runbot.repo', context)
+        return request.render('runbot.instance', context)
 
     @route([
         '/runbot/build/<int:build_id>/<operation>',
@@ -228,7 +150,9 @@ class Runbot(Controller):
         context = {
             'build': build,
             'fqdn': fqdn(),
-            'more': more,
+            'more': more is not False,
+            'categories': request.env['runbot.project.category'].search([]),
+            #'category': build_id.param_id.category_id, TODO how to find category? store cat? trigger?
         }
         return request.render("runbot.build", context)
 

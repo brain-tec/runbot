@@ -217,6 +217,7 @@ def migrate(cr, version):
                 'version_id':  branch_to_version[branch_id],
                 'extra_params': extra_params,
                 'config_id': config_id,
+                #'trigger_id': triggers[repo_to_group[repo_id].id].id,
                 'config_data': config_data,
                 'commit_path_mode':commit_path_mode,
             })
@@ -261,9 +262,9 @@ def migrate(cr, version):
                     'repo_id': dependency_repo_id,
                 })
 
-                build_commit_ids[build_id][commit.repo_group_id.id] = (dependency_hash, commit.id)
                 sha_repo_commits[key] = commit
                 sha_commits[dependency_hash] = commit
+            build_commit_ids[build_id][commit.repo_group_id.id] = (dependency_hash, commit.id)
 
             cr.execute('UPDATE runbot_build_commit SET commit_id=%s WHERE id=%s', (commit.id, id))
     progress.finish()

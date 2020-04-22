@@ -4,12 +4,15 @@ class Commit(models.Model):
     _name = "runbot.commit"
     _description = "Commit"
 
+    _sql_constraints = [
+        (
+            "commit_unique",
+            "unique (name, repo_group_id)",
+            "Commit must be unique to ensure correct duplicate matching",
+        )
+    ]
     name = fields.Char('SHA')
-    repo_id = fields.Many2one('runbot.repo', string='Repo') # discovered in repo
-
-    # note, would be better to store group only: a commit should be the same in both repo.
-    # problem: where to checkout? In practice, update both repo if they are the same bare repository with different origins
-    repo_group_id = fields.Many2one(related='repo_id.repo_group_id', store=True)
+    repo_group_id = fields.Many2one('runbot.repo_group', string='Repo group')
     date = fields.Datetime('Commit date')
     author = fields.Char('Author')
     author_email = fields.Char('Author Email')
@@ -51,7 +54,8 @@ class RunbotBuildCommit(models.Model):
 
     params_id = fields.Many2one('runbot.build.params', 'Build', required=True, ondelete='cascade', index=True)
     commit_id = fields.Many2one('runbot.commit', 'Dependency commit', required=True)
-    closest_branch_id = fields.Many2one('runbot.branch', 'Branch', ondelete='cascade')
+    repo_id = fields.Many2one('runbot.repo', string='Repo') # discovered in repo
+    closest_branch_id = fields.Many2one('runbot.branch', 'Branch', ondelete='cascade') # TODO remove?
     match_type = fields.Char('Match Type')
 
     def _get_repo(self):

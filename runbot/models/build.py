@@ -8,6 +8,8 @@ import shutil
 import subprocess
 import time
 import datetime
+import hashlib
+
 from ..common import dt2time, fqdn, now, grep, local_pgadmin_cursor, s2human, Commit as OldComit, dest_reg, os, list_local_dbs, pseudo_markdown
 from ..container import docker_build, docker_stop, docker_state, Command
 from ..fields import JsonDictField
@@ -61,7 +63,7 @@ class BuildParameters(models.Model):
     # execution parametter
     commit_ids = fields.One2many('runbot.build.commit', 'params_id', copy=True)
     version_id = fields.Many2one('runbot.version', required=True)
-
+    #trigger_id = fields.Many2one('runbot.trigger', required=True)
     # other informations
     extra_params = fields.Char('Extra cmd args')
     config_id = fields.Many2one('runbot.build.config', 'Run Config', required=True,
@@ -75,7 +77,7 @@ class BuildParameters(models.Model):
 
     build_ids = fields.One2many('runbot.build', 'params_id')
 
-    builds_reference_ids = fields.One2many('runbot.build.reference', 'build_id')
+    builds_reference_ids = fields.One2many('runbot.build.reference', 'params_id')
     modules = fields.Char('Modules') # TODO fill this with combination of triggers repo_group_modules and project_id.modules (or trigger?)
 
     # problem for dependencies and path_mode.
@@ -89,6 +91,18 @@ class BuildParameters(models.Model):
     # trigger could define domains to find builds
     # build_params could use those domains
     # other solution: ignore this, will be time setted, subbuild will create new params
+
+    def _hash(self):
+        return hashlib.sha256((
+            self.version_id,
+            self.extra_params,
+            self.config_id,
+            self.config_data.dict,
+            self.commit_path_mode,
+            sorted(self.builds_reference_ids.build_ids.ids),
+            self.modules,
+            sorted(self.commit_ids.commit_id.ids),
+        )).hexdigest()
 
 class BuildResults(models.Model):
     # remove duplicate management
@@ -1224,6 +1238,7 @@ class BuildReference(models.Model):
     _name = 'runbot.build.reference'
     _description = 'build result used for dump or dependencies as reference for another build'
 
+    params_id = fields.Many2one('runbot.params', index=True)
     build_id = fields.Many2one('runbot.build', index=True)
     ref_config_descriptor = fields.Many2one('runbot.build.reference.descriptor')
     key = fields.Char('key')

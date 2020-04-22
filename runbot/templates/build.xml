@@ -25,6 +25,7 @@
           </t>
         </t>
     </template>
+
     <template id="runbot.build_button">
         <div t-attf-class="pull-right">
             <div t-attf-class="btn-group {{klass}}">
@@ -120,8 +121,8 @@
                                   <b>Description:</b> <t t-raw="build.md_description"/><br/>
                                 </t>
                                 <t t-foreach="build.params_id.sudo().commit_ids" t-as="build_commit">
-                                  <b>Commit:</b> <a t-attf-href="build_commit.commit_id.git_url"><t t-esc="build_commit.commit_id.dname"/></a>
-                                  <t t-if="build_commit.match_type == 'default'"> from branch <b t-esc="build_commit.closest_branch_id.branch_name"/><br/></t>
+                                  <b>Commit:</b> <a t-attf-href="{{build_commit.commit_id.git_url}}"><t t-esc="build_commit.commit_id.dname"/></a>
+                                  <t t-if="build_commit.match_type in ('default', 'pr_target', 'prefix') "> from branch <b t-esc="build_commit.closest_branch_id.branch_name"/><br/></t>
                                   <div t-else="" class="ml-3">
                                     <b>Subject:</b>  <t t-esc="build_commit.commit_id.subject"/><br/>
                                     <b>Author:</b>  <t t-esc="build_commit.commit_id.author"/><br/>
