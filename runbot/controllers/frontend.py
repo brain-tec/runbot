@@ -27,7 +27,7 @@ class Runbot(Controller):
         return pending_count, level, scheduled_count
 
     @route(['/runbot', '/runbot/projects/<model("runbot.project.category"):category>'], website=True, auth='public', type='http')
-    def projects(self, category=None, search='', refresh='', **kwargs):
+    def projects(self, category=None, more=False, search='', refresh='', **kwargs):
         search = search if len(search) < 60 else search[:60]
         env = request.env
         categories = env['runbot.project.category'].search([])
@@ -45,6 +45,7 @@ class Runbot(Controller):
             'pending_level': level,
             'scheduled_count': scheduled_count,
             'hosts_data': request.env['runbot.host'].search([]),
+            'more': more,
         }
 
         if category:
@@ -76,8 +77,7 @@ class Runbot(Controller):
 
 
     @route(['/runbot/project/<model("runbot.project"):project>'], website=True, auth='public', type='http')
-    def project(self, project=None, page=1, limit=50, more=False, refresh='', **kwargs):
-        print('here')
+    def project(self, project=None, page=1, limit=50, more=False, **kwargs):
         env = request.env
         domain =[('project_id','=',project.id), ('hidden', '=', False)]
         instance_count = request.env['runbot.instance'].search_count(domain)
@@ -95,8 +95,8 @@ class Runbot(Controller):
 
 
     @route(['/runbot/instance/<model("runbot.project.instance"):instance>'], website=True, auth='public', type='http')
-    def project(self, project=None, page=1, limit=50, more=False, refresh='', **kwargs):
-        context = {'instance': instance, 'pager': pager, 'more': more}
+    def instance(self, instance=None, more=False, **kwargs):
+        context = {'instance': instance, 'more': more}
         return request.render('runbot.instance', context)
 
 
@@ -213,7 +213,7 @@ class Runbot(Controller):
         return werkzeug.utils.redirect(build.build_url + qs)
 
     @route(['/runbot/build/<int:build_id>'], type='http', auth="public", website=True)
-    def build(self, build_id, search=None, **post):
+    def build(self, build_id, more=False, search=None, **post):
         """Events/Logs"""
 
         Build = request.env['runbot.build']
@@ -228,6 +228,7 @@ class Runbot(Controller):
         context = {
             'build': build,
             'fqdn': fqdn(),
+            'more': more,
         }
         return request.render("runbot.build", context)
 

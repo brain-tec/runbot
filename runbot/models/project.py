@@ -223,14 +223,18 @@ class ProjectInstanceSlot(models.Model):
     _name = 'runbot.instance.slot'
     _description = 'Link between a project instance and a build'
 
+    _fa_link_type = {'created': 'hashtag', 'matched': 'link', 'rebuild': 'refresh'}
 
     instance_id = fields.Many2one('runbot.instance')
     trigger_id = fields.Many2one('runbot.trigger', index=True)
     build_id = fields.Many2one('runbot.build', index=True)
-    link_type = fields.Selection([('created', 'Build created'), ('matched', 'Existing build matched'), ('rebuild', 'Rebuild')]) # rebuild type?
+    link_type = fields.Selection([('created', 'Build created'), ('matched', 'Existing build matched'), ('rebuild', 'Rebuild')], required=True) # rebuild type?
     active = fields.Boolean('Attached')
     result = fields.Selection("Result", related='build_id.global_result')
     # rebuild, what to do: since build ccan be in multiple instance:
     # - replace for all instance?
     # - only available on instance and replace for instance only?
     # - create a new project instance will new linked build?
+
+    def fa_link_type(self):
+        return self._fa_link_type.get(self.link_type, 'exclamation-triangle')

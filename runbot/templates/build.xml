@@ -131,8 +131,8 @@
                                 <b>Version:</b> <t t-esc="build.params_id.version_id.name"/><br/>
                                 <b>Config:</b> <t t-esc="build.params_id.config_id.name"/><br/>
                                 <t t-if='more'>
-                                  <b>Config data:</b> <t t-esc="build.params_id.config_data"/><br/>
-                                  <b>Modules</b> <t t-esc="build.params_id.modules"/><br/>
+                                  <b>Config data:</b> <t t-esc="build.params_id.config_data.dict"/><br/>
+                                  <b>Modules:</b> <t t-esc="build.params_id.modules"/><br/>
                                   <b>Extra params:</b> <t t-esc="build.params_id.extra_params"/><br/>
                                   <t t-if="len(build.params_id.build_ids) > 1">
                                       <b>Reference builds:</b>

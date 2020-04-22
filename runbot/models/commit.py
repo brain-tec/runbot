@@ -33,10 +33,10 @@ class Commit(models.Model):
         except:
             return False
 
-    @api.depends('name', 'repo_id.short_name')
+    @api.depends('name', 'repo_group_id.name')
     def _compute_dname(self):
         for commit in self:
-            commit.dname = '%s:%s' % (commit.repo_id.short_name, commit.name[:8])
+            commit.dname = '%s:%s' % (commit.repo_group_id.name, commit.name[:8])
 
     @api.depends('name', 'repo_id.base')
     def _compute_commit_url(self):
@@ -55,5 +55,6 @@ class RunbotBuildCommit(models.Model):
     match_type = fields.Char('Match Type')
 
     def _get_repo(self):
+        raise NotImplementedError()
         return self.closest_branch_id.repo_id or self.dependecy_repo_id
 

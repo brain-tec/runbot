@@ -73,7 +73,7 @@ class BuildParameters(models.Model):
                                 default='soft',
                                 string='Source export path mode')
 
-    builds_ids = fields.One2many('runbot.build', 'params_id')
+    build_ids = fields.One2many('runbot.build', 'params_id')
 
     builds_reference_ids = fields.One2many('runbot.build.reference', 'build_id')
     modules = fields.Char('Modules') # TODO fill this with combination of triggers repo_group_modules and project_id.modules (or trigger?)

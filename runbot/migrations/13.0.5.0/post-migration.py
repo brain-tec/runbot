@@ -94,6 +94,7 @@ def migrate(cr, version):
         FROM runbot_repo order by id
     """)
     triggers = {}
+    triggers_by_category = defaultdict(list)
     for id, name, repo_config_id in cr.fetchall():
         repo_name = name.split('/')[-1].replace('.git', '')
         cr.execute(""" SELECT dependency_id FROM runbot_repo_dep_rel WHERE dependant_id = %s""", (id,))
@@ -101,13 +102,15 @@ def migrate(cr, version):
         group = repo_to_group[id]
         if group.id not in processed:
             processed.add(group.id)
-            triggers[group.id] = env['runbot.trigger'].create({
+            trigger = env['runbot.trigger'].create({
                 'name': repo_name,
                 'category_id': group.default_category_id.id,
                 'repos_group_ids': [(4, group.id)],
                 'dependency_ids': [(4, repo_to_group[dependency_id].id) for dependency_id in dependency_ids],
                 'config_id': repo_config_id if repo_config_id else env.ref('runbot.runbot_build_config_default').id,
             })
+            triggers[group.id] = trigger
+            triggers_by_category[group.default_category_id.id].append(trigger)
         # TODO create trigger using dependency_ids
 
     # no build, config, ...
@@ -273,6 +276,7 @@ def migrate(cr, version):
     nb_root_build = cr.fetchone()[0]
     counter = 0
     progress = _bar(nb_root_build)
+    previous_instance = {}
     for offset in range(0, nb_root_build, batch_size):
         cr.execute("""
             SELECT
@@ -297,9 +301,8 @@ def migrate(cr, version):
                     continue
 
                 # to fix: nightly will be in the same instance of the previous normal one. If config_id is diffrent, create instance?
-
+                # possible fix: max create_date diff
                 instance = project.last_instance
-                instance_repos_groups = []
                 instance_commits = instance.project_commit_ids.mapped('commit_id')
                 instance_group_repos_ids = instance_commits.mapped('repo_group_id').ids
                 for commit in instance_commits:
@@ -314,12 +317,33 @@ def migrate(cr, version):
             missing_commits = [commit_id for repo_group_id, (_, commit_id) in build_commits.items() if repo_group_id not in instance_group_repos_ids]
             if not instance:
                 instance = env['runbot.instance'].create({
+                    'create_date': create_date,
                     'last_update': create_date,
                     'state': 'ready',
                     'project_id': project.id
                 })
+                #if project.last_instance:
+                #    previous = previous_instance.get(project.last_instance.id)
+                #    if previous:
+                #        previous_build_by_trigger = {slot.trigger_id.id: slot.build_id.id for slot in previous.slot_ids}
+                #    else:
+                #        previous_build_by_trigger = {}
+                #    instance_slot_triggers = project.last_instance.slot_ids.mapped('trigger_id').ids
+                #    missing_trigger_ids = [trigger for trigger in triggers_by_category[project.category_id.id] if trigger.id not in instance_slot_triggers]
+                #    for trigger in missing_trigger_ids:
+                #        env['runbot.instance.slot'].create({
+                #            'trigger_id': trigger.id,
+                #            'instance_id': project.last_instance.id,
+                #            'build_id': previous_build_by_trigger.get(trigger.id), # may be None, if we want to create empty slots. Else, iter on slot instead
+                #            'link_type': 'matched',
+                #            'active': True,
+                #        })
+
+                previous_instance[instance.id] = project.last_instance
                 project.last_instance = instance
-            instance_slot = env['runbot.instance.slot'].create({
+            else:
+                instance.last_update = create_date
+            env['runbot.instance.slot'].create({
                 'trigger_id': triggers[repo_to_group[repo_id].id].id,
                 'instance_id': instance.id,
                 'build_id': build_id,

@@ -168,8 +168,7 @@
       </template>
 
 
-
-       <template id="runbot.projects">
+      <template id="runbot.projects">
           <t t-call='website.layout'>
               <t t-set="head">
                   <t t-if="refresh">
@@ -214,12 +213,32 @@
                                 <t t-if="instance.state=='preparing'"><t t-set="klass">default</t></t>
                                 <t t-if="instance.state=='ready'"><t t-set="klass">success</t></t>
                                 <td t-attf-class="bg-{{klass}}-light" style="width:22%">
+                                  <div><small>
+                                    <t t-foreach="instance.project_commit_ids" t-as="project_commit">
+                                          <a t-attf-href="/runbot/commit/#{project_commit.commit_id.id}">
+                                              <span class="label" t-esc="project_commit.commit_id.dname"/>
+                                          </a>
+                                    </t>
+                                  </small></div>
+
                                   <t t-foreach="instance.slot_ids" t-as="slot">
-                                    <a t-attf-href="/runbot/build/#{slot.build_id.id}">
-                                      <span
-                                        t-attf-class="label label-{{slot.build_id.get_color_class()}}"
-                                        t-esc="slot.trigger_id.name"/>
-                                    </a>
+                                    <t t-set="bu" t-value="slot.build_id"/>
+                                    <div t-attf-class="btn-group btn-group-ssm">
+                                      <a t-attf-href="/runbot/build/#{slot.build_id.id}" t-attf-class="btn btn-{{slot.build_id.get_color_class()}}">
+                                        <i t-attf-class="fa fa-{{slot.fa_link_type()}}"/>
+                                        <span
+                                          t-esc="slot.trigger_id.name"/>
+                                      </a>
+                                      <a t-if="bu.local_state=='running'" 
+                                         t-attf-href="http://{{bu.domain}}/?db={{bu.dest}}-all"
+                                         class="btn btn-primary" title="Sign in on this build"
+                                         aria-label="Sign in on this build">
+                                         <i class="fa fa-sign-in"/></a>
+                                      <a t-if="bu.local_state=='done' and bu.requested_action != 'wake_up'"
+                                         href="#" data-runbot="wakeup" t-att-data-runbot-build="bu.id"
+                                         class="btn btn-default" title="Wake up this build" aria-label="Wake up this build">
+                                         <i class="fa fa-coffee"/></a>
+                                    </div>
                                   </t>
                                 </td>
                               </t>

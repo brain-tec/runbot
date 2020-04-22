@@ -73,7 +73,7 @@ class RepoGroup(models.Model):
     server_files = fields.Char('Server files', help='Comma separated list of possible server files')  # odoo-bin,openerp-server,openerp-server.py
     manifest_files = fields.Char('Manifest files', help='Comma separated list of possible manifest files', default='__manifest__.py')
     addons_paths = fields.Char('Addons paths', help='Comma separated list of possible addons path', default='')
-
+    #default_branch/project?
 
     #odoo
     #   -odoo/odoo
@@ -113,6 +113,8 @@ class RunbotRepo(models.Model):
                              ('hook', 'Hook')],
                             default='poll',
                             string="Mode", required=True, help="hook: Wait for webhook on /runbot/hook/<id> i.e. github push event")
+    fetch_pr = fields.Boolean('Fetch PR', default=True)
+    fetch_branches = fields.Boolean('Fetch branches', default=True)
     hook_time = fields.Float('Last hook time', compute='_compute_hook_time')
     get_ref_time = fields.Float('Last refs db update', compute='_compute_get_ref_time')
     token = fields.Char("Github token", groups="runbot.group_runbot_admin")
