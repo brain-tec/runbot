@@ -243,7 +243,7 @@ class runbot_branch(models.Model):
             if coverage_config:
                 vals['config_id'] = coverage_config
         branch = super(runbot_branch, self).create(vals)
-        branch.project_id = self.env['runbot.project']._get(self.reference_name, branch.repo_id.repo_group_id.default_category_id)
+        branch.project_id = self.env['runbot.project']._get(self.reference_name, branch.repo_id.repo_group_id.category_id)
 
     def _get_last_coverage_build(self):
         """ Return the last build with a coverage value > 0"""

@@ -5,6 +5,7 @@ from odoo import SUPERUSER_ID
 import logging
 import progressbar
 from collections import defaultdict
+import datetime
 
 def _bar(total):
     b = progressbar.ProgressBar(maxval=total, \
@@ -38,6 +39,9 @@ def migrate(cr, version):
     })
     security_category = env['runbot.project.category'].create({
         'name': 'Security'
+    })
+    nightly_category = env['runbot.project.category'].create({
+        'name': 'Nightly'
     })
     category_matching = { # some hardcoded info 
         'odoo': RD_category,
@@ -73,7 +77,7 @@ def migrate(cr, version):
                 })
             group = env['runbot.repo.group'].create({
                 'name': repo_name,
-                'default_category_id': category.id,
+                'category_id': category.id,
                 #'main': id, # older repo should be the main, not sur it is usefull
                 'modules': modules,
                 'modules_auto': modules_auto,
@@ -104,13 +108,13 @@ def migrate(cr, version):
             processed.add(group.id)
             trigger = env['runbot.trigger'].create({
                 'name': repo_name,
-                'category_id': group.default_category_id.id,
+                'category_id': group.category_id.id,
                 'repos_group_ids': [(4, group.id)],
                 'dependency_ids': [(4, repo_to_group[dependency_id].id) for dependency_id in dependency_ids],
                 'config_id': repo_config_id if repo_config_id else env.ref('runbot.runbot_build_config_default').id,
             })
             triggers[group.id] = trigger
-            triggers_by_category[group.default_category_id.id].append(trigger)
+            triggers_by_category[group.category_id.id].append(trigger)
         # TODO create trigger using dependency_ids
 
     # no build, config, ...
@@ -143,7 +147,7 @@ def migrate(cr, version):
             pull_head_repo_id = owner_group_to_repo.get((owner, group.id))
             if pull_head_repo_id:
                 branch.pull_head_repo_id = pull_head_repo_id
-        category_id = group.default_category_id
+        category_id = group.category_id
         name = branch.reference_name
 
         key = (name, category_id)
@@ -191,14 +195,14 @@ def migrate(cr, version):
         for id, branch_id, repo_id, extra_params, config_id, config_data, commit_path_mode,\
             name, author, author_email, committer, committer_email, subject, date in cr.fetchall():
             progress.update(counter)
-
-            key = (name, repo_id)
+            group_id = repo_to_group[repo_id].id
+            key = (name, group_id)
             if key in sha_repo_commits:
                 commit = sha_repo_commits[key]
             else:
                 commit = env['runbot.commit'].create({
                     'name': name,
-                    'repo_id': repo_id,
+                    'repo_group_id': group_id,
                     'author': author,
                     'author_email': author_email,
                     'committer': committer,
@@ -223,9 +227,10 @@ def migrate(cr, version):
             })
             env['runbot.build.commit'].create({
                 'commit_id': commit.id,
+                'repo_id': repo_id.id,
                 'params_id': params.id,
             })
-            build_commit_ids[id][commit.repo_group_id.id] = (name, commit.id)
+            build_commit_ids[id][commit.repo_group_id.id] = commit.id
             cr.execute('UPDATE runbot_build_commit SET params_id=%s WHERE build_id=%s', (params.id, id))
             # todo set params on duplicate?
             cr.execute('UPDATE runbot_build SET params_id=%s WHERE id=%s', (params.id, id))
@@ -252,21 +257,23 @@ def migrate(cr, version):
         for id, dependency_hash, dependency_repo_id, build_id in cr.fetchall():
             progress.update(counter)
             counter += 1
-            key = (dependency_hash, dependency_repo_id)
+
+            group_id = repo_to_group[dependency_repo_id].id
+            key = (dependency_hash, group_id)
             commit = sha_repo_commits.get(key) or sha_commits.get(dependency_hash) # TODO check this (changing repo)
             if not commit:
                 # -> most of the time, commit in exists but with wrong repo. Info can be found on other commit.
                 _logger.warning('Missing commit %s created', dependency_hash)
                 commit = env['runbot.commit'].create({
                     'name': dependency_hash,
-                    'repo_id': dependency_repo_id,
+                    'repo_group_id': group_id,
                 })
 
                 sha_repo_commits[key] = commit
                 sha_commits[dependency_hash] = commit
-            build_commit_ids[build_id][commit.repo_group_id.id] = (dependency_hash, commit.id)
+            build_commit_ids[build_id][commit.repo_group_id.id] = commit.id
 
-            cr.execute('UPDATE runbot_build_commit SET commit_id=%s WHERE id=%s', (commit.id, id))
+            cr.execute('UPDATE runbot_build_commit SET commit_id=%s, repo_id=%s WHERE id=%s', (commit.id, dependency_repo_id, id))
     progress.finish()
 
     _logger.info('Creating instances')
@@ -281,10 +288,10 @@ def migrate(cr, version):
     for offset in range(0, nb_root_build, batch_size):
         cr.execute("""
             SELECT
-            id, duplicate_id, repo_id, branch_id, create_date, build_type
+            id, duplicate_id, repo_id, branch_id, create_date, build_type, config_id
             FROM runbot_build WHERE parent_id IS NULL order by id asc
             LIMIT %s OFFSET %s""", (batch_size, offset))
-        for id, duplicate_id, repo_id, branch_id, create_date, build_type in cr.fetchall():
+        for id, duplicate_id, repo_id, branch_id, create_date, build_type, config_id in cr.fetchall():
             progress.update(counter)
             counter += 1
             if repo_id is None:
@@ -297,25 +304,29 @@ def migrate(cr, version):
             build_id = duplicate_id or id
             build_commits = build_commit_ids[build_id]
             instance_group_repos_ids = []
+            
+            # check if this build can be added to last_instance
             if project.last_instance:
-                if duplicate_id and build_id in project.last_instance.slot_ids.mapped('build_id').ids:
-                    continue
+                if create_date - project.last_instance.last_update < datetime.timedelta(minutes=5):
+                    if duplicate_id and build_id in project.last_instance.slot_ids.mapped('build_id').ids:
+                        continue
 
-                # to fix: nightly will be in the same instance of the previous normal one. If config_id is diffrent, create instance?
-                # possible fix: max create_date diff
-                instance = project.last_instance
-                instance_commits = instance.project_commit_ids.mapped('commit_id')
-                instance_group_repos_ids = instance_commits.mapped('repo_group_id').ids
-                for commit in instance_commits:
-                    repo_group_id = commit.repo_group_id.id
-                    if repo_group_id in build_commits:
-                        instance_commit_name, _ = build_commits[repo_group_id]
-                        if instance_commit_name != commit.name:
-                            instance = False
-                            instance_group_repos_ids = []
-                            break
+                    # to fix: nightly will be in the same instance of the previous normal one. If config_id is diffrent, create instance?
+                    # possible fix: max create_date diff
+                    instance = project.last_instance
+                    instance_commits = instance.project_commit_ids.mapped('commit_id')
+                    instance_group_repos_ids = instance_commits.mapped('repo_group_id').ids
+                    for commit in instance_commits:
+                        repo_group_id = commit.repo_group_id.id
+                        if repo_group_id in build_commits:
+                            if commit.id != build_commits[repo_group_id]:
+                                instance = False
+                                instance_group_repos_ids = []
+                                break
 
-            missing_commits = [commit_id for repo_group_id, (_, commit_id) in build_commits.items() if repo_group_id not in instance_group_repos_ids]
+            missing_commits = [commit_id for repo_group_id, commit_id in build_commits.items() if repo_group_id not in instance_group_repos_ids]
+            triggers[repo_to_group[repo_id].id].id
+            #if trigger.config_id != 
             if not instance:
                 instance = env['runbot.instance'].create({
                     'create_date': create_date,

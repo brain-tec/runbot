@@ -63,7 +63,7 @@ class BuildParameters(models.Model):
     # execution parametter
     commit_ids = fields.One2many('runbot.build.commit', 'params_id', copy=True)
     version_id = fields.Many2one('runbot.version', required=True)
-    #trigger_id = fields.Many2one('runbot.trigger', required=True)
+    category_id = fields.Many2one('runbot.category', required=True)  # for access rights
     # other informations
     extra_params = fields.Char('Extra cmd args')
     config_id = fields.Many2one('runbot.build.config', 'Run Config', required=True,
@@ -80,6 +80,7 @@ class BuildParameters(models.Model):
     builds_reference_ids = fields.One2many('runbot.build.reference', 'params_id')
     modules = fields.Char('Modules') # TODO fill this with combination of triggers repo_group_modules and project_id.modules (or trigger?)
 
+    fingerprint = fields.Char('Fingerprint')
     # problem for dependencies and path_mode.
     # they are change for upgrade, need commit in another version.
     # a new BuildParameters will be created in a subbuild: not cool
@@ -93,15 +94,17 @@ class BuildParameters(models.Model):
     # other solution: ignore this, will be time setted, subbuild will create new params
 
     def _hash(self):
+        self.ensure_one()
         return hashlib.sha256((
             self.version_id,
+            self.category_id,
             self.extra_params,
             self.config_id,
             self.config_data.dict,
-            self.commit_path_mode,
-            sorted(self.builds_reference_ids.build_ids.ids),
             self.modules,
+            self.commit_path_mode,
             sorted(self.commit_ids.commit_id.ids),
+            sorted(self.builds_reference_ids.build_ids.ids),
         )).hexdigest()
 
 class BuildResults(models.Model):
@@ -1238,7 +1241,7 @@ class BuildReference(models.Model):
     _name = 'runbot.build.reference'
     _description = 'build result used for dump or dependencies as reference for another build'
 
-    params_id = fields.Many2one('runbot.params', index=True)
+    params_id = fields.Many2one('runbot.build.params', index=True)
     build_id = fields.Many2one('runbot.build', index=True)
     ref_config_descriptor = fields.Many2one('runbot.build.reference.descriptor')
     key = fields.Char('key')

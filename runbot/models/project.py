@@ -2,9 +2,15 @@ import glob
 import re
 import time
 
+from ..common import s2human, dt2time
+from babel.dates import format_timedelta
+from datetime import timedelta
+
 from collections import defaultdict
 
 from odoo import models, fields, api
+
+
 
 #Todo test: create will invalid branch name, pull request
 
@@ -171,7 +177,24 @@ class ProjectInstance(models.Model):
     slot_ids = fields.One2many('runbot.instance.slot', 'instance_id')
     state = fields.Selection([('preparing', 'Preparing'), ('ready', 'Ready'), ('complete', 'Complete'), ('done', 'Done')])
     hidden = fields.Boolean('Hidden', default=False)
+    age = fields.Integer(compute='_compute_age', string='Build age')
 
+
+    @api.depends('create_date')
+    def _compute_age(self):
+        """Return the time between job start and now"""
+        for instance in self:
+            if instance.create_date:
+                instance.age = int(1587461700 - dt2time(instance.create_date)) # TODO remove hack time.time()
+            else:
+                instance.buildage_age = 0
+
+    def get_formated_age(self):
+        return format_timedelta(
+            timedelta(seconds=-self.age),
+            threshold=2.1,
+            add_direction=True, locale='en'
+        )
     def _add_commit(self, commit):
         # if not the same hash for repo_group:
         self.last_update = fields.Datetime.now()
@@ -214,6 +237,7 @@ class ProjectInstanceCommit(models.Model):
     _description = "Project instance commit"
 
     commit_id = fields.Many2one('runbot.commit', index=True)
+    repo_id = fields.Many2one('runbot.repo', string='Repo') # discovered in repo
     # ??? base_commit_id = fields.Many2one('runbot.commit')
     instance_id = fields.Many2one('runbot.instance', index=True)
     match_type = fields.Selection([('new', 'New head of branch'), ('head', 'Head of branch'), ('default', 'Found on base branch')])  # HEAD, DEFAULT

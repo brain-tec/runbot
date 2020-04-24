@@ -59,7 +59,7 @@ class RepoGroup(models.Model):
     #main = fields.Many2one('runbot.repo', "Main repo")
     #main_regex = fields.Char('regex to define if a branch is a version or not')
     repo_ids = fields.One2many('runbot.repo', 'repo_group_id', "Repo and forks")
-    default_category_id = fields.Many2one('runbot.project.category',
+    category_id = fields.Many2one('runbot.project.category',
         help="Default project category to use when pushing on this repos")
     # -> not verry usefull, remove it? (iterate on categories or contraints triggers:
     # all trigger where a repo is used must be in the same category.
