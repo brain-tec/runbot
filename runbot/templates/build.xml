@@ -122,7 +122,7 @@
                                 </t>
                                 <t t-foreach="build.params_id.sudo().commit_ids" t-as="build_commit">
                                   <b>Commit:</b> <a t-attf-href="{{build_commit.git_url}}"><t t-esc="build_commit.commit_id.dname"/></a>
-                                  <t t-if="build_commit.match_type in ('default', 'pr_target', 'prefix') "> from branch <b t-esc="build_commit.closest_branch_id.branch_name"/><br/></t>
+                                  <t t-if="build_commit.match_type in ('default', 'pr_target', 'prefix') "> from base branch<br/></t>
                                   <div t-else="" class="ml-3">
                                     <b>Subject:</b>  <t t-esc="build_commit.commit_id.subject"/><br/>
                                     <b>Author:</b>  <t t-esc="build_commit.commit_id.author"/><br/>
@@ -142,7 +142,7 @@
                                         <a t-attf-href="/runbot/build/#{reference.build_id.id}">
                                             <span
                                             t-attf-class="label label-{{reference.build_id.get_color_class()}}"
-                                            t-esc="slot.trigger_id.name"/>
+                                            t-esc="reference.build_id.id"/>
                                         </a>
                                       </t>
                                   </t>
@@ -150,10 +150,10 @@
                                   <t t-if="len(build.params_id.build_ids) > 1">
                                       <b>Similar builds:</b>
                                       <t t-foreach="build.params_id.build_ids" t-as="simbuild">
-                                        <a t-attf-href="/runbot/build/#{simbuild.id}">
+                                        <a t-if="simbuild.id != build.id" t-attf-href="/runbot/build/#{simbuild.id}">
                                             <span
                                             t-attf-class="label label-{{simbuild.get_color_class()}}"
-                                            t-esc="slot.trigger_id.name"/>
+                                            t-esc="simbuild.id"/>
                                         </a>
                                       </t>
                                   </t>

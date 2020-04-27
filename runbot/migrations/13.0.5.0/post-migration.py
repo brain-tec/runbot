@@ -178,28 +178,29 @@ def migrate(cr, version):
     sha_repo_commits = {}
     branch_heads = {}
     build_commit_ids = defaultdict(dict)
-    cr.execute("SELECT count(*) FROM runbot_build WHERE duplicate_id IS NULL")
-    nb_real_build = cr.fetchone()[0]
+    cr.execute("SELECT count(*) FROM runbot_build")
+    nb_build = cr.fetchone()[0]
 
-    # create params from build
-    _logger.info('Creating params and commits')
+    ########################
+    # BUILDS
+    ########################
+    _logger.info('Creating main commits')
     counter = 0
-    progress = _bar(nb_real_build)
-    for offset in range(0, nb_real_build, batch_size):
+    progress = _bar(nb_build)
+    for offset in range(0, nb_build, batch_size):
         cr.execute("""
-            SELECT
-            id, branch_id, repo_id, extra_params, config_id, config_data, commit_path_mode,
-            name, author, author_email, committer, committer_email, subject, date
-            FROM runbot_build WHERE duplicate_id IS NULL ORDER BY id asc LIMIT %s OFFSET %s""", (batch_size, offset))
+            SELECT id,
+            repo_id, name, author, author_email, committer, committer_email, subject, date, duplicate_id, branch_id
+            FROM runbot_build ORDER BY id asc LIMIT %s OFFSET %s""", (batch_size, offset))
 
-        for id, branch_id, repo_id, extra_params, config_id, config_data, commit_path_mode,\
-            name, author, author_email, committer, committer_email, subject, date in cr.fetchall():
+        for id ,repo_id, name, author, author_email, committer, committer_email, subject, date, duplicate_id, branch_id in cr.fetchall():
             progress.update(counter)
             group_id = repo_to_group[repo_id].id
             key = (name, group_id)
             if key in sha_repo_commits:
                 commit = sha_repo_commits[key]
             else:
+                assert not duplicate_id # duplicate_id should already exist
                 commit = env['runbot.commit'].create({
                     'name': name,
                     'repo_group_id': group_id,
@@ -212,31 +213,78 @@ def migrate(cr, version):
                 })
                 sha_repo_commits[key] = commit
                 sha_commits[name] = commit
-
-                # setting head if it is a new commit, should be ok since in chronological order. if not, check type and parent_id
-                # TODO: check that it is corresct or scheduler will explode
             branch_heads[branch_id] = commit.id
             counter += 1
-            params = env['runbot.build.params'].create({
+
+            build_commit_ids[id][commit.repo_group_id.id] = commit.id
+
+
+    progress.finish()
+
+    _logger.info('Creating params')
+    counter = 0
+
+    cr.execute("SELECT count(*) FROM runbot_build WHERE duplicate_id IS NULL")
+    nb_real_build = cr.fetchone()[0]
+    progress = _bar(nb_real_build)
+
+    #monkey patch to avoid search
+    original = env['runbot.build.params']._find_existing
+    existing = {}
+    def _find_existing(fingerprint):
+        return existing.get(fingerprint, env['runbot.build.params'])
+
+    param = env['runbot.build.params']
+    param._find_existing = _find_existing
+
+    for offset in range(0, nb_real_build, batch_size):
+        progress.update(counter)
+        counter+=1
+        cr.execute("""
+            SELECT
+            id, branch_id, repo_id, extra_params, config_id, config_data, commit_path_mode
+            FROM runbot_build WHERE duplicate_id IS NULL ORDER BY id asc LIMIT %s OFFSET %s""", (batch_size, offset))
+        
+        for id, branch_id, repo_id, extra_params, config_id, config_data, commit_path_mode in cr.fetchall():
+
+            build_commit_ids_create_values = [
+                {'commit_id': build_commit_ids[id][repo_to_group[repo_id].id],'repo_id': repo_id, 'match_type':'exact'}]
+
+            cr.execute('SELECT dependency_hash, dependecy_repo_id, match_type FROM runbot_build_dependency WHERE build_id=%s', (id,))
+            for dependency_hash, dependecy_repo_id, match_type in cr.fetchall():
+                group_id = repo_to_group[dependecy_repo_id].id
+                key = (dependency_hash, group_id)
+                commit = sha_repo_commits.get(key) or sha_commits.get(dependency_hash) # TODO check this (changing repo)
+                if not commit:
+                    # -> most of the time, commit in exists but with wrong repo. Info can be found on other commit.
+                    _logger.warning('Missing commit %s created', dependency_hash)
+                    commit = env['runbot.commit'].create({
+                        'name': dependency_hash,
+                        'repo_group_id': group_id,
+                    })
+                    sha_repo_commits[key] = commit
+                    sha_commits[dependency_hash] = commit
+                build_commit_ids[id][commit.repo_group_id.id] = commit.id
+                build_commit_ids_create_values.append({'commit_id': commit.id,'repo_id': dependecy_repo_id, 'match_type':match_type})
+
+            params = param.create({
                 'version_id':  branch_to_version[branch_id],
                 'extra_params': extra_params,
                 'config_id': config_id,
+                'category_id': repo_to_group[repo_id].category_id,
                 #'trigger_id': triggers[repo_to_group[repo_id].id].id,
                 'config_data': config_data,
                 'commit_path_mode':commit_path_mode,
+                'commit_ids': [(0, 0, values) for values in build_commit_ids_create_values]
             })
-            env['runbot.build.commit'].create({
-                'commit_id': commit.id,
-                'repo_id': repo_id.id,
-                'params_id': params.id,
-            })
-            build_commit_ids[id][commit.repo_group_id.id] = commit.id
-            cr.execute('UPDATE runbot_build_commit SET params_id=%s WHERE build_id=%s', (params.id, id))
-            # todo set params on duplicate?
-            cr.execute('UPDATE runbot_build SET params_id=%s WHERE id=%s', (params.id, id))
+            existing[params.fingerprint] = params
+            cr.execute('UPDATE runbot_build SET params_id=%s WHERE id=%s OR duplicate_id = %s', (params.id, id, id))
+            # TODO one dev pass to check if params are the same for duplicate?
             # TODO deps from logs?
         env.cache.invalidate()
     progress.finish()
+
+    env['runbot.build.params']._find_existing = original
 
 
     for branch, head in branch_heads.items():
@@ -244,37 +292,6 @@ def migrate(cr, version):
     del branch_heads
     # adapt build commits
 
-
-    _logger.info('Updating build commits')
-    cr.execute("SELECT count(*) FROM runbot_build_commit")
-    nb_build_commit = cr.fetchone()[0]
-    counter = 0
-
-    progress = _bar(nb_build_commit)
-    for offset in range(0, nb_build_commit, batch_size):
-        cr.execute('SELECT id, dependency_hash, dependecy_repo_id, build_id from runbot_build_commit WHERE build_id is not NULL LIMIT %s OFFSET %s', (batch_size, offset))
-        # TODO unique by hash repo and update
-        for id, dependency_hash, dependency_repo_id, build_id in cr.fetchall():
-            progress.update(counter)
-            counter += 1
-
-            group_id = repo_to_group[dependency_repo_id].id
-            key = (dependency_hash, group_id)
-            commit = sha_repo_commits.get(key) or sha_commits.get(dependency_hash) # TODO check this (changing repo)
-            if not commit:
-                # -> most of the time, commit in exists but with wrong repo. Info can be found on other commit.
-                _logger.warning('Missing commit %s created', dependency_hash)
-                commit = env['runbot.commit'].create({
-                    'name': dependency_hash,
-                    'repo_group_id': group_id,
-                })
-
-                sha_repo_commits[key] = commit
-                sha_commits[dependency_hash] = commit
-            build_commit_ids[build_id][commit.repo_group_id.id] = commit.id
-
-            cr.execute('UPDATE runbot_build_commit SET commit_id=%s, repo_id=%s WHERE id=%s', (commit.id, dependency_repo_id, id))
-    progress.finish()
 
     _logger.info('Creating instances')
     ###################

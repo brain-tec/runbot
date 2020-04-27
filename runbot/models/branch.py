@@ -161,7 +161,7 @@ class runbot_branch(models.Model):
                     branch.target_branch_name = pi['base']['ref']
                     branch.pull_head_name = pi['head']['label']
                     pull_head_repo_name = pi['head']['repo']['full_name']
-                    branch.pull_head_repo_id = self.env['runbot.repo'].search(['name', 'like', '%%:%s' % pull_head_repo_name)], limit=1)
+                    branch.pull_head_repo_id = self.env['runbot.repo'].search([('name', 'like', '%%:%s' % pull_head_repo_name)], limit=1)
 
             else:
                 branch.branch_name = ''

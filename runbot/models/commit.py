@@ -48,13 +48,12 @@ class RunbotBuildCommit(models.Model):
     params_id = fields.Many2one('runbot.build.params', 'Build', required=True, ondelete='cascade', index=True)
     commit_id = fields.Many2one('runbot.commit', 'Dependency commit', required=True)
     repo_id = fields.Many2one('runbot.repo', string='Repo') # discovered in repo
-    closest_branch_id = fields.Many2one('runbot.branch', 'Branch', ondelete='cascade') # TODO remove? this kind of info should be on instance to ensure a kind of unicity
     match_type = fields.Char('Match Type')
     git_url = fields.Char('Url to commit', compute='_compute_commit_url')
 
     def _get_repo(self):
         raise NotImplementedError()
-        return self.closest_branch_id.repo_id or self.dependecy_repo_id
+        return self.repo_id or self.commit_id.group_repo_ids.repo_ids
 
     @api.depends('commit_id.name', 'repo_id.base')
     def _compute_commit_url(self):

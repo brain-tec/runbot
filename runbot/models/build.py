@@ -73,39 +73,48 @@ class BuildParameters(models.Model):
                                     ('soft', 'repo name only'),
                                     ],
                                 default='soft',
-                                string='Source export path mode')
+                                string='Source export path mode') # todo remove
 
     build_ids = fields.One2many('runbot.build', 'params_id')
 
     builds_reference_ids = fields.One2many('runbot.build.reference', 'params_id')
     modules = fields.Char('Modules') # TODO fill this with combination of triggers repo_group_modules and project_id.modules (or trigger?)
 
-    fingerprint = fields.Char('Fingerprint')
-    # problem for dependencies and path_mode.
-    # they are change for upgrade, need commit in another version.
-    # a new BuildParameters will be created in a subbuild: not cool
-    # would it be possible to define in advance all depepdencies?
-    # upgrade: need a nightly build in 12 and in 13.
-    # master: need a nightly build in 12.3
-    # 12.3 need a last build of master
-    # niglty upgrade needs a bunch of build everywhere
-    # trigger could define domains to find builds
-    # build_params could use those domains
-    # other solution: ignore this, will be time setted, subbuild will create new params
+    fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)
 
-    def _hash(self):
-        self.ensure_one()
-        return hashlib.sha256((
-            self.version_id,
-            self.category_id,
-            self.extra_params,
-            self.config_id,
-            self.config_data.dict,
-            self.modules,
-            self.commit_path_mode,
-            sorted(self.commit_ids.commit_id.ids),
-            sorted(self.builds_reference_ids.build_ids.ids),
-        )).hexdigest()
+    @api.depends('version_id', 'category_id', 'extra_params', 'config_id', 'config_data', 'modules', 'commit_path_mode', 'commit_ids', 'builds_reference_ids')
+    def _compute_fingerprint(self):
+        for param in self:
+            cleaned_vals = {
+                'version_id': param.version_id.id,
+                'category_id': param.category_id.id,
+                'extra_params': param.extra_params or '',
+                'config_id': param.config_id.id,
+                'config_data': param.config_data.dict,
+                'modules': param.modules or '',
+                'commit_path_mode': param.commit_path_mode,
+                'commit_ids': sorted(param.commit_ids.commit_id.ids),
+                'builds_reference_ids': sorted(param.builds_reference_ids.build_id.ids),
+            }
+            param.fingerprint = hashlib.sha256(str(cleaned_vals).encode('utf8')).hexdigest()
+
+    def create(self, values):
+        params = self.new(values)
+        match = self._find_existing(params.fingerprint)
+        if match:
+            return match
+        values = self._convert_to_write(params._cache)
+        return super().create(values)
+
+    def _find_existing(self, fingerprint):
+        print('Nope')
+        self.env['runbot.build'].flush()
+        return self.env['runbot.build.params'].search([('fingerprint', '=', fingerprint)], limit=1)
+
+    def write(self):
+        raise UserError('Params cannot be modified')
+
+
 
 class BuildResults(models.Model):
     # remove duplicate management
@@ -341,7 +350,6 @@ class BuildResults(models.Model):
                 dep_create_vals.append({
                     'build_id': build_id.id,
                     'dependecy_repo_id': extra_repo.id,
-                    'closest_branch_id': build_closest_branch and build_closest_branch.id,
                     'dependency_hash': last_commit,
                     'match_type': match_type,
                 })
@@ -508,7 +516,6 @@ class BuildResults(models.Model):
     def _copy_dependency_ids(self):
         return [(0, 0, {
             'match_type': dep.match_type,
-            'closest_branch_id': dep.closest_branch_id and dep.closest_branch_id.id,
             'dependency_hash': dep.dependency_hash,
             'dependecy_repo_id': dep.dependecy_repo_id.id,
         }) for dep in self.dependency_ids]

@@ -13,7 +13,6 @@
                         <field name="commit_ids">
                             <tree>
                                 <field name="commit_id"/>
-                                <field name="closest_branch_id"/>
                                 <field name="match_type"/>
                             </tree>
                         </field>
