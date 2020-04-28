@@ -196,12 +196,13 @@ def migrate(cr, version):
             if not repo_id:
                 _logger.warning('No repo_id for build %s, skipping', id)
                 continue
-            group_id = repo_to_group[repo_id].id
+            group = repo_to_group[repo_id].id
+            group_id = group.id
             key = (name, group_id)
             if key in sha_repo_commits:
                 commit = sha_repo_commits[key]
             else:
-                if duplicate_id and group_id.project_id != RD_project.id:
+                if duplicate_id and group.project_id != RD_project.id:
                     cross_project_duplicate_ids += id
                 elif duplicate_id:
                     _logger.warning('Problem: duplicate: %s,%s', id, duplicate_id)
