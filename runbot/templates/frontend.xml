@@ -243,11 +243,12 @@
                                   </t>
                                   <div>
                                     <t t-if="more" ><small>
-                                    <t t-foreach="instance.project_commit_ids" t-as="project_commit">
+                                    <div t-foreach="instance.project_commit_ids" t-as="project_commit"  class="text-nowrap overflow-hidden" style="max-width:100%">
                                           <a t-attf-href="/runbot/commit/#{project_commit.commit_id.id}">
                                               <span class="badge badge-light" t-esc="project_commit.commit_id.dname"/>
                                           </a>
-                                    </t>
+                                          <span title="project_commit.commit_id.subject" t-esc="project_commit.commit_id.subject"></span>
+                                    </div>
                                     </small></t>
                                  </div>
 
