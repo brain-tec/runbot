@@ -57,9 +57,9 @@ class RunbotBuildStatSql(models.Model):
     #build_name = fields.Char(String="Build name", readonly=True) # todo arrayagg
     build_parent_path = fields.Char('Build Parent path')
     build_host = fields.Char(string="Host", readonly=True)
-    #project_id = fields.Many2one("runbot.project", string="Project", readonly=True)
-    #project_name = fields.Char(string="Project name", readonly=True)
-    #project_sticky = fields.Boolean(string="Sticky", readonly=True)
+    #bundle_id = fields.Many2one("runbot.bundle", string="Bundle", readonly=True)
+    #bundle_name = fields.Char(string="Bundle name", readonly=True)
+    #bundle_sticky = fields.Boolean(string="Sticky", readonly=True)
     #repo_name = fields.Char(string="Repo name", readonly=True) # todo arrayagg
 
     def init(self):

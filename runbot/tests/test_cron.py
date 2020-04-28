@@ -62,4 +62,4 @@ class Test_Cron(RunbotCase):
         mock_host_docker_build.assert_called()
         host = self.env['runbot.host'].search([('name', '=', hostname)])
         self.assertEqual(host.name, hostname, 'A new host should have been created')
-        self.assertGreater(host.psql_conn_count, 0, 'A least one connection should exist on the current psql instance')
+        self.assertGreater(host.psql_conn_count, 0, 'A least one connection should exist on the current psql batch')

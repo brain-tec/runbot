@@ -63,8 +63,8 @@ class BuildParameters(models.Model):
     # execution parametter
     commit_ids = fields.One2many('runbot.build.commit', 'params_id', copy=True)
     version_id = fields.Many2one('runbot.version', required=True)
-    category_id = fields.Many2one('runbot.project.category', required=True)  # for access rights
-    #trigger_type = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)
+    project_id = fields.Many2one('runbot.project', required=True)  # for access rights
+    category = fields.Char('Category', index=True)
 
     # other informations
     extra_params = fields.Char('Extra cmd args')
@@ -80,16 +80,16 @@ class BuildParameters(models.Model):
     build_ids = fields.One2many('runbot.build', 'params_id')
 
     builds_reference_ids = fields.One2many('runbot.build.reference', 'params_id')
-    modules = fields.Char('Modules') # TODO fill this with combination of triggers repo_group_modules and project_id.modules (or trigger?)
+    modules = fields.Char('Modules') # TODO fill this with combination of triggers repo_group_modules and bundle_id.modules (or trigger?)
 
     fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)
 
-    @api.depends('version_id', 'category_id', 'extra_params', 'config_id', 'config_data', 'modules', 'commit_path_mode', 'commit_ids', 'builds_reference_ids')
+    @api.depends('version_id', 'project_id', 'extra_params', 'config_id', 'config_data', 'modules', 'commit_path_mode', 'commit_ids', 'builds_reference_ids')
     def _compute_fingerprint(self):
         for param in self:
             cleaned_vals = {
                 'version_id': param.version_id.id,
-                'category_id': param.category_id.id,
+                'project_id': param.project_id.id,
                 'extra_params': param.extra_params or '',
                 'config_id': param.config_id.id,
                 'config_data': param.config_data.dict,
@@ -120,11 +120,11 @@ class BuildParameters(models.Model):
 
 class BuildResults(models.Model):
     # remove duplicate management
-    # instead, link between project_batch and build
-    # kill -> only available from project.
-    # kill -> actually detach the build from the project
+    # instead, link between bundle_batch and build
+    # kill -> only available from bundle.
+    # kill -> actually detach the build from the bundle
     # rebuild: detach and create a new link (a little like exact rebuild),
-    # if a build is detached from all project, kill it
+    # if a build is detached from all bundle, kill it
     # nigktly?
 
     _name = "runbot.build"
@@ -446,7 +446,7 @@ class BuildResults(models.Model):
         # name is not really usefull, but this is a big change
         # - need to move all db/folder/docker/regex  + ngnix + ...
 
-        # using project_id means that we need to have it on a build to make it unique
+        # using bundle_id means that we need to have it on a build to make it unique
 
         for build in self:
             if build.id:
@@ -977,8 +977,8 @@ class BuildResults(models.Model):
             self.invalidate_cache()
 
     def _ask_kill(self, lock=True, message=None):
-        # if build remains in same project, it's ok like that
-        # if build can be cross project, need to check number of ref to build
+        # if build remains in same bundle, it's ok like that
+        # if build can be cross bundle, need to check number of ref to build
         if lock:
             self.env.cr.execute("""SELECT id FROM runbot_build WHERE parent_path like %s FOR UPDATE""", ['%s%%' % self.parent_path])
         self.ensure_one()
@@ -1115,7 +1115,7 @@ class BuildResults(models.Model):
             self._cr.after('commit', send_github_status)
 
 
-    # TODO should be on project: multiple build for the same hash
+    # TODO should be on bundle: multiple build for the same hash
     def _github_status(self):
         """Notify github of failed/successful builds"""
         for build in self:
@@ -1171,7 +1171,7 @@ class BuildResults(models.Model):
         return {'active_step': new_step.id, 'local_state': new_step._step_state()}
 
     def _get_py_version(self):
-        """return the python name to use from build instance"""
+        """return the python name to use from build batch"""
         (server_commit, server_file) = self._get_server_info()
         server_path = server_commit._source_path(server_file)
         with open(server_path, 'r') as f:

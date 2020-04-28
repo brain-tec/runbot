@@ -4,7 +4,7 @@ from . import repo
 from . import commit
 from . import branch
 from . import build
-from . import project
+from . import bundle
 from . import event
 from . import build_config
 from . import ir_cron

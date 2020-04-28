@@ -17,7 +17,7 @@ class runbot_branch(models.Model):
 
     head = fields.Many2one('runbot.commit', 'Head Commit')
     head_name = fields.Char('Head name', related='head.name', store=True)
-    project_id = fields.Many2one('runbot.project', 'Project', required=True, ondelete='cascade')
+    bundle_id = fields.Many2one('runbot.bundle', 'Bundle', required=True, ondelete='cascade')
     repo_id = fields.Many2one('runbot.repo', 'Repository', required=True, ondelete='cascade')
     name = fields.Char('Ref Name', required=True)
     branch_name = fields.Char(compute='_get_branch_infos', string='Branch', readonly=1, store=True)
@@ -30,8 +30,8 @@ class runbot_branch(models.Model):
     sticky = fields.Boolean('Sticky')
     is_main = fields.Boolean('Is main', default=False, compute='_compute_is_main', store=True)
     # TODO remove sticky and main and stuff.
-    # should be based on a project, but need a category to know corresponding project
-    # anyway, display will be by category (?)
+    # should be based on a bundle, but need a project to know corresponding bundle
+    # anyway, display will be by project (?)
 
     #closest_sticky = fields.Many2one('runbot.branch', compute='_compute_closest_sticky', string='Closest sticky')
     #defined_sticky = fields.Many2one('runbot.branch', string='Force sticky')
@@ -53,7 +53,7 @@ class runbot_branch(models.Model):
     @api.depends('target_branch_name', 'pull_head_name', 'pull_head_repo_id')
     def _compute_reference_name(self):
         """
-        a unique reference for a branch inside a project.
+        a unique reference for a branch inside a bundle.
             -branch_name for branches
             - branch name part of pull_head_name for pr if repo is known
             - pull_head_name (organisation:branch_name) for external pr
@@ -81,9 +81,9 @@ class runbot_branch(models.Model):
 
     @api.depends('sticky')
     def _compute_is_main(self):
-        for project in self:
-            if project.sticky:
-                project.is_main = True
+        for bundle in self:
+            if bundle.sticky:
+                bundle.is_main = True
         # else, don't change or use default on create, does it work?
 
     #@api.depends('sticky', 'defined_sticky', 'target_branch_name', 'name')
@@ -201,7 +201,7 @@ class runbot_branch(models.Model):
             return False
         return True
 
-    # this is now the project
+    # this is now the bundle
     #def _get_last_branch_name_builds(self): 
     #    # naive way to find corresponding build, only matching branch name or pr pull_head_name and target_branch_name.
     #    self.ensure_one()
@@ -243,7 +243,7 @@ class runbot_branch(models.Model):
             if coverage_config:
                 vals['config_id'] = coverage_config
         branch = super(runbot_branch, self).create(vals)
-        branch.project_id = self.env['runbot.project']._get(self.reference_name, branch.repo_id.repo_group_id.category_id)
+        branch.bundle_id = self.env['runbot.bundle']._get(self.reference_name, branch.repo_id.repo_group_id.project_id)
 
     def _get_last_coverage_build(self):
         """ Return the last build with a coverage value > 0"""

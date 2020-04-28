@@ -1,30 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
 <data>
-<template id="runbot.project">
+<template id="runbot.bundle">
     <t t-call='website.layout'>
         <div class="container-fluid">
             <div class="row">
                 <div class='col-md-12'>
                     <div class="navbar navbar-default">
                         <span class="text-center" style="font-size: 18px;">
-                            <t t-esc="project.name"/> <i t-if="project.sticky" class="fa fa-star" style="color: #f0ad4e" />
+                            <t t-esc="bundle.name"/> <i t-if="bundle.sticky" class="fa fa-star" style="color: #f0ad4e" />
                         </span>
                         <span class="pull-right"><t t-call="website.pager" /></span>
                     </div>
                     <div>
                         <table class="table table-condensed table-responsive table-stripped">
-                            <tr><td>Version</td><td t-esc="project.version_id.name"/></tr>
+                            <tr><td>Version</td><td t-esc="bundle.version_id.name"/></tr>
                             <tr><td>branches</td><td>
-                                <div t-foreach="project.branch_ids.sorted(key=lambda b: (b.repo_id.sequence,b.id))" t-as="branch"><small>
+                                <div t-foreach="bundle.branch_ids.sorted(key=lambda b: (b.repo_id.sequence,b.id))" t-as="branch"><small>
                                     <a t-att-href="branch.branch_url" t-esc="branch.dname"/>
                                     <a t-if="more" class="fa fa-cog" t-attf-href="/web/#id={{branch.id}}&amp;view_type=form&amp;model=runbot.branch" target="new"/>
                                 </small></div>
                             </td></tr>
 
-                            <tr t-if="more"><td>Category</td><td t-esc="project.category_id.name"/></tr>
-                            <tr t-if="more"><td>New build enabled</td><td><i t-attf-class="fa fa-{{'times' if project.no_build else 'check'}}"/></td></tr>
-                            <tr t-if="more"><td>Modules</td><td t-esc="project.modules or '/'"/></tr>
+                            <tr t-if="more"><td>Category</td><td t-esc="bundle.project_id.name"/></tr>
+                            <tr t-if="more"><td>New build enabled</td><td><i t-attf-class="fa fa-{{'times' if bundle.no_build else 'check'}}"/></td></tr>
+                            <tr t-if="more"><td>Modules</td><td t-esc="bundle.modules or '/'"/></tr>
                         </table>
                     </div>
                     <table class="table table-condensed table-stripped" style="table-layout: initial;">
@@ -37,22 +37,22 @@
                                 <th>Builds</th>
                             </tr>
                         </thead>
-                        <t t-foreach="instances" t-as="instance">
+                        <t t-foreach="batchs" t-as="batch">
                             <tr>
-                                <td t-esc="instance.create_date"></td>
-                                <td t-esc="instance.last_update" t-if="more"></td>
-                                <td t-esc="instance.state" t-if="more"></td>
+                                <td t-esc="batch.create_date"></td>
+                                <td t-esc="batch.last_update" t-if="more"></td>
+                                <td t-esc="batch.state" t-if="more"></td>
                                 <td> 
-                                    <t t-foreach="instance.project_commit_ids" t-as="project_commit">
-                                        <a t-attf-href="/runbot/commit/#{project_commit.commit_id.id}">
-                                            <span class="label" t-esc="project_commit.commit_id.dname"/>
+                                    <t t-foreach="batch.bundle_commit_ids" t-as="bundle_commit">
+                                        <a t-attf-href="/runbot/commit/#{bundle_commit.commit_id.id}">
+                                            <span class="label" t-esc="bundle_commit.commit_id.dname"/>
                                         </a>
                                     </t>
                                 </td>
-                                <t t-if="instance.state=='preparing'"><t t-set="klass">default</t></t>
-                                <t t-if="instance.state=='ready'"><t t-set="klass">success</t></t>
+                                <t t-if="batch.state=='preparing'"><t t-set="klass">default</t></t>
+                                <t t-if="batch.state=='ready'"><t t-set="klass">success</t></t>
                                 <td t-attf-class="bg-{{klass}}-light" style="width:22%">
-                                    <t t-foreach="instance.slot_ids" t-as="slot">
+                                    <t t-foreach="batch.slot_ids" t-as="slot">
                                         <t t-call="runbot.slot_button"/>
                                     </t>
                                 </td>

@@ -26,18 +26,18 @@ class Runbot(Controller):
         level = ['info', 'warning', 'danger'][int(pending_count > warn) + int(pending_count > crit)]
         return pending_count, level, scheduled_count
 
-    @route(['/runbot', '/runbot/projects/<model("runbot.project.category"):category>'], website=True, auth='public', type='http')
-    def projects(self, category=None, more=False, mode = '', search='', refresh='', **kwargs):
+    @route(['/runbot', '/runbot/<model("runbot.project"):project>'], website=True, auth='public', type='http')
+    def bundles(self, project=None, more=False, mode = '', search='', refresh='', **kwargs):
         search = search if len(search) < 60 else search[:60]
         env = request.env
-        categories = env['runbot.project.category'].search([])
-        if not category and categories:
-            category = categories[0]
+        projects = env['runbot.project'].search([])
+        if not project and projects:
+            project = projects[0]
 
         pending_count, level, scheduled_count = self._pending()
         context = {
-            'categories': categories,
-            'category': category,
+            'projects': projects,
+            'project': project,
             'search': search,
             'refresh': refresh,
             'message': request.env['ir.config_parameter'].sudo().get_param('runbot.runbot_message'),
@@ -48,18 +48,18 @@ class Runbot(Controller):
             'more': more is not False,
         }
 
-        if category:
-            # basic search to start, only project name. TODO add instance.commits and project pr numbers (all branches names)
+        if project:
+            # basic search to start, only bundle name. TODO add batch.commits and bundle pr numbers (all branches names)
 
-            domain = [('last_batch', '!=', False),('category_id', '=', category.id)]
+            domain = [('last_batch', '!=', False),('project_id', '=', project.id)]
             if search:
                 search_domain = expression.OR([[('name', 'like', search_elem)] for search_elem in search.split("|")])
                 domain = expression.AND([domain, search_domain])
 
-            e = expression.expression(domain, request.env['runbot.project'])
+            e = expression.expression(domain, request.env['runbot.bundle'])
             where_clause, where_params = e.to_sql()
             env.cr.execute("""
-                SELECT id FROM runbot_project
+                SELECT id FROM runbot_bundle
                 WHERE {where_clause}
                 ORDER BY
                     sticky desc,
@@ -67,52 +67,52 @@ class Runbot(Controller):
                     case when not sticky then last_batch end desc
                 LIMIT 100""".format(where_clause=where_clause), where_params)
             # TODO check if where clausse is usefull on complete database
-            projects = env['runbot.project'].browse([r[0] for r in env.cr.fetchall()])
+            bundles = env['runbot.bundle'].browse([r[0] for r in env.cr.fetchall()])
 
             context.update({
-                'projects': projects,
-                'qu': QueryURL('/runbot/projects/' + slug(category), search=search, refresh=refresh),
+                'bundles': bundles,
+                'qu': QueryURL('/runbot/' + slug(project), search=search, refresh=refresh),
             })
 
         context.update({'message': request.env['ir.config_parameter'].sudo().get_param('runbot.runbot_message')})
-        return request.render('runbot.projects%s' % mode, context) # todo remove mode hack
+        return request.render('runbot.bundles%s' % mode, context) # todo remove mode hack
 
 
     @route([
-        '/runbot/project/<model("runbot.project"):project>',
-        '/runbot/project/<model("runbot.project"):project>/page/<int:page>'
+        '/runbot/bundle/<model("runbot.bundle"):bundle>',
+        '/runbot/bundle/<model("runbot.bundle"):bundle>/page/<int:page>'
         ], website=True, auth='public', type='http')
-    def project(self, project=None, page=1, limit=50, more=False, **kwargs):
+    def bundle(self, bundle=None, page=1, limit=50, more=False, **kwargs):
         env = request.env
-        domain = [('project_id', '=', project.id), ('hidden', '=', False)]
-        instance_count = request.env['runbot.batch'].search_count(domain)
+        domain = [('bundle_id', '=', bundle.id), ('hidden', '=', False)]
+        batch_count = request.env['runbot.batch'].search_count(domain)
         pager = request.website.pager(
-            url='/runbot/project/%s' % project.id,
-            total=instance_count,
+            url='/runbot/bundle/%s' % bundle.id,
+            total=batch_count,
             page=page,
             step=50,
         )
-        instances = request.env['runbot.batch'].search(domain, limit=limit, offset=pager.get('offset', 0), order='id desc')
+        batchs = request.env['runbot.batch'].search(domain, limit=limit, offset=pager.get('offset', 0), order='id desc')
 
         context = {
-            'project': project,
-            'instances': instances,
+            'bundle': bundle,
+            'batchs': batchs,
             'pager': pager,
             'more': more is not False,
-            'categories': request.env['runbot.project.category'].search([]),
-            'category': project.category_id
+            'projects': request.env['runbot.project'].search([]),
+            'project': bundle.project_id
             }
 
-        return request.render('runbot.project', context)
+        return request.render('runbot.bundle', context)
 
 
-    @route(['/runbot/instance/<model("runbot.project.batch"):instance>'], website=True, auth='public', type='http')
-    def instance(self, instance=None, more=False, **kwargs):
+    @route(['/runbot/batch/<model("runbot.bundle.batch"):batch>'], website=True, auth='public', type='http')
+    def batch(self, batch=None, more=False, **kwargs):
         context = {
-            'instance': instance,
+            'batch': batch,
             'more': more is not False,
-            'categories': request.env['runbot.project.category'].search([]),
-            'category': instance.project_id.category_id,
+            'projects': request.env['runbot.project'].search([]),
+            'project': batch.bundle_id.project_id,
         }
         return request.render('runbot.batch', context)
 
@@ -151,14 +151,14 @@ class Runbot(Controller):
             'build': build,
             'fqdn': fqdn(),
             'more': more is not False,
-            'categories': request.env['runbot.project.category'].search([]),
-            #'category': build_id.param_id.category_id, TODO how to find category? store cat? trigger?
+            'projects': request.env['runbot.project'].search([]),
+            #'project': build_id.param_id.project_id, TODO how to find project? store cat? trigger?
         }
         return request.render("runbot.build", context)
 
     @route(['/runbot/quick_connect/<model("runbot.branch"):branch>'], type='http', auth="public", website=True)
     def fast_launch(self, branch, **post):
-        """Connect to the running Odoo instance"""
+        """Connect to the running Odoo batch"""
         Build = request.env['runbot.build']
         domain = [('branch_id', '=', branch.id), ('config_id', '=', branch.config_id.id)]
 

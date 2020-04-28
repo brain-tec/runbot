@@ -33,7 +33,7 @@ class RunbotException(Exception):
 
 class RepoTrigger(models.Model):
     """
-    List of repo parts that must be part of the same project
+    List of repo parts that must be part of the same bundle
     """
 
     _name = 'runbot.trigger'
@@ -41,7 +41,7 @@ class RepoTrigger(models.Model):
     _description = 'Triggers'
 
     name = fields.Char("Repo trigger descriptions")
-    category_id = fields.Many2one('runbot.project.category')  # main/security/runbot
+    project_id = fields.Many2one('runbot.project')  # main/security/runbot
     repos_group_ids = fields.Many2many('runbot.repo.group', relation='runbot_trigger_triggers', string="Triggers")
     dependency_ids = fields.Many2many('runbot.repo.group', relation='runbot_trigger_dependencies', string="Dependencies")
     config_id = fields.Many2one('runbot.build.config', 'Config')
@@ -59,10 +59,10 @@ class RepoGroup(models.Model):
     #main = fields.Many2one('runbot.repo', "Main repo")
     #main_regex = fields.Char('regex to define if a branch is a version or not')
     repo_ids = fields.One2many('runbot.repo', 'repo_group_id', "Repo and forks")
-    category_id = fields.Many2one('runbot.project.category',
-        help="Default project category to use when pushing on this repos")
-    # -> not verry usefull, remove it? (iterate on categories or contraints triggers:
-    # all trigger where a repo is used must be in the same category.
+    project_id = fields.Many2one('runbot.project',
+        help="Default bundle project to use when pushing on this repos")
+    # -> not verry usefull, remove it? (iterate on projects or contraints triggers:
+    # all trigger where a repo is used must be in the same project.
     modules = fields.Char("Modules to install", help="Comma-separated list of modules to install and test.")
     modules_auto = fields.Selection([('none', 'None (only explicit modules list)'),
                                      ('repo', 'Repository modules (excluding dependencies)'),
@@ -73,7 +73,7 @@ class RepoGroup(models.Model):
     server_files = fields.Char('Server files', help='Comma separated list of possible server files')  # odoo-bin,openerp-server,openerp-server.py
     manifest_files = fields.Char('Manifest files', help='Comma separated list of possible manifest files', default='__manifest__.py')
     addons_paths = fields.Char('Addons paths', help='Comma separated list of possible addons path', default='')
-    #default_branch/project?
+    #default_branch/bundle?
 
     #odoo
     #   -odoo/odoo
@@ -390,19 +390,19 @@ class RunbotRepo(models.Model):
                         'date': dateutil.parser.parse(date[:19]),
                     })
                 branch.head = commit
-                project = branch.project_id
-                if project.no_buld:
+                bundle = branch.bundle_id
+                if bundle.no_buld:
                     continue
                 # TODO check  if repo group of branch is a trigger
 
-                # todo move following logic to project ? project._notify_new_commit()
-                project_batch = project._get_preparing_batch()
-                project_batch._add_commit(commit)
+                # todo move following logic to bundle ? bundle._notify_new_commit()
+                bundle_batch = bundle._get_preparing_batch()
+                bundle_batch._add_commit(commit)
 
-                if not project.sticky: # todo move this logic to project?
+                if not bundle.sticky: # todo move this logic to bundle?
                     # pending builds are skipped as we have a new ref
                     builds_to_skip = self.env['runbot.build'].search(
-                        [('project_id', '=', project.id), ('local_state', '=', 'pending')],
+                        [('bundle_id', '=', bundle.id), ('local_state', '=', 'pending')],
                         order='sequence asc')
                     builds_to_skip._skip(reason='New ref found')
 
@@ -615,7 +615,7 @@ class RunbotRepo(models.Model):
         assert e.get_tables() == ['"runbot_build"']
         where_clause, where_params = e.to_sql()
 
-        # self-assign to be sure that another runbot instance cannot self assign the same builds
+        # self-assign to be sure that another runbot batch cannot self assign the same builds
         query = """UPDATE
                         runbot_build
                     SET
@@ -715,7 +715,7 @@ class RunbotRepo(models.Model):
 
     def _cron_fetch_and_build(self, hostname):
         """ This method have to be called from a dedicated cron
-        created on each runbot instance.
+        created on each runbot batch.
         """
 
         if hostname != fqdn():

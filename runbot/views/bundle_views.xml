@@ -1,9 +1,9 @@
 <odoo>
   <data>
-    <record id="view_runbot_project" model="ir.ui.view">
-        <field name="model">runbot.project</field>
+    <record id="view_runbot_bundle" model="ir.ui.view">
+        <field name="model">runbot.bundle</field>
         <field name="arch" type="xml">
-            <form string="Projects">
+            <form string="Bundles">
                 <div class="oe_button_box" name="button_box">
                     <button name="toggle_request_branch_rebuild" type="object" class="oe_stat_button" icon="fa-play">
                     <field name="rebuild_requested" widget="boolean_button" options='{"terminology": {
@@ -16,7 +16,7 @@
                 </div>
                 <group>
                     <field name="name"/>
-                    <field name="category_id"/>
+                    <field name="project_id"/>
                     <field name="sticky"/>
                     <field name="is_base"/>
                     <field name="version_id"/>
@@ -32,7 +32,7 @@
                     <field name="batch_ids">
                         <tree>
                             <field name="state"/>
-                            <field name="project_commit_ids"/>
+                            <field name="bundle_commit_ids"/>
                             <field name="slot_ids"/>
                         </tree>
                     </field>
@@ -40,8 +40,8 @@
             </form>
         </field>
     </record>
-    <record id="view_runbot_project_tree" model="ir.ui.view">
-        <field name="model">runbot.project</field>
+    <record id="view_runbot_bundle_tree" model="ir.ui.view">
+        <field name="model">runbot.bundle</field>
         <field name="arch" type="xml">
             <tree string="Build params">
                 <field name="name"/>
@@ -53,12 +53,12 @@
     <record id="view_runbot_batch" model="ir.ui.view">
         <field name="model">runbot.batch</field>
         <field name="arch" type="xml">
-            <form string="Project instance">
+            <form string="Bundle batch">
                 <group>
                     <field name="last_update"/>
-                    <field name="project_id"/>
+                    <field name="bundle_id"/>
                     <field name="state"/>
-                    <field name="project_commit_ids">
+                    <field name="bundle_commit_ids">
                         <tree>
                             <field name="commit_id"/>
                             <field name="match_type"/>
@@ -80,42 +80,42 @@
         <field name="model">runbot.batch</field>
         <field name="arch" type="xml">
             <tree string="Build params">
-                <field name="project_id"/>
+                <field name="bundle_id"/>
                 <field name="state"/>
             </tree>
         </field>
     </record>
 
 
-    <record id="action_project" model="ir.actions.act_window">
-        <field name="name">Projects</field>
+    <record id="action_bundle" model="ir.actions.act_window">
+        <field name="name">Bundles</field>
+        <field name="type">ir.actions.act_window</field>
+        <field name="res_model">runbot.bundle</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+    <record id="action_bundle_project" model="ir.actions.act_window">
+        <field name="name">Categories</field>
         <field name="type">ir.actions.act_window</field>
         <field name="res_model">runbot.project</field>
         <field name="view_mode">tree,form</field>
     </record>
-    <record id="action_project_category" model="ir.actions.act_window">
-        <field name="name">Categories</field>
-        <field name="type">ir.actions.act_window</field>
-        <field name="res_model">runbot.project.category</field>
-        <field name="view_mode">tree,form</field>
-    </record>
-    <record id="action_project_version" model="ir.actions.act_window">
+    <record id="action_bundle_version" model="ir.actions.act_window">
         <field name="name">Versions</field>
         <field name="type">ir.actions.act_window</field>
         <field name="res_model">runbot.version</field>
         <field name="view_mode">tree,form</field>
     </record>
-    <record id="action_project_batch" model="ir.actions.act_window">
+    <record id="action_bundle_batch" model="ir.actions.act_window">
         <field name="name">Instances</field>
         <field name="type">ir.actions.act_window</field>
         <field name="res_model">runbot.batch</field>
         <field name="view_mode">tree,form</field>
     </record>
 
-    <menuitem id="menu_project" name="Project" parent="runbot_menu_root"/>
-    <menuitem id="menu_project_project" action="action_project" parent="menu_project"/>
-    <menuitem id="menu_project_category" action="action_project_category" parent="menu_project"/>
-    <menuitem id="menu_project_version" action="action_project_version" parent="menu_project"/>
-    <menuitem id="menu_project_batch" action="action_project_batch" parent="menu_project"/>
+    <menuitem id="menu_bundle" name="Bundle" parent="runbot_menu_root"/>
+    <menuitem id="menu_bundle_bundle" action="action_bundle" parent="menu_bundle"/>
+    <menuitem id="menu_bundle_project" action="action_bundle_project" parent="menu_bundle"/>
+    <menuitem id="menu_bundle_version" action="action_bundle_version" parent="menu_bundle"/>
+    <menuitem id="menu_bundle_batch" action="action_bundle_batch" parent="menu_bundle"/>
   </data>
 </odoo>

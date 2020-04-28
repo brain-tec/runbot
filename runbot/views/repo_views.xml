@@ -10,7 +10,7 @@
             <sheet>
               <group name="repo_group">
                 <field name="name"/>
-                <field name="category_id"/>
+                <field name="project_id"/>
                 <field name="repos_group_ids"/>
                 <field name="dependency_ids"/>
                 <field name="config_id"/>
@@ -30,7 +30,7 @@
             <sheet>
               <group name="repo_group">
                 <field name="name"/>
-                <field name="category_id"/>
+                <field name="project_id"/>
                 <field name="modules"/>
                 <field name="modules_auto"/>
                 <field name="group_ids"  widget="many2many_tags"/>

@@ -108,9 +108,9 @@ class RunbotErrorLog(models.Model):
     config_id = fields.Many2one('runbot.build.config', string='Config', readonly=True)
     parent_id = fields.Many2one('runbot.build', string='Parent build', readonly=True)
     hidden = fields.Boolean(string='Hidden', readonly=True)
-    #project_id = fields.Many2one('runbot.project', string='Project', readonly=True)
-    #project_name = fields.Char(string='Project name', readonly=True)
-    #project_sticky = fields.Boolean(string='Sticky', readonly=True)
+    #bundle_id = fields.Many2one('runbot.bundle', string='Bundle', readonly=True)
+    #bundle_name = fields.Char(string='Bundle name', readonly=True)
+    #bundle_sticky = fields.Boolean(string='Sticky', readonly=True)
     build_url = fields.Char(compute='_compute_build_url', readonly=True)
 
     def _compute_repo_short_name(self):

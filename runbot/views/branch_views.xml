@@ -10,7 +10,7 @@
             </header>
             <sheet>
               <group name="branch_group">
-                <field name="project_id"/>
+                <field name="bundle_id"/>
                 <field name="repo_id"/>
                 <field name="name"/>
                 <field name="branch_name"/>

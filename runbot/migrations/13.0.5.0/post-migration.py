@@ -28,28 +28,25 @@ def migrate(cr, version):
         cr.execute("""INSERT INTO ir_config_parameter (KEY, value) VALUES ('runbot_nginx', 'True')""")
 
     ########################
-    # Repo groups, triggers and categories
+    # Repo groups, triggers and projects
     ########################
 
     repo_to_group = {}
     owner_group_to_repo = {}
 
-    RD_category = env['runbot.project.category'].create({
+    RD_project = env['runbot.project'].create({
         'name': 'R&D'
     })
-    security_category = env['runbot.project.category'].create({
+    security_project = env['runbot.project'].create({
         'name': 'Security'
     })
-    nightly_category = env['runbot.project.category'].create({
-        'name': 'Nightly'
-    })
-    category_matching = { # some hardcoded info 
-        'odoo': RD_category,
-        'enterprise': RD_category,
-        'upgrade': RD_category,
-        'design-themes': RD_category,
-        'odoo-security': security_category,
-        'enterprise-security': security_category,
+    project_matching = { # some hardcoded info 
+        'odoo': RD_project,
+        'enterprise': RD_project,
+        'upgrade': RD_project,
+        'design-themes': RD_project,
+        'odoo-security': security_project,
+        'enterprise-security': security_project,
     }
     cr.execute("""
         SELECT 
@@ -69,15 +66,15 @@ def migrate(cr, version):
         else:
             # if not, we need to give information on how to group repos: odoo+enterprise+upgarde+design-theme/se/runbot
             # this mean that we will need to group build too. Could be nice but maybe a little difficult.
-            if repo_name in category_matching:
-                category = category_matching[repo_name]
+            if repo_name in project_matching:
+                project = project_matching[repo_name]
             else:
-                category = env['runbot.project.category'].create({
+                project = env['runbot.project'].create({
                     'name': repo_name,
                 })
             group = env['runbot.repo.group'].create({
                 'name': repo_name,
-                'category_id': category.id,
+                'project_id': project.id,
                 #'main': id, # older repo should be the main, not sur it is usefull
                 'modules': modules,
                 'modules_auto': modules_auto,
@@ -98,7 +95,7 @@ def migrate(cr, version):
         FROM runbot_repo order by id
     """)
     triggers = {}
-    triggers_by_category = defaultdict(list)
+    triggers_by_project = defaultdict(list)
     for id, name, repo_config_id in cr.fetchall():
         repo_name = name.split('/')[-1].replace('.git', '')
         cr.execute(""" SELECT dependency_id FROM runbot_repo_dep_rel WHERE dependant_id = %s""", (id,))
@@ -108,29 +105,29 @@ def migrate(cr, version):
             processed.add(group.id)
             trigger = env['runbot.trigger'].create({
                 'name': repo_name,
-                'category_id': group.category_id.id,
+                'project_id': group.project_id.id,
                 'repos_group_ids': [(4, group.id)],
                 'dependency_ids': [(4, repo_to_group[dependency_id].id) for dependency_id in dependency_ids],
                 'config_id': repo_config_id if repo_config_id else env.ref('runbot.runbot_build_config_default').id,
             })
             triggers[group.id] = trigger
-            triggers_by_category[group.category_id.id].append(trigger)
+            triggers_by_project[group.project_id.id].append(trigger)
         # TODO create trigger using dependency_ids
 
     # no build, config, ...
 
     ########################
-    # Projects
+    # Bundles
     ########################
-    _logger.info('Creating projects')
+    _logger.info('Creating bundles')
 
     branches = env['runbot.branch'].search([], order='id')
 
     branches._compute_reference_name()
 
-    projects = {}
+    bundles = {}
     versions = {}
-    branch_to_project = {}
+    branch_to_bundle = {}
     branch_to_version = {}
     progress = _bar(len(branches))
     for i, branch in enumerate(branches):
@@ -147,14 +144,14 @@ def migrate(cr, version):
             pull_head_repo_id = owner_group_to_repo.get((owner, group.id))
             if pull_head_repo_id:
                 branch.pull_head_repo_id = pull_head_repo_id
-        category_id = group.category_id
+        project_id = group.project_id
         name = branch.reference_name
 
-        key = (name, category_id)
-        if key not in projects:
-            project = env['runbot.project'].create({
+        key = (name, project_id)
+        if key not in bundles:
+            bundle = env['runbot.bundle'].create({
                 'name': name,
-                'category_id': category_id.id,
+                'project_id': project_id.id,
                 'sticky': branch.sticky,
                 'is_base': branch.sticky,
                 'version_id': next((version.id for k, version in versions.items() if (
@@ -162,14 +159,14 @@ def migrate(cr, version):
                     branch.branch_name.startswith(k)
                 )), next(version.id for k, version in versions.items() if k=='master'))
             })
-            projects[key] = project
-        project = projects[key]
-        branch.project_id = project
-        branch_to_project[branch.id] = project
-        branch_to_version[branch.id] = project.version_id.id
+            bundles[key] = bundle
+        bundle = bundles[key]
+        branch.bundle_id = bundle
+        branch_to_bundle[branch.id] = bundle
+        branch_to_version[branch.id] = bundle.version_id.id
 
     branches.flush()
-    env['runbot.project'].flush()
+    env['runbot.bundle'].flush()
     progress.finish()
 
     batch_size = 100000
@@ -285,7 +282,7 @@ def migrate(cr, version):
                 'version_id':  branch_to_version[branch_id],
                 'extra_params': extra_params,
                 'config_id': config_id,
-                'category_id': repo_to_group[repo_id].category_id,
+                'project_id': repo_to_group[repo_id].project_id,
                 #'trigger_id': triggers[repo_to_group[repo_id].id].id,
                 'config_data': config_data,
                 'commit_path_mode':commit_path_mode,
@@ -307,9 +304,9 @@ def migrate(cr, version):
     # adapt build commits
 
 
-    _logger.info('Creating instances')
+    _logger.info('Creating batchs')
     ###################
-    # Project instance
+    # Bundle batch
     ####################
     cr.execute("SELECT count(*) FROM runbot_build WHERE parent_id IS NOT NULL")
     nb_root_build = cr.fetchone()[0]
@@ -328,67 +325,67 @@ def migrate(cr, version):
             if repo_id is None:
                 _logger.warning('Skipping %s: no repo', id)
                 continue
-            project = branch_to_project[branch_id]
-            # try to merge build in same instance
+            bundle = branch_to_bundle[branch_id]
+            # try to merge build in same batch
             # not temporal notion in this case, only hash consistency
-            instance = False
+            batch = False
             build_id = duplicate_id or id
             build_commits = build_commit_ids[build_id]
-            instance_group_repos_ids = []
+            batch_group_repos_ids = []
             
             # check if this build can be added to last_batch
-            if project.last_batch:
-                if create_date - project.last_batch.last_update < datetime.timedelta(minutes=5):
-                    if duplicate_id and build_id in project.last_batch.slot_ids.mapped('build_id').ids:
+            if bundle.last_batch:
+                if create_date - bundle.last_batch.last_update < datetime.timedelta(minutes=5):
+                    if duplicate_id and build_id in bundle.last_batch.slot_ids.mapped('build_id').ids:
                         continue
 
-                    # to fix: nightly will be in the same instance of the previous normal one. If config_id is diffrent, create instance?
+                    # to fix: nightly will be in the same batch of the previous normal one. If config_id is diffrent, create batch?
                     # possible fix: max create_date diff
-                    instance = project.last_batch
-                    instance_commits = instance.project_commit_ids.mapped('commit_id')
-                    instance_group_repos_ids = instance_commits.mapped('repo_group_id').ids
-                    for commit in instance_commits:
+                    batch = bundle.last_batch
+                    batch_commits = batch.bundle_commit_ids.mapped('commit_id')
+                    batch_group_repos_ids = batch_commits.mapped('repo_group_id').ids
+                    for commit in batch_commits:
                         repo_group_id = commit.repo_group_id.id
                         if repo_group_id in build_commits:
                             if commit.id != build_commits[repo_group_id]:
-                                instance = False
-                                instance_group_repos_ids = []
+                                batch = False
+                                batch_group_repos_ids = []
                                 break
 
-            missing_commits = [commit_id for repo_group_id, commit_id in build_commits.items() if repo_group_id not in instance_group_repos_ids]
+            missing_commits = [commit_id for repo_group_id, commit_id in build_commits.items() if repo_group_id not in batch_group_repos_ids]
             triggers[repo_to_group[repo_id].id].id
             #if trigger.config_id != 
-            if not instance:
-                instance = env['runbot.batch'].create({
+            if not batch:
+                batch = env['runbot.batch'].create({
                     'create_date': create_date,
                     'last_update': create_date,
                     'state': 'ready',
-                    'project_id': project.id
+                    'bundle_id': bundle.id
                 })
-                #if project.last_batch:
-                #    previous = previous_batch.get(project.last_batch.id)
+                #if bundle.last_batch:
+                #    previous = previous_batch.get(bundle.last_batch.id)
                 #    if previous:
                 #        previous_build_by_trigger = {slot.trigger_id.id: slot.build_id.id for slot in previous.slot_ids}
                 #    else:
                 #        previous_build_by_trigger = {}
-                #    instance_slot_triggers = project.last_batch.slot_ids.mapped('trigger_id').ids
-                #    missing_trigger_ids = [trigger for trigger in triggers_by_category[project.category_id.id] if trigger.id not in instance_slot_triggers]
+                #    batch_slot_triggers = bundle.last_batch.slot_ids.mapped('trigger_id').ids
+                #    missing_trigger_ids = [trigger for trigger in triggers_by_project[bundle.project_id.id] if trigger.id not in batch_slot_triggers]
                 #    for trigger in missing_trigger_ids:
                 #        env['runbot.batch.slot'].create({
                 #            'trigger_id': trigger.id,
-                #            'batch_id': project.last_batch.id,
+                #            'batch_id': bundle.last_batch.id,
                 #            'build_id': previous_build_by_trigger.get(trigger.id), # may be None, if we want to create empty slots. Else, iter on slot instead
                 #            'link_type': 'matched',
                 #            'active': True,
                 #        })
 
-                previous_batch[instance.id] = project.last_batch
-                project.last_batch = instance
+                previous_batch[batch.id] = bundle.last_batch
+                bundle.last_batch = batch
             else:
-                instance.last_update = create_date
+                batch.last_update = create_date
             env['runbot.batch.slot'].create({
                 'trigger_id': triggers[repo_to_group[repo_id].id].id,
-                'batch_id': instance.id,
+                'batch_id': batch.id,
                 'build_id': build_id,
                 'link_type': 'rebuild' if build_type == 'rebuild' else 'matched' if duplicate_id else 'created',
                 'active': True,
@@ -396,7 +393,7 @@ def migrate(cr, version):
             for missing_commit in missing_commits: # todo improve this, need time to prefetch params + commits
                 env['runbot.batch.commit'].create({
                     'commit_id': missing_commit,
-                    'batch_id': instance.id,
+                    'batch_id': batch.id,
                     'match_type': 'head', # TODO fixme
                     #'has_main' = True, ?
                 })
