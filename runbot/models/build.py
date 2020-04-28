@@ -63,7 +63,7 @@ class BuildParameters(models.Model):
     # execution parametter
     commit_ids = fields.One2many('runbot.build.commit', 'params_id', copy=True)
     version_id = fields.Many2one('runbot.version', required=True)
-    category_id = fields.Many2one('runbot.category', required=True)  # for access rights
+    category_id = fields.Many2one('runbot.project.category', required=True)  # for access rights
     # other informations
     extra_params = fields.Char('Extra cmd args')
     config_id = fields.Many2one('runbot.build.config', 'Run Config', required=True,
