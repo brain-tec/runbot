@@ -62,9 +62,9 @@ class BuildParameters(models.Model):
     # on param or on build?
     # execution parametter
     commit_ids = fields.One2many('runbot.build.commit', 'params_id', copy=True)
-    version_id = fields.Many2one('runbot.version', required=True)
+    version_id = fields.Many2one('runbot.version', required=True, index=True)
     project_id = fields.Many2one('runbot.project', required=True)  # for access rights
-    category = fields.Char('Category', index=True)
+    category = fields.Char('Category', index=True) # normal vs nightly vs weekly, ...
 
     # other informations
     extra_params = fields.Char('Extra cmd args')

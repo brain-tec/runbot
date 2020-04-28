@@ -201,14 +201,11 @@ def migrate(cr, version):
             if key in sha_repo_commits:
                 commit = sha_repo_commits[key]
             else:
-<<<<<<< HEAD
-                if duplicate_id and group_id.project_id != RD_category.id:
+                if duplicate_id and group_id.project_id != RD_project.id:
                     cross_project_duplicate_ids += id
-                else:
+                elif duplicate_id:
                     _logger.warning('Problem: duplicate: %s,%s', id, duplicate_id)
-=======
-                assert not duplicate_id  # duplicate_id should already exist
->>>>>>> wip
+
                 commit = env['runbot.commit'].create({
                     'name': name,
                     'repo_group_id': group_id,
