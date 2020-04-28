@@ -51,7 +51,7 @@ class Runbot(Controller):
         if category:
             # basic search to start, only project name. TODO add instance.commits and project pr numbers (all branches names)
 
-            domain = [('last_instance', '!=', False),('category_id', '=', category.id)]
+            domain = [('last_batch', '!=', False),('category_id', '=', category.id)]
             if search:
                 search_domain = expression.OR([[('name', 'like', search_elem)] for search_elem in search.split("|")])
                 domain = expression.AND([domain, search_domain])
@@ -64,7 +64,7 @@ class Runbot(Controller):
                 ORDER BY
                     sticky desc,
                     case when sticky then version_number end collate "C" desc,
-                    case when not sticky then last_instance end desc
+                    case when not sticky then last_batch end desc
                 LIMIT 100""".format(where_clause=where_clause), where_params)
             # TODO check if where clausse is usefull on complete database
             projects = env['runbot.project'].browse([r[0] for r in env.cr.fetchall()])
@@ -85,14 +85,14 @@ class Runbot(Controller):
     def project(self, project=None, page=1, limit=50, more=False, **kwargs):
         env = request.env
         domain = [('project_id', '=', project.id), ('hidden', '=', False)]
-        instance_count = request.env['runbot.instance'].search_count(domain)
+        instance_count = request.env['runbot.batch'].search_count(domain)
         pager = request.website.pager(
             url='/runbot/project/%s' % project.id,
             total=instance_count,
             page=page,
             step=50,
         )
-        instances = request.env['runbot.instance'].search(domain, limit=limit, offset=pager.get('offset', 0), order='id desc')
+        instances = request.env['runbot.batch'].search(domain, limit=limit, offset=pager.get('offset', 0), order='id desc')
 
         context = {
             'project': project,
@@ -106,7 +106,7 @@ class Runbot(Controller):
         return request.render('runbot.project', context)
 
 
-    @route(['/runbot/instance/<model("runbot.project.instance"):instance>'], website=True, auth='public', type='http')
+    @route(['/runbot/instance/<model("runbot.project.batch"):instance>'], website=True, auth='public', type='http')
     def instance(self, instance=None, more=False, **kwargs):
         context = {
             'instance': instance,
@@ -114,7 +114,7 @@ class Runbot(Controller):
             'categories': request.env['runbot.project.category'].search([]),
             'category': instance.project_id.category_id,
         }
-        return request.render('runbot.instance', context)
+        return request.render('runbot.batch', context)
 
     @route([
         '/runbot/build/<int:build_id>/<operation>',

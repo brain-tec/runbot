@@ -396,8 +396,8 @@ class RunbotRepo(models.Model):
                 # TODO check  if repo group of branch is a trigger
 
                 # todo move following logic to project ? project._notify_new_commit()
-                project_instance = project._get_preparing_instance()
-                project_instance._add_commit(commit)
+                project_batch = project._get_preparing_batch()
+                project_batch._add_commit(commit)
 
                 if not project.sticky: # todo move this logic to project?
                     # pending builds are skipped as we have a new ref

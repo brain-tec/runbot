@@ -55,9 +55,9 @@ class Project(models.Model):
     no_build = fields.Boolean('No build')
     modules = fields.Char("Modules to install", help="Comma-separated list of modules to install and test.")
 
-    instance_ids = fields.One2many('runbot.instance', 'project_id')
-    last_instance = fields.Many2one('runbot.instance', index=True)
-    last_instances = fields.Many2many('runbot.instance', 'Last instances', compute='_compute_last_instances')
+    batch_ids = fields.One2many('runbot.batch', 'project_id')
+    last_batch = fields.Many2one('runbot.batch', index=True)
+    last_batchs = fields.Many2many('runbot.batch', 'Last instances', compute='_compute_last_batchs')
 
     def _init_column(self, column_name):
         if column_name not in ('version_number',):
@@ -70,9 +70,9 @@ class Project(models.Model):
                 self.search([('version_id', '=', version.id)]).write({'version_number':version.number})
 
 
-    def _compute_last_instances(self):
+    def _compute_last_batchs(self):
         if self:
-            instance_ids = defaultdict(list)
+            batch_ids = defaultdict(list)
             self.env.cr.execute("""
                 SELECT
                     id
@@ -81,21 +81,21 @@ class Project(models.Model):
                         instance.id AS id,
                         row_number() OVER (PARTITION BY instance.project_id order by instance.id desc) AS row
                     FROM
-                        runbot_project project INNER JOIN runbot_instance instance ON project.id=instance.project_id
+                        runbot_project project INNER JOIN runbot_batch instance ON project.id=instance.project_id
                     WHERE
                         project.id in %s
-                    ) AS project_instance
+                    ) AS project_batch
                 WHERE
                     row <= 4
                 ORDER BY row, id desc
                 """, [tuple(self.ids)]
             )
-            instances = self.env['runbot.instance'].browse([r[0] for r in self.env.cr.fetchall()])
+            instances = self.env['runbot.batch'].browse([r[0] for r in self.env.cr.fetchall()])
             for instance in instances:
-                instance_ids[instance.project_id.id].append(instance.id)
+                batch_ids[instance.project_id.id].append(instance.id)
 
             for project in self:
-                project.last_instances = [(6, 0, instance_ids[project.id])]
+                project.last_batchs = [(6, 0, batch_ids[project.id])]
 
 
     def toggle_request_project_rebuild(self):
@@ -148,16 +148,16 @@ class Project(models.Model):
                     project.base_id = candidate
 
 
-    def _get_preparing_instance(self):
+    def _get_preparing_batch(self):
         # find last project instance or create one
-        if self.last_instance.state != preparing:
-            preparing = self.env['runbot.instance'].create({
+        if self.last_batch.state != preparing:
+            preparing = self.env['runbot.batch'].create({
                 'last_update': fields.Datetime.Now(),
                 'project_id': self,
                 'state': 'creating',
             })
-            self.last_instance = preparing
-        return self.last_instance
+            self.last_batch = preparing
+        return self.last_batch
 
     def _target_changed(self):
         self.add_warning()
@@ -168,13 +168,13 @@ class Project(models.Model):
 
 
 class ProjectInstance(models.Model):
-    _name = "runbot.instance"
+    _name = "runbot.batch"
     _description = "Project instance"
 
     last_update = fields.Datetime('Last ref update')
     project_id = fields.Many2one('runbot.project', required=True, index=True)
-    project_commit_ids = fields.One2many('runbot.instance.commit', 'instance_id')
-    slot_ids = fields.One2many('runbot.instance.slot', 'instance_id')
+    project_commit_ids = fields.One2many('runbot.batch.commit', 'batch_id')
+    slot_ids = fields.One2many('runbot.batch.slot', 'batch_id')
     state = fields.Selection([('preparing', 'Preparing'), ('ready', 'Ready'), ('complete', 'Complete'), ('done', 'Done')])
     hidden = fields.Boolean('Hidden', default=False)
     age = fields.Integer(compute='_compute_age', string='Build age')
@@ -204,9 +204,9 @@ class ProjectInstance(models.Model):
                 project_commit.commit_id = commit
                 break
         else:
-            self.env['runbot.instance.commit'].create({
+            self.env['runbot.batch.commit'].create({
                 'commit_id': commit.id,
-                'instance_id': self.id,
+                'batch_id': self.id,
                 'match_type': 'head'
             })
 
@@ -233,23 +233,23 @@ class ProjectInstance(models.Model):
 
 
 class ProjectInstanceCommit(models.Model):
-    _name = 'runbot.instance.commit'
+    _name = 'runbot.batch.commit'
     _description = "Project instance commit"
 
     commit_id = fields.Many2one('runbot.commit', index=True)
     repo_id = fields.Many2one('runbot.repo', string='Repo') # discovered in repo
     # ??? base_commit_id = fields.Many2one('runbot.commit')
-    instance_id = fields.Many2one('runbot.instance', index=True)
+    batch_id = fields.Many2one('runbot.batch', index=True)
     match_type = fields.Selection([('new', 'New head of branch'), ('head', 'Head of branch'), ('default', 'Found on base branch')])  # HEAD, DEFAULT
 
 
 class ProjectInstanceSlot(models.Model):
-    _name = 'runbot.instance.slot'
+    _name = 'runbot.batch.slot'
     _description = 'Link between a project instance and a build'
 
     _fa_link_type = {'created': 'hashtag', 'matched': 'link', 'rebuild': 'refresh'}
 
-    instance_id = fields.Many2one('runbot.instance')
+    batch_id = fields.Many2one('runbot.batch')
     trigger_id = fields.Many2one('runbot.trigger', index=True)
     build_id = fields.Many2one('runbot.build', index=True)
     link_type = fields.Selection([('created', 'Build created'), ('matched', 'Existing build matched'), ('rebuild', 'Rebuild')], required=True) # rebuild type?

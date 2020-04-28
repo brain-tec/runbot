@@ -120,7 +120,7 @@ class BuildParameters(models.Model):
 
 class BuildResults(models.Model):
     # remove duplicate management
-    # instead, link between project_instance and build
+    # instead, link between project_batch and build
     # kill -> only available from project.
     # kill -> actually detach the build from the project
     # rebuild: detach and create a new link (a little like exact rebuild),

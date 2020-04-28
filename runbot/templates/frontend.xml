@@ -229,7 +229,7 @@
                                 </div>
                                 <div class="col-md-9 col-lg-10">
                                   <div class="row">
-                                    <t t-foreach="project.last_instances" t-as="instance">
+                                    <t t-foreach="project.last_batchs" t-as="instance">
                                       <t t-if="instance.state=='preparing'"><t t-set="klass">default</t></t>
                                       <t t-if="instance.state=='ready'"><t t-set="klass">success</t></t>
                                       <div t-attf-class="col-md-6 col-xl-3 bg-{{klass}}-light cell {{'d-none d-xl-block' if instance_index > 1 else ''}}">
@@ -300,7 +300,7 @@
 
 
                     <div class="row">
-                      <t t-foreach="project.last_instances[:2]" t-as="instance">
+                      <t t-foreach="project.last_batchs[:2]" t-as="instance">
                         <div class="col-xs-6">
 
                           <div class="badge badge-light" t-esc="instance.get_formated_age()" style="width:100%;"/>
