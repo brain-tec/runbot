@@ -210,6 +210,7 @@
               </t>
               <div class="container-fluid">
                   <div class="row">
+                      <div class='col-md-12'><span class="pull-right" t-call="runbot.slots_infos"/></div>
                       <div class='col-md-12'>
                           <div t-if="message" class="alert alert-warning" role="alert">
                             <t t-esc="message" />
@@ -217,45 +218,41 @@
                           <div t-if="not category" class="mb32">
                               <h1>No category</h1>
                           </div>
-                          <table t-else="" class="table table-condensed table-bordered" style="table-layout: initial;">
-                            <tr>
-                                <th>Projects</th>
-                                <td colspan="4">
-                                  <span class="pull-right" t-call="runbot.slots_infos"/>
-                                </td>
-                            </tr>
-                              <tr t-foreach="projects" t-as="project">
-                              <td style="width:12%">
-                                  <div class="project_name">
-                                    <i t-if="project.sticky" class="fa fa-star" style="color: #f0ad4e" />
-                                    <a t-attf-href="/runbot/project/#{project.id}">
-                                    <b t-esc="project.name"/></a>
-                                  </div>
-                              </td>
-                              <t t-foreach="project.last_instances" t-as="instance">
-                                <t t-if="instance.state=='preparing'"><t t-set="klass">default</t></t>
-                                <t t-if="instance.state=='ready'"><t t-set="klass">success</t></t>
-                                <td t-attf-class="bg-{{klass}}-light" style="width:22%">
-
-                                  <div><div class="badge badge-light" t-esc="instance.get_formated_age()"/></div>
-                                  <t t-foreach="instance.slot_ids" t-as="slot">
-                                    <t t-call="runbot.slot_button"/>
-                                  </t>
-                                  <div>
-                                    <t t-if="more" ><small>
-                                    <div t-foreach="instance.project_commit_ids" t-as="project_commit"  class="text-nowrap overflow-hidden" style="max-width:100%">
-                                          <a t-attf-href="/runbot/commit/#{project_commit.commit_id.id}">
-                                              <span class="badge badge-light" t-esc="project_commit.commit_id.dname"/>
-                                          </a>
-                                          <span title="project_commit.commit_id.subject" t-esc="project_commit.commit_id.subject"></span>
+                          <div t-else="">
+                                <div t-foreach="projects" t-as="project" class="row">
+                                <div class="col-md-3 col-lg-2 cell">
+                                    <div class="one_line">
+                                      <i t-if="project.sticky" class="fa fa-star" style="color: #f0ad4e" />
+                                      <a t-attf-href="/runbot/project/#{project.id}">
+                                      <b t-esc="project.name"/></a>
                                     </div>
-                                    </small></t>
-                                 </div>
-
-                                </td>
-                              </t>
-                            </tr>
-                          </table>
+                                </div>
+                                <div class="col-md-9 col-lg-10">
+                                  <div class="row">
+                                    <t t-foreach="project.last_instances" t-as="instance">
+                                      <t t-if="instance.state=='preparing'"><t t-set="klass">default</t></t>
+                                      <t t-if="instance.state=='ready'"><t t-set="klass">success</t></t>
+                                      <div t-attf-class="col-md-6 col-xl-3 bg-{{klass}}-light cell {{'d-none d-xl-block' if instance_index > 1 else ''}}">
+                                        <div><div class="badge badge-light" t-esc="instance.get_formated_age()"/></div>
+                                        <t t-foreach="instance.slot_ids" t-as="slot">
+                                          <t t-call="runbot.slot_button"/>
+                                        </t>
+                                        <div t-if="more">
+                                          <small>
+                                            <div t-foreach="instance.project_commit_ids" t-as="project_commit" class="one_line">
+                                              <a t-attf-href="/runbot/commit/#{project_commit.commit_id.id}">
+                                                  <span class="badge badge-light" t-esc="project_commit.commit_id.dname"/>
+                                              </a>
+                                              <span title="project_commit.commit_id.subject" t-esc="project_commit.commit_id.subject"></span>
+                                            </div>
+                                          </small>
+                                        </div>
+                                      </div>
+                                    </t>
+                                    </div>
+                                </div>
+                              </div>
+                          </div>
                       </div>
                   </div>
               </div>

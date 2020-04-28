@@ -46,13 +46,15 @@ body, .table{
 
 .dropdown-toggle:after { content: none }
 
-.branch_name, .project_name {
-    max-width: 250px;
+.one_line {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-
+.cell {
+    border-bottom:1px solid #dee2e6;
+    border-right:1px solid #dee2e6;
+}
 .branch_time {
     float:right;
     margin-left:10px;

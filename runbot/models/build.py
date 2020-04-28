@@ -64,6 +64,8 @@ class BuildParameters(models.Model):
     commit_ids = fields.One2many('runbot.build.commit', 'params_id', copy=True)
     version_id = fields.Many2one('runbot.version', required=True)
     category_id = fields.Many2one('runbot.project.category', required=True)  # for access rights
+    #trigger_type = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)
+
     # other informations
     extra_params = fields.Char('Extra cmd args')
     config_id = fields.Many2one('runbot.build.config', 'Run Config', required=True,
