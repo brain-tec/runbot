@@ -196,14 +196,14 @@ def migrate(cr, version):
             if not repo_id:
                 _logger.warning('No repo_id for build %s, skipping', id)
                 continue
-            group = repo_to_group[repo_id].id
+            group = repo_to_group[repo_id]
             group_id = group.id
             key = (name, group_id)
             if key in sha_repo_commits:
                 commit = sha_repo_commits[key]
             else:
-                if duplicate_id and group.project_id != RD_project.id:
-                    cross_project_duplicate_ids += id
+                if duplicate_id and group.project_id.id != RD_project.id:
+                    cross_project_duplicate_ids.append(id)
                 elif duplicate_id:
                     _logger.warning('Problem: duplicate: %s,%s', id, duplicate_id)
 
@@ -228,7 +228,7 @@ def migrate(cr, version):
     progress.finish()
 
     _logger.info('Cleaning cross project duplicates')
-    env['runbot.build'].browse(cross_project_duplicate_ids).write({'local_state': 'done', 'duplicate_id': False})
+    cr.execute("UPDATE runbot_build SET local_state='done', duplicate_id=NULL WHERE id IN %s", (tuple(cross_project_duplicate_ids), ))
 
     _logger.info('Creating params')
     counter = 0

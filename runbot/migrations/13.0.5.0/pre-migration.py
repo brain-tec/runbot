@@ -10,4 +10,6 @@ def migrate(cr, version):
     # Fix duplicate problems
     cr.execute("UPDATE runbot_build SET duplicate_id = null WHERE duplicate_id > id")
     cr.execute("UPDATE runbot_build SET local_state='done' WHERE duplicate_id IS NULL AND local_state = 'duplicate';")
+    # Remove builds without a repo
+    cr.execute("DELETE FROM runbot_build WHERE repo_id IS NULL")
     return
