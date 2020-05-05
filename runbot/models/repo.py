@@ -96,7 +96,7 @@ class RepoGroup(models.Model):
     #runbot
     #   -odoo/runbot
 
-class RunbotRepo(models.Model):
+class Repo(models.Model):
 
     _name = "runbot.repo"
     _description = "Repo"

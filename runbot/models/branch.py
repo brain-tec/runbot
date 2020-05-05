@@ -9,7 +9,7 @@ from odoo.osv import expression
 _logger = logging.getLogger(__name__)
 
 
-class runbot_branch(models.Model):
+class Branch(models.Model):
     _name = "runbot.branch"
     _description = "Branch"
     _order = 'name'
