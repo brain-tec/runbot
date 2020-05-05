@@ -780,7 +780,7 @@ class RunbotRepo(models.Model):
             cannot_be_deleted_builds = self.env['runbot.build'].search([('host', '=', fqdn()), ('local_state', 'not in', ('done', 'duplicate'))])
             cannot_be_deleted_path = set()
             for build in cannot_be_deleted_builds:
-                for commit in build.commit_ids:
+                for commit in build.build_commit_ids:
                     cannot_be_deleted_path.add(commit._source_path())
 
             to_delete = set()

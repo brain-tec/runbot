@@ -120,7 +120,7 @@
                                 <t t-if="build.description">
                                   <b>Description:</b> <t t-raw="build.md_description"/><br/>
                                 </t>
-                                <t t-foreach="build.params_id.sudo().commit_ids" t-as="build_commit">
+                                <t t-foreach="build.params_id.sudo().build_commit_ids" t-as="build_commit">
                                   <b>Commit:</b> <a t-attf-href="{{build_commit.git_url}}"><t t-esc="build_commit.commit_id.dname"/></a>
                                   <t t-if="build_commit.match_type in ('default', 'pr_target', 'prefix') "> from base branch<br/></t>
                                   <div t-else="" class="ml-3">

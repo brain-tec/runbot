@@ -284,7 +284,7 @@ def migrate(cr, version):
                 #'trigger_id': triggers[repo_to_group[repo_id].id].id,
                 'config_data': config_data,
                 'commit_path_mode':commit_path_mode,
-                'commit_ids': [(0, 0, values) for values in build_commit_ids_create_values]
+                'build_commit_ids': [(0, 0, values) for values in build_commit_ids_create_values]
             })
             existing[params.fingerprint] = params
             cr.execute('UPDATE runbot_build SET params_id=%s WHERE id=%s OR duplicate_id = %s', (params.id, id, id))

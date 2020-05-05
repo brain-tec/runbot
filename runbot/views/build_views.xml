@@ -10,7 +10,7 @@
                         <field name="config_data"/>
                         <field name="version_id"/>
                         <field name="extra_params"/>
-                        <field name="commit_ids">
+                        <field name="build_commit_ids">
                             <tree>
                                 <field name="commit_id"/>
                                 <field name="match_type"/>
@@ -27,7 +27,7 @@
             <tree string="Build params">
                 <field name="config_id"/>
                 <field name="version_id"/>
-                <field name="commit_ids"/>
+                <field name="build_commit_ids"/>
             </tree>
         </field>
     </record>

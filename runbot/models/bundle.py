@@ -33,7 +33,7 @@ class Version(models.Model):
 
 class Project(models.Model):
     _name = 'runbot.project'
-    _description = 'Category'
+    _description = 'Project'
 
     name = fields.Char('Category name', required=True, unique=True, help="Name of the base branch")
     trigger_ids = fields.One2many('runbot.trigger', 'project_id', string='Triggers', required=True, unique=True, help="Name of the base branch")

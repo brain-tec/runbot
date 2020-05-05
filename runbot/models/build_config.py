@@ -426,7 +426,7 @@ class ConfigStep(models.Model):
         cmd.finals.append(['pg_dump', db_name, '>', sql_dest])
         cmd.finals.append(['cp', '-r', filestore_path, filestore_dest])
         cmd.finals.append(['cd', dump_dir, '&&', 'zip', '-rmq9', zip_path, '*'])
-        infos = '{\n    "db_name": "%s",\n    "build_id": %s,\n    "shas": [%s]\n}' % (db_name, build.id, ', '.join(['"%s"' % commit for commit in build.commit_ids]))
+        infos = '{\n    "db_name": "%s",\n    "build_id": %s,\n    "shas": [%s]\n}' % (db_name, build.id, ', '.join(['"%s"' % commit for commit in build.build_commit_ids]))
         build.write_file('logs/%s/info.json' % db_name, infos)
 
         if self.flamegraph:
@@ -485,7 +485,7 @@ class ConfigStep(models.Model):
 
     def _coverage_params(self, build, modules_to_install):
         pattern_to_omit = set()
-        for commit in build.commit_ids:
+        for commit in build.build_commit_ids:
             docker_source_folder = build._docker_source_folder(commit)
             for manifest_file in commit.repo.manifest_files.split(','):
                 pattern_to_omit.add('*%s' % manifest_file)

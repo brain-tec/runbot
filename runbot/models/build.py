@@ -43,7 +43,7 @@ COPY_WHITELIST = [
     "build_type",
     "parent_id",
     "hidden",
-    "commit_ids",
+    "build_commit_ids",
     "config_id",
     "orphan_result",
     "commit_path_mode",
@@ -61,7 +61,7 @@ class BuildParameters(models.Model):
 
     # on param or on build?
     # execution parametter
-    commit_ids = fields.One2many('runbot.build.commit', 'params_id', copy=True)
+    build_commit_ids = fields.One2many('runbot.build.commit', 'params_id', copy=True)
     version_id = fields.Many2one('runbot.version', required=True, index=True)
     project_id = fields.Many2one('runbot.project', required=True)  # for access rights
     category = fields.Char('Category', index=True) # normal vs nightly vs weekly, ...
@@ -84,7 +84,7 @@ class BuildParameters(models.Model):
 
     fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)
 
-    @api.depends('version_id', 'project_id', 'extra_params', 'config_id', 'config_data', 'modules', 'commit_path_mode', 'commit_ids', 'builds_reference_ids')
+    @api.depends('version_id', 'project_id', 'extra_params', 'config_id', 'config_data', 'modules', 'commit_path_mode', 'build_commit_ids', 'builds_reference_ids')
     def _compute_fingerprint(self):
         for param in self:
             cleaned_vals = {
@@ -95,7 +95,7 @@ class BuildParameters(models.Model):
                 'config_data': param.config_data.dict,
                 'modules': param.modules or '',
                 'commit_path_mode': param.commit_path_mode,
-                'commit_ids': sorted(param.commit_ids.commit_id.ids),
+                'build_commit_ids': sorted(param.build_commit_ids.commit_id.ids),
                 'builds_reference_ids': sorted(param.builds_reference_ids.build_id.ids),
             }
             param.fingerprint = hashlib.sha256(str(cleaned_vals).encode('utf8')).hexdigest()
@@ -326,7 +326,7 @@ class BuildResults(models.Model):
         repo = build_id.repo_id
         dep_create_vals = []
         build_id._log('create', 'Build created') # mainly usefull to log creation time
-        if not vals.get('commit_ids'):
+        if not vals.get('build_commit_ids'):
             params = build_id._get_params() # calling git show, dont call that if not usefull.
             for extra_repo in repo.dependency_ids:
                 repo_name = extra_repo.short_name
@@ -407,7 +407,7 @@ class BuildResults(models.Model):
         #        # maybe update duplicate priority if needed
 
         docker_source_folders = set()
-        for commit in build_id.commit_ids:
+        for commit in build_id.build_commit_ids:
             docker_source_folder = build_id._docker_source_folder(commit)
             if docker_source_folder in docker_source_folders:
                 extra_info['commit_path_mode'] = 'rep_sha'
@@ -871,7 +871,7 @@ class BuildResults(models.Model):
         self.ensure_one()  # will raise exception if hash not found, we don't want to fail for all build.
         # checkout branch
         exports = {}
-        for commit in commits or self.commit_ids:
+        for commit in commits or self.build_commit_ids:
             build_export_path = self._docker_source_folder(commit)
             if build_export_path in exports:
                 self._log('_checkout', 'Multiple repo have same export path in build, some source may be missing for %s' % build_export_path, level='ERROR')
@@ -882,7 +882,7 @@ class BuildResults(models.Model):
     def _get_repo_available_modules(self, commits=None):
         available_modules = []
         repo_modules = []
-        for commit in commits or self.commit_ids:
+        for commit in commits or self.build_commit_ids:
             for (addons_path, module, manifest_file_name) in self._get_available_modules(commit):
                 if commit.repo == self.repo_id:
                     repo_modules.append(module)
@@ -1002,20 +1002,20 @@ class BuildResults(models.Model):
 
     def _get_all_commit(self):
         # TODO replace by runbot.commit
-        return [OldComit(self.repo_id, self.name)] + [OldComit(dep._get_repo(), dep.dependency_hash) for dep in self.commit_ids]
+        return [OldComit(self.repo_id, self.name)] + [OldComit(dep._get_repo(), dep.dependency_hash) for dep in self.build_commit_ids]
 
     def _get_server_commit(self, commits=None):
         """
         returns a Commit() of the first repo containing server files found in commits or in build commits
         the commits param is not used in code base but could be usefull for jobs and crons
         """
-        for commit in (commits or self.commit_ids):
+        for commit in (commits or self.build_commit_ids):
             if commit.repo.server_files:
                 return commit
         raise ValidationError('No repo found with defined server_files')
 
     def _get_addons_path(self, commits=None):
-        for commit in (commits or self.commit_ids):
+        for commit in (commits or self.build_commit_ids):
             source_path = self._docker_source_folder(commit)
             for addons_path in (commit.repo.addons_paths or '').split(','):
                 if os.path.isdir(commit._source_path(addons_path)):
@@ -1039,7 +1039,7 @@ class BuildResults(models.Model):
         python_params = python_params or []
         py_version = py_version if py_version is not None else build._get_py_version()
         pres = []
-        for commit in self.commit_ids:
+        for commit in self.build_commit_ids:
             if os.path.isfile(commit._source_path('requirements.txt')):
                 repo_dir = self._docker_source_folder(commit)
                 requirement_path = os.path.join(repo_dir, 'requirements.txt')
