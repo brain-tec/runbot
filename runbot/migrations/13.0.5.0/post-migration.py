@@ -253,7 +253,7 @@ def migrate(cr, version):
             SELECT
             id, branch_id, repo_id, extra_params, config_id, config_data, commit_path_mode
             FROM runbot_build WHERE duplicate_id IS NULL ORDER BY id asc LIMIT %s OFFSET %s""", (batch_size, offset))
-        
+
         for id, branch_id, repo_id, extra_params, config_id, config_data, commit_path_mode in cr.fetchall():
 
             build_commit_ids_create_values = [
@@ -340,7 +340,7 @@ def migrate(cr, version):
                     # to fix: nightly will be in the same batch of the previous normal one. If config_id is diffrent, create batch?
                     # possible fix: max create_date diff
                     batch = bundle.last_batch
-                    batch_commits = batch.bundle_commit_ids.mapped('commit_id')
+                    batch_commits = batch.batch_commit_ids.mapped('commit_id')
                     batch_group_repos_ids = batch_commits.mapped('repo_group_id').ids
                     for commit in batch_commits:
                         repo_group_id = commit.repo_group_id.id

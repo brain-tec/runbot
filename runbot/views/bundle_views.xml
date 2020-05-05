@@ -32,7 +32,7 @@
                     <field name="batch_ids">
                         <tree>
                             <field name="state"/>
-                            <field name="bundle_commit_ids"/>
+                            <field name="batch_commit_ids"/>
                             <field name="slot_ids"/>
                         </tree>
                     </field>
@@ -58,7 +58,7 @@
                     <field name="last_update"/>
                     <field name="bundle_id"/>
                     <field name="state"/>
-                    <field name="bundle_commit_ids">
+                    <field name="batch_commit_ids">
                         <tree>
                             <field name="commit_id"/>
                             <field name="match_type"/>
@@ -106,7 +106,7 @@
         <field name="view_mode">tree,form</field>
     </record>
     <record id="action_bundle_batch" model="ir.actions.act_window">
-        <field name="name">Instances</field>
+        <field name="name">Batches</field>
         <field name="type">ir.actions.act_window</field>
         <field name="res_model">runbot.batch</field>
         <field name="view_mode">tree,form</field>

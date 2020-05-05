@@ -77,7 +77,6 @@ class Runbot(Controller):
         context.update({'message': request.env['ir.config_parameter'].sudo().get_param('runbot.runbot_message')})
         return request.render('runbot.bundles%s' % mode, context) # todo remove mode hack
 
-
     @route([
         '/runbot/bundle/<model("runbot.bundle"):bundle>',
         '/runbot/bundle/<model("runbot.bundle"):bundle>/page/<int:page>'
@@ -106,7 +105,7 @@ class Runbot(Controller):
         return request.render('runbot.bundle', context)
 
 
-    @route(['/runbot/batch/<model("runbot.bundle.batch"):batch>'], website=True, auth='public', type='http')
+    @route(['/runbot/batch/<model("runbot.batch"):batch>'], website=True, auth='public', type='http')
     def batch(self, batch=None, more=False, **kwargs):
         context = {
             'batch': batch,
@@ -158,7 +157,7 @@ class Runbot(Controller):
 
     @route(['/runbot/quick_connect/<model("runbot.branch"):branch>'], type='http', auth="public", website=True)
     def fast_launch(self, branch, **post):
-        """Connect to the running Odoo batch"""
+        """Connect to the running Odoo instance"""
         Build = request.env['runbot.build']
         domain = [('branch_id', '=', branch.id), ('config_id', '=', branch.config_id.id)]
 

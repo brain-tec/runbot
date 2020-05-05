@@ -31,7 +31,7 @@ class Version(models.Model):
                 # max version number with this format: 99.99
                 version.number = '.'.join([elem.zfill(2) for elem in re.sub(r'[^0-9\.]', '', version.name).split('.')])
 
-class BundleCategory(models.Model):
+class Project(models.Model):
     _name = 'runbot.project'
     _description = 'Category'
 
@@ -167,13 +167,13 @@ class Bundle(models.Model):
         return None
 
 
-class BundleInstance(models.Model):
+class Batch(models.Model):
     _name = "runbot.batch"
     _description = "Bundle batch"
 
     last_update = fields.Datetime('Last ref update')
     bundle_id = fields.Many2one('runbot.bundle', required=True, index=True)
-    bundle_commit_ids = fields.One2many('runbot.batch.commit', 'batch_id')
+    batch_commit_ids = fields.One2many('runbot.batch.commit', 'batch_id')
     slot_ids = fields.One2many('runbot.batch.slot', 'batch_id')
     state = fields.Selection([('preparing', 'Preparing'), ('ready', 'Ready'), ('complete', 'Complete'), ('done', 'Done')])
     hidden = fields.Boolean('Hidden', default=False)
@@ -198,7 +198,7 @@ class BundleInstance(models.Model):
     def _add_commit(self, commit):
         # if not the same hash for repo_group:
         self.last_update = fields.Datetime.now()
-        for bundle_commit in self.bundle_commit_ids:
+        for bundle_commit in self.batch_commit_ids:
             # case 1: a commit already exists for the repo (pr+branch, or fast push)
             if bundle_commit.commit_id.repo_group_id == commit.repo_group_id:
                 bundle_commit.commit_id = commit
@@ -214,7 +214,7 @@ class BundleInstance(models.Model):
         #  For all commit on real branches:
         self.state = 'ready'
         triggers = self.env['runbot.trigger'].search([('project_id', '=', self.bundle_id.project_id)])
-        pushed_repo_groups = self.bundle_commit_ids.mapped('repos_group_ids') | self.bundle_commit_ids.mapped('dependency_ids')
+        pushed_repo_groups = self.batch_commit_ids.mapped('repos_group_ids') | self.batch_commit_ids.mapped('dependency_ids')
 
         #  save commit state for all trigger dependencies and repo
         trigger_repos_groups = triggers.mapped('repo_group_id')
@@ -232,7 +232,7 @@ class BundleInstance(models.Model):
             # todo execute triggers
 
 
-class BundleInstanceCommit(models.Model):
+class BatchCommit(models.Model):
     _name = 'runbot.batch.commit'
     _description = "Bundle batch commit"
 
@@ -243,7 +243,7 @@ class BundleInstanceCommit(models.Model):
     match_type = fields.Selection([('new', 'New head of branch'), ('head', 'Head of branch'), ('default', 'Found on base branch')])  # HEAD, DEFAULT
 
 
-class BundleInstanceSlot(models.Model):
+class BatchSlot(models.Model):
     _name = 'runbot.batch.slot'
     _description = 'Link between a bundle batch and a build'
 

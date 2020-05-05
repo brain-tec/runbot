@@ -15,7 +15,7 @@
                     <div>
                         <table class="table table-condensed table-responsive table-stripped">
                             <tr><td>Version</td><td t-esc="bundle.version_id.name"/></tr>
-                            <tr><td>branches</td><td>
+                            <tr><td>Branches</td><td>
                                 <div t-foreach="bundle.branch_ids.sorted(key=lambda b: (b.repo_id.sequence,b.id))" t-as="branch"><small>
                                     <a t-att-href="branch.branch_url" t-esc="branch.dname"/>
                                     <a t-if="more" class="fa fa-cog" t-attf-href="/web/#id={{branch.id}}&amp;view_type=form&amp;model=runbot.branch" target="new"/>
@@ -43,7 +43,7 @@
                                 <td t-esc="batch.last_update" t-if="more"></td>
                                 <td t-esc="batch.state" t-if="more"></td>
                                 <td> 
-                                    <t t-foreach="batch.bundle_commit_ids" t-as="bundle_commit">
+                                    <t t-foreach="batch.batch_commit_ids" t-as="bundle_commit">
                                         <a t-attf-href="/runbot/commit/#{bundle_commit.commit_id.id}">
                                             <span class="label" t-esc="bundle_commit.commit_id.dname"/>
                                         </a>
@@ -51,7 +51,7 @@
                                 </td>
                                 <t t-if="batch.state=='preparing'"><t t-set="klass">default</t></t>
                                 <t t-if="batch.state=='ready'"><t t-set="klass">success</t></t>
-                                <td t-attf-class="bg-{{klass}}-light" style="width:22%">
+                                <td t-attf-class="bg-{{klass}}-light">
                                     <t t-foreach="batch.slot_ids" t-as="slot">
                                         <t t-call="runbot.slot_button"/>
                                     </t>
@@ -66,11 +66,32 @@
 </template>
 <template id="runbot.batch">
   <t t-call='website.layout'>
-        <div class="container-fluid">
-            <div class="row">
-               
-            </div>
-        </div>
+          <table class="table table-condensed table-responsive table-stripped">
+            <tr><td>Project</td><td t-esc="batch.bundle_id.name"/></tr>
+            <tr><td>State</td><td t-esc="batch.state"/></tr>
+            <tr><td>Create date</td><td t-esc="batch.create_date"/></tr>
+            <tr><td>Last update</td><td><t t-esc="batch.last_update"/>(<t t-esc="batch.last_update - batch.create_date"/>)</td></tr>
+            <tr><td>Commits</td><td>
+              <div t-foreach="batch.batch_commit_ids" t-as="bundle_commit">
+                <t t-set="commit" t-value="bundle_commit.commit_id"/>
+                <a t-attf-href="/runbot/commit/#{commit.id}">
+                    <span class="label" t-esc="commit.dname"/>
+                </a>
+                <span t-esc="commit.subject"/><br/>
+                Author: <span t-esc="commit.author"/> (<span t-esc="commit.author_email"/>)<br/>
+                <t t-if="commit.author != commit.committer">
+                    Committer: <span t-esc="commit.committer"/>(<span t-esc="commit.author_email"/>)<br/>
+                </t>
+                Commit date: <span t-esc="commit.date"/><br/>
+              </div>
+            </td></tr>
+            <tr><td>Slots</td><td>
+                <t t-foreach="batch.slot_ids" t-as="slot">
+                    <t t-call="runbot.slot_button"/>
+                </t>
+            </td></tr>
+        </table>
+        <div>TODO: Links, rebuild, wizard, launch empty slots, ...</div>
     </t>
 </template>
 </data>
