@@ -32,7 +32,6 @@
                 <field name="name"/>
                 <field name="project_id"/>
                 <field name="modules"/>
-                <field name="modules_auto"/>
                 <field name="group_ids"  widget="many2many_tags"/>
                 <field name="server_files"/>
                 <field name="manifest_files"/>

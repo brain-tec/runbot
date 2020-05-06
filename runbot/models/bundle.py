@@ -119,12 +119,13 @@ class Bundle(models.Model):
             for bundle in self:
                 self.env['runbot.bundle'].search([('name', '=like', '%s%%' % bundle.name)])._compute_closest_base()
 
-    def _get(self, name, project_id):
-        bundle = self.search([('name', '=', name), ('project_id', '=', project_id)])
+    def _get(self, name, project):
+        project.ensure_one()
+        bundle = self.search([('name', '=', name), ('project_id', '=', project.id)])
         if not bundle:
             self.create({
                 'name': name,
-                'project_id': project_id,
+                'project_id': project,
             })
         return bundle
 
@@ -151,10 +152,11 @@ class Bundle(models.Model):
     def _get_preparing_batch(self):
         # find last bundle batch or create one
         if self.last_batch.state != preparing:
+            self.last_batch._skip()
             preparing = self.env['runbot.batch'].create({
                 'last_update': fields.Datetime.Now(),
-                'bundle_id': self,
-                'state': 'creating',
+                'bundle_id': self.id,
+                'state': 'preparing',
             })
             self.last_batch = preparing
         return self.last_batch
@@ -195,20 +197,28 @@ class Batch(models.Model):
             threshold=2.1,
             add_direction=True, locale='en'
         )
-    def _add_commit(self, commit):
+
+    def _new_commit(self, commit, repo):
         # if not the same hash for repo_group:
         self.last_update = fields.Datetime.now()
-        for bundle_commit in self.batch_commit_ids:
+        for batch_commit in self.batch_commit_ids:
             # case 1: a commit already exists for the repo (pr+branch, or fast push)
-            if bundle_commit.commit_id.repo_group_id == commit.repo_group_id:
-                bundle_commit.commit_id = commit
+            if batch_commit.commit_id.repo_group_id == commit.repo_group_id:
+                batch_commit.commit_id = commit
+                batch_commit.repo_id = repo
                 break
         else:
             self.env['runbot.batch.commit'].create({
                 'commit_id': commit.id,
                 'batch_id': self.id,
-                'match_type': 'head'
+                'match_type': 'head',
+                'repo_id': repo.id,
             })
+
+    def _skip(self):
+        if not self or self.sticky:
+            return
+        # foreach pending build, if build is not in another batch, skip.
 
     def _start(self):
         #  For all commit on real branches:
@@ -238,7 +248,6 @@ class BatchCommit(models.Model):
 
     commit_id = fields.Many2one('runbot.commit', index=True)
     repo_id = fields.Many2one('runbot.repo', string='Repo') # discovered in repo
-    # ??? base_commit_id = fields.Many2one('runbot.commit')
     batch_id = fields.Many2one('runbot.batch', index=True)
     match_type = fields.Selection([('new', 'New head of branch'), ('head', 'Head of branch'), ('default', 'Found on base branch')])  # HEAD, DEFAULT
 

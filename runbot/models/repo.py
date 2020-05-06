@@ -41,10 +41,11 @@ class RepoTrigger(models.Model):
     _description = 'Triggers'
 
     name = fields.Char("Repo trigger descriptions")
-    project_id = fields.Many2one('runbot.project')  # main/security/runbot
+    project_id = fields.Many2one('runbot.project', required=True)  # main/security/runbot
     repos_group_ids = fields.Many2many('runbot.repo.group', relation='runbot_trigger_triggers', string="Triggers")
     dependency_ids = fields.Many2many('runbot.repo.group', relation='runbot_trigger_dependencies', string="Dependencies")
     config_id = fields.Many2one('runbot.build.config', 'Config')
+    # TODO add repo_module_id to replace modules_auto (many2many or option to only use trigger)
 
 
 class RepoGroup(models.Model):
@@ -59,16 +60,11 @@ class RepoGroup(models.Model):
     #main = fields.Many2one('runbot.repo', "Main repo")
     #main_regex = fields.Char('regex to define if a branch is a version or not')
     repo_ids = fields.One2many('runbot.repo', 'repo_group_id', "Repo and forks")
-    project_id = fields.Many2one('runbot.project',
+    project_id = fields.Many2one('runbot.project', required=True,
         help="Default bundle project to use when pushing on this repos")
     # -> not verry usefull, remove it? (iterate on projects or contraints triggers:
     # all trigger where a repo is used must be in the same project.
     modules = fields.Char("Modules to install", help="Comma-separated list of modules to install and test.")
-    modules_auto = fields.Selection([('none', 'None (only explicit modules list)'),
-                                     ('repo', 'Repository modules (excluding dependencies)'),
-                                     ('all', 'All modules (including dependencies)')],
-                                    default='all',
-                                    string="Other modules to install automatically")
     group_ids = fields.Many2many('res.groups', string='Limited to groups')
     server_files = fields.Char('Server files', help='Comma separated list of possible server files')  # odoo-bin,openerp-server,openerp-server.py
     manifest_files = fields.Char('Manifest files', help='Comma separated list of possible manifest files', default='__manifest__.py')
@@ -377,11 +373,12 @@ class Repo(models.Model):
             # create build (and mark previous builds as skipped) if not found
             if branch.head_name != sha: # new push on branch
                 _logger.debug('repo %s branch %s new commit found: %s', self.name, branch.name, sha)
-                commit = self.env['runbot.commit'].search([('name', '=', sha), ('repo_id', '=', self.id)])
+                repo_group_id = self.repo_group_id.id
+                commit = self.env['runbot.commit'].search([('name', '=', sha), ('repo_group_id', '=', repo_group_id)])
                 if not commit:
                     commit = self.env['runbot.commit'].create({
                         'name': sha,
-                        'repo_id': self.id,
+                        'repo_group_id': repo_group_id,
                         'author': author,
                         'author_email': author_email,
                         'committer': committer,
@@ -390,21 +387,15 @@ class Repo(models.Model):
                         'date': dateutil.parser.parse(date[:19]),
                     })
                 branch.head = commit
+
                 bundle = branch.bundle_id
                 if bundle.no_buld:
                     continue
-                # TODO check  if repo group of branch is a trigger
 
+                # TODO check  if repo group of branch is a trigger
                 # todo move following logic to bundle ? bundle._notify_new_commit()
                 bundle_batch = bundle._get_preparing_batch()
-                bundle_batch._add_commit(commit)
-
-                if not bundle.sticky: # todo move this logic to bundle?
-                    # pending builds are skipped as we have a new ref
-                    builds_to_skip = self.env['runbot.build'].search(
-                        [('bundle_id', '=', bundle.id), ('local_state', '=', 'pending')],
-                        order='sequence asc')
-                    builds_to_skip._skip(reason='New ref found')
+                bundle_batch._new_commit(commit, self)
 
     def _create_pending_builds(self):
         """ Find new commits in physical repos"""

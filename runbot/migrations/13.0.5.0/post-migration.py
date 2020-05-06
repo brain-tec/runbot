@@ -77,7 +77,7 @@ def migrate(cr, version):
                 'project_id': project.id,
                 #'main': id, # older repo should be the main, not sur it is usefull
                 'modules': modules,
-                'modules_auto': modules_auto,
+                #'modules_auto': modules_auto,
                 'group_ids': [(4, group_id) for group_id in group_ids],
                 'server_files': server_files,
                 'manifest_files': manifest_files,

@@ -118,7 +118,7 @@ class BuildParameters(models.Model):
 
 
 
-class BuildResults(models.Model):
+class BuildResult(models.Model):
     # remove duplicate management
     # instead, link between bundle_batch and build
     # kill -> only available from bundle.
@@ -309,7 +309,7 @@ class BuildResults(models.Model):
         return [values]
 
     def copy(self, default=None):
-        return super(BuildResults, self.with_context(force_rebuild=True)).copy(default)
+        return super(BuildResult, self.with_context(force_rebuild=True)).copy(default)
 
 
     @api.model_create_single
@@ -317,7 +317,7 @@ class BuildResults(models.Model):
         if not 'config_id' in vals:
             branch = self.env['runbot.branch'].browse(vals.get('branch_id'))
             vals['config_id'] = branch.config_id.id
-        build_id = super(BuildResults, self).create(vals)
+        build_id = super(BuildResult, self).create(vals)
         extra_info = {}
         if not build_id.sequence:
             extra_info['sequence'] = build_id.id
@@ -407,8 +407,8 @@ class BuildResults(models.Model):
         #        # maybe update duplicate priority if needed
 
         docker_source_folders = set()
-        for commit in build_id.build_commit_ids:
-            docker_source_folder = build_id._docker_source_folder(commit)
+        for build_commit in build_id.build_commit_ids:
+            docker_source_folder = build_id._docker_source_folder(build_commit.commit_id)
             if docker_source_folder in docker_source_folders:
                 extra_info['commit_path_mode'] = 'rep_sha'
                 continue
@@ -430,7 +430,7 @@ class BuildResults(models.Model):
         local_result = values.get('local_result')
         for build in self:
             assert not local_result or local_result == self._get_worst_result([build.local_result, local_result])  # dont write ok on a warn/error build
-        res = super(BuildResults, self).write(values)
+        res = super(BuildResult, self).write(values)
         if 'log_counter' in values: # not 100% usefull but more correct ( see test_ir_logging)
             self.flush()
         return res
@@ -851,14 +851,6 @@ class BuildResults(models.Model):
             return commit._source_path('odoo', *path)
         return commit._source_path('openerp', *path)
 
-    def _get_available_modules(self, commit):
-        for manifest_file_name in commit.repo.manifest_files.split(','):  # '__manifest__.py' '__openerp__.py'
-            for addons_path in (commit.repo.addons_paths or '').split(','):  # '' 'addons' 'odoo/addons'
-                sep = os.path.join(addons_path, '*')
-                for manifest_path in glob.glob(commit._source_path(sep, manifest_file_name)):
-                    module = os.path.basename(os.path.dirname(manifest_path))
-                    yield (addons_path, module, manifest_file_name)
-
     def _docker_source_folder(self, commit):
         # in case some build have commits with the same repo name (ex: foo/bar, foo-ent/bar)
         # it can be usefull to uniquify commit export path using hash
@@ -871,7 +863,7 @@ class BuildResults(models.Model):
         self.ensure_one()  # will raise exception if hash not found, we don't want to fail for all build.
         # checkout branch
         exports = {}
-        for commit in commits or self.build_commit_ids:
+        for commit in commits or self.build_commit_ids.mapped('commit_ids'):
             build_export_path = self._docker_source_folder(commit)
             if build_export_path in exports:
                 self._log('_checkout', 'Multiple repo have same export path in build, some source may be missing for %s' % build_export_path, level='ERROR')
@@ -879,13 +871,11 @@ class BuildResults(models.Model):
             exports[build_export_path] = commit.export()
         return exports
 
-    def _get_repo_available_modules(self, commits=None):
-        available_modules = []
-        repo_modules = []
-        for commit in commits or self.build_commit_ids:
-            for (addons_path, module, manifest_file_name) in self._get_available_modules(commit):
-                if commit.repo == self.repo_id:
-                    repo_modules.append(module)
+    def _get_available_modules(self):
+        available_modules = defaultdict(list)
+        #repo_modules = []
+        for commit in self.build_commit_ids.mapped('commit_ids'):
+            for (addons_path, module, manifest_file_name) in commit._get_available_modules():
                 if module in available_modules:
                     self._log(
                         'Building environment',
@@ -893,34 +883,30 @@ class BuildResults(models.Model):
                         level='WARNING'
                     )
                 else:
-                    available_modules.append(module)
-        return repo_modules, available_modules
+                    available_modules[commit.repo_group_id].append(module)
+        #return repo_modules, available_modules
+        return available_modules
 
     def _get_modules_to_test(self, commits=None, modules_patterns=''):
-        self.ensure_one()  # will raise exception if hash not found, we don't want to fail for all build.
+        self.ensure_one()
 
-        # checkout branch
-        repo_modules, available_modules = self._get_repo_available_modules(commits=commits)
+        def filter_patterns(patterns, default, all):
+            patterns_list = (patterns or '').split(',')
+            patterns_list = [p.strip() for p in patterns_list]
+            for pat in patterns_list:
+                if pat.startswith('-'):
+                    pat = pat.strip('- ')
+                    default -= {mod for mod in default if fnmatch.fnmatch(mod, pat)}
+                else:
+                    default |= {mod for mod in all if fnmatch.fnmatch(mod, pat)}
 
-        patterns_list = []
-        # TODO FIXME merge repo_group.modules from trigger on params
-        for pats in [self.params_id.modules, modules_patterns]:
-            patterns_list += [p.strip() for p in (pats or '').split(',')]
+        available_modules = []
+        modules_to_install = set()
+        for repo_group, module_list in self._get_available_modules().items():
+            available_modules += module_list
+            modules_to_install |= filter_patterns(repo_group.modules , set(), module_list)
 
-        if self.repo_id.modules_auto == 'all':
-            default_repo_modules = available_modules
-        elif self.repo_id.modules_auto == 'repo':
-            default_repo_modules = repo_modules
-        else:
-            default_repo_modules = []
-
-        modules_to_install = set(default_repo_modules)
-        for pat in patterns_list:
-            if pat.startswith('-'):
-                pat = pat.strip('- ')
-                modules_to_install -= {mod for mod in modules_to_install if fnmatch.fnmatch(mod, pat)}
-            else:
-                modules_to_install |= {mod for mod in available_modules if fnmatch.fnmatch(mod, pat)}
+        modules_to_install = filter_patterns(modules_patterns, modules_to_install, available_modules)
 
         return sorted(modules_to_install)
 
@@ -1001,21 +987,20 @@ class BuildResults(models.Model):
             self.requested_action = 'wake_up'
 
     def _get_all_commit(self):
-        # TODO replace by runbot.commit
-        return [OldComit(self.repo_id, self.name)] + [OldComit(dep._get_repo(), dep.dependency_hash) for dep in self.build_commit_ids]
+        return self.build_commit_ids.mapped('commit_id') # todo remove
 
     def _get_server_commit(self, commits=None):
         """
         returns a Commit() of the first repo containing server files found in commits or in build commits
         the commits param is not used in code base but could be usefull for jobs and crons
         """
-        for commit in (commits or self.build_commit_ids):
-            if commit.repo.server_files:
+        for commit in (commits or self.build_commit_ids.mapped('commit_id')):
+            if commit.repo_group_id.server_files:
                 return commit
         raise ValidationError('No repo found with defined server_files')
 
     def _get_addons_path(self, commits=None):
-        for commit in (commits or self.build_commit_ids):
+        for commit in (commits or self.build_commit_ids.mapped('commit_id')):
             source_path = self._docker_source_folder(commit)
             for addons_path in (commit.repo.addons_paths or '').split(','):
                 if os.path.isdir(commit._source_path(addons_path)):
@@ -1039,8 +1024,8 @@ class BuildResults(models.Model):
         python_params = python_params or []
         py_version = py_version if py_version is not None else build._get_py_version()
         pres = []
-        for commit in self.build_commit_ids:
-            if os.path.isfile(commit._source_path('requirements.txt')):
+        for commit in self.build_commit_ids.mapped('commit_id'):
+            if os.path.isfile(commit._source_path('requirements.txt')): # this is a change I think
                 repo_dir = self._docker_source_folder(commit)
                 requirement_path = os.path.join(repo_dir, 'requirements.txt')
                 pres.append(['sudo', 'pip%s' % py_version, 'install', '-r', '%s' % requirement_path])

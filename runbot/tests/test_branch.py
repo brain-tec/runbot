@@ -11,7 +11,7 @@ class Test_Branch(RunbotCase):
         self.repo = Repo.create({'name': 'bla@example.com:foo/bar', 'token': '123'})
         self.Branch = self.env['runbot.branch']
 
-        #mock_patch = patch('odoo.addons.runbot.models.repo.runbot_repo._github', self._github)
+        #mock_patch = patch('odoo.addons.runbot.models.repo.Repo._github', self._github)
         #mock_patch.start()
         #self.addCleanup(mock_patch.stop)
 
@@ -58,9 +58,9 @@ class TestBranchRelations(RunbotCase):
 
     def setUp(self):
         super(TestBranchRelations, self).setUp()
-
-        self.repo = self.env['runbot.repo'].create({'name': 'bla@example.com:foo/bar'})
-        self.repodev = self.env['runbot.repo'].create({'name': 'bla@example.com:foo-dev/bar', 'duplicate_id':self.repo.id })
+        repo_group = self.env['runbot.repo.group'].create({'name': 'bar'})
+        self.repo = self.env['runbot.repo'].create({'name': 'bla@example.com:foo/bar', 'repo_group_id': repo_group.id})
+        self.repodev = self.env['runbot.repo'].create({'name': 'bla@example.com:foo-dev/bar', 'repo_group_id':repo_group.id })
         self.Branch = self.env['runbot.branch']
 
         def create_sticky(name):

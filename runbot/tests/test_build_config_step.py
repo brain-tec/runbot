@@ -30,8 +30,8 @@ class TestBuildConfigStep(RunbotCase):
             'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
             'port': '1234',
         })
-        self.start_patcher('_local_pg_createdb', 'odoo.addons.runbot.models.build.runbot_build._local_pg_createdb', True)
-        self.start_patcher('_get_py_version', 'odoo.addons.runbot.models.build.runbot_build._get_py_version', 3)
+        self.start_patcher('_local_pg_createdb', 'odoo.addons.runbot.models.build.BuildResult._local_pg_createdb', True)
+        self.start_patcher('_get_py_version', 'odoo.addons.runbot.models.build.BuildResult._get_py_version', 3)
         self.start_patcher('find_patcher', 'odoo.addons.runbot.common.find', 0)
 
     def test_config_step_create_results(self):
@@ -144,7 +144,7 @@ class TestBuildConfigStep(RunbotCase):
         dup_config = config.copy()
         self.assertEqual(dup_config.step_order_ids.mapped('step_id'), config.step_order_ids.mapped('step_id'))
 
-    @patch('odoo.addons.runbot.models.build.runbot_build._checkout')
+    @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
     def test_coverage(self, mock_checkout):
         config_step = self.ConfigStep.create({
             'name': 'coverage',
@@ -163,7 +163,7 @@ class TestBuildConfigStep(RunbotCase):
 
         config_step._run_odoo_install(self.parent_build, 'dev/null/logpath')
 
-    @patch('odoo.addons.runbot.models.build.runbot_build._checkout')
+    @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
     def test_dump(self, mock_checkout):
         config_step = self.ConfigStep.create({
             'name': 'all',
@@ -182,7 +182,7 @@ class TestBuildConfigStep(RunbotCase):
         config_step._run_odoo_install(self.parent_build, 'dev/null/logpath')
 
 
-    @patch('odoo.addons.runbot.models.build.runbot_build._checkout')
+    @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
     def test_install_tags(self, mock_checkout):
         config_step = self.ConfigStep.create({
             'name': 'all',
@@ -217,7 +217,7 @@ class TestBuildConfigStep(RunbotCase):
         config_step._run_odoo_install(self.parent_build, 'dev/null/logpath')
 
 
-    @patch('odoo.addons.runbot.models.build.runbot_build._checkout')
+    @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
     def test_db_name(self, mock_checkout):
         config_step = self.ConfigStep.create({
             'name': 'default',
@@ -245,7 +245,7 @@ class TestBuildConfigStep(RunbotCase):
         self.assertEqual(call_count, 3)
 
 
-    @patch('odoo.addons.runbot.models.build.runbot_build._checkout')
+    @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
     def test_sub_command(self, mock_checkout):
         config_step = self.ConfigStep.create({
             'name': 'default',
@@ -278,7 +278,7 @@ class TestMakeResult(RunbotCase):
         })
 
     @patch('odoo.addons.runbot.models.build_config.os.path.getmtime')
-    @patch('odoo.addons.runbot.models.build.runbot_build._log')
+    @patch('odoo.addons.runbot.models.build.BuildResult._log')
     def test_make_result(self, mock_log, mock_getmtime):
         file_content = """
 Loading stuff

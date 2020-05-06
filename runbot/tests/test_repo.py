@@ -42,7 +42,7 @@ class Test_Repo(RunbotCase):
         local_repo = self.Repo.create({'name': '/path/somewhere/rep.git'})
         self.assertEqual(local_repo.short_name, 'somewhere/rep')
 
-    @patch('odoo.addons.runbot.models.repo.runbot_repo._get_fetch_head_time')
+    @patch('odoo.addons.runbot.models.repo.Repo._get_fetch_head_time')
     def test_repo_create_pending_builds(self, mock_fetch_head_time):
         """ Test that when finding new refs in a repo, the missing branches
         are created and new builds are created in pending state
@@ -75,7 +75,7 @@ class Test_Repo(RunbotCase):
 
         mock_fetch_head_time.side_effect = counter()
 
-        with patch('odoo.addons.runbot.models.repo.runbot_repo._git', new=self.mock_git_helper()):
+        with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
             repo._create_pending_builds()
 
         branch = self.env['runbot.branch'].search([('repo_id', '=', repo.id)])
@@ -97,7 +97,7 @@ class Test_Repo(RunbotCase):
                              'Marc Bidule',
                              '<marc.bidule@somewhere.com>')]
 
-        with patch('odoo.addons.runbot.models.repo.runbot_repo._git', new=self.mock_git_helper()):
+        with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
             other_repo._create_pending_builds()
 
         branch_count = self.env['runbot.branch'].search_count([('repo_id', '=', repo.id)])
@@ -118,7 +118,7 @@ class Test_Repo(RunbotCase):
                              'Marc Bidule',
                              '<marc.bidule@somewhere.com>')]
 
-        with patch('odoo.addons.runbot.models.repo.runbot_repo._git', new=self.mock_git_helper()):
+        with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
             repo._create_pending_builds()
 
         branch_count = self.env['runbot.branch'].search_count([('repo_id', '=', repo.id)])
@@ -137,7 +137,7 @@ class Test_Repo(RunbotCase):
         self.commit_list = first_commit  # branch reseted hard to an old commit
         builds = self.env['runbot.build'].search([('repo_id', '=', repo.id), ('branch_id', '=', branch.id), ('name', '=', 'd0d0caca')])
         self.assertEqual(len(builds), 1)
-        with patch('odoo.addons.runbot.models.repo.runbot_repo._git', new=self.mock_git_helper()):
+        with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
             repo._create_pending_builds()
 
         last_build = self.env['runbot.build'].search([], limit=1)
@@ -145,7 +145,7 @@ class Test_Repo(RunbotCase):
         builds = self.env['runbot.build'].search([('repo_id', '=', repo.id), ('branch_id', '=', branch.id), ('name', '=', 'd0d0caca')])
         self.assertEqual(len(builds), 2)
         # self.assertEqual(last_build.duplicate_id, previous_build) False because previous_build is skipped
-        with patch('odoo.addons.runbot.models.repo.runbot_repo._git', new=self.mock_git_helper()):
+        with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
             other_repo._create_pending_builds()
         builds = self.env['runbot.build'].search([('repo_id', '=', repo.id), ('branch_id', '=', branch.id), ('name', '=', 'd0d0caca')])
         self.assertEqual(len(builds), 2)
@@ -173,7 +173,7 @@ class Test_Repo(RunbotCase):
                                      '<marc.bidule@somewhere.com>'])
         inserted_time = time.time()
         _logger.info('Insert took: %ssec', (inserted_time - start_time))
-        with patch('odoo.addons.runbot.models.repo.runbot_repo._git', new=self.mock_git_helper()):
+        with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
             repo._create_pending_builds()
 
         _logger.info('Create pending builds took: %ssec', (time.time() - inserted_time))
@@ -300,9 +300,9 @@ class Test_Repo_Scheduler(RunbotCase):
             'name': 'refs/head/foo'
         })
 
-    @patch('odoo.addons.runbot.models.build.runbot_build._kill')
-    @patch('odoo.addons.runbot.models.build.runbot_build._schedule')
-    @patch('odoo.addons.runbot.models.build.runbot_build._init_pendings')
+    @patch('odoo.addons.runbot.models.build.BuildResult._kill')
+    @patch('odoo.addons.runbot.models.build.BuildResult._schedule')
+    @patch('odoo.addons.runbot.models.build.BuildResult._init_pendings')
     def test_repo_scheduler(self, mock_init_pendings, mock_schedule, mock_kill):
 
         self.env['ir.config_parameter'].set_param('runbot.runbot_workers', 6)

@@ -17,7 +17,7 @@ class Branch(models.Model):
 
     head = fields.Many2one('runbot.commit', 'Head Commit')
     head_name = fields.Char('Head name', related='head.name', store=True)
-    bundle_id = fields.Many2one('runbot.bundle', 'Bundle', required=True, ondelete='cascade')
+    bundle_id = fields.Many2one('runbot.bundle', 'Bundle', readonly=True, ondelete='cascade')
     repo_id = fields.Many2one('runbot.repo', 'Repository', required=True, ondelete='cascade')
     name = fields.Char('Ref Name', required=True)
     branch_name = fields.Char(compute='_get_branch_infos', string='Branch', readonly=1, store=True)
@@ -242,8 +242,9 @@ class Branch(models.Model):
             coverage_config = self.env.ref('runbot.runbot_build_config_test_coverage', raise_if_not_found=False)
             if coverage_config:
                 vals['config_id'] = coverage_config
-        branch = super(runbot_branch, self).create(vals)
+        branch = super().create(vals)
         branch.bundle_id = self.env['runbot.bundle']._get(self.reference_name, branch.repo_id.repo_group_id.project_id)
+        #note: bundle is created after branch because we need reference_name. Use new? Compute reference another way? or keep bundle_id not required?
 
     def _get_last_coverage_build(self):
         """ Return the last build with a coverage value > 0"""

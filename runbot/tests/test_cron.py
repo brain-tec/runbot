@@ -8,7 +8,7 @@ class Test_Cron(RunbotCase):
 
     def setUp(self):
         super(Test_Cron, self).setUp()
-        self.start_patcher('_get_cron_period', 'odoo.addons.runbot.models.repo.runbot_repo._get_cron_period', 2)
+        self.start_patcher('_get_cron_period', 'odoo.addons.runbot.models.repo.Repo._get_cron_period', 2)
 
     @patch('odoo.addons.runbot.models.repo.config.get')
     def test_cron_period(self, mock_config_get):
@@ -31,8 +31,8 @@ class Test_Cron(RunbotCase):
         ret = self.Repo._cron_fetch_and_build('runbotx.foo.com')
         self.assertEqual(ret, 'Not for me')
 
-    @patch('odoo.addons.runbot.models.repo.runbot_repo._create_pending_builds')
-    @patch('odoo.addons.runbot.models.repo.runbot_repo._update')
+    @patch('odoo.addons.runbot.models.repo.Repo._create_pending_builds')
+    @patch('odoo.addons.runbot.models.repo.Repo._update')
     def test_cron_schedule(self, mock_update, mock_create):
         """ test that cron_fetch_and_schedule do its work """
         self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_update_frequency', 1)
@@ -46,8 +46,8 @@ class Test_Cron(RunbotCase):
 
     @patch('odoo.addons.runbot.models.host.RunboHost._docker_build')
     @patch('odoo.addons.runbot.models.host.RunboHost._bootstrap')
-    @patch('odoo.addons.runbot.models.repo.runbot_repo._reload_nginx')
-    @patch('odoo.addons.runbot.models.repo.runbot_repo._scheduler')
+    @patch('odoo.addons.runbot.models.repo.Repo._reload_nginx')
+    @patch('odoo.addons.runbot.models.repo.Repo._scheduler')
     def test_cron_build(self, mock_scheduler, mock_reload, mock_host_bootstrap, mock_host_docker_build):
         """ test that cron_fetch_and_build do its work """
         hostname = 'host.runbot.com'
