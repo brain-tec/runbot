@@ -46,7 +46,6 @@ class Bundle(models.Model):
     name = fields.Char('Bundle name', required=True, unique=True, help="Name of the base branch")
     project_id = fields.Many2one('runbot.project')
     sticky = fields.Boolean(store=True)
-    is_base = fields.Boolean('Is base')
     version_id = fields.Many2one('runbot.version', 'Version')
     version_number = fields.Char(related='version_id.number', store=True)
     branch_ids = fields.One2many('runbot.branch', 'bundle_id')
@@ -60,6 +59,7 @@ class Bundle(models.Model):
     last_batch = fields.Many2one('runbot.batch', index=True)
     last_batchs = fields.Many2many('runbot.batch', 'Last batchs', compute='_compute_last_batchs')
 
+    is_base = fields.Boolean('Is base')
     base_id = fields.Many2one('runbot.bundle', 'Base bundle', compute='_compute_base_id', store=True)
     defined_base_id = fields.Many2one('runbot.bundle', 'Forced base bundle') # todo add constrains on project
     previous_version_bundle_id = fields.Many2one('runbot.bundle', 'Base bundle', compute='_compute_previous_version_bundle_id', store=True)
@@ -71,9 +71,11 @@ class Bundle(models.Model):
         for bundle in self:
             if bundle.is_base:
                 bundle.base_id = bundle
-            project_id = bundle.project_id.id
+                continue
             if bundle.defined_base_id:
                 bundle.base_id = bundle.defined_base_id
+                continue
+            project_id = bundle.project_id.id
             if project_id in bases_by_project:  # small perf imp for udge bartched
                 base_bundles = bases_by_project[project_id]
             else:
@@ -87,6 +89,14 @@ class Bundle(models.Model):
                     bundle.base_id = candidate
 
     def _compute_previous_version_bundle_id(self):
+        for bundle in self:
+            if not bundle.is_base:
+                bundle.previous_version_bundle_id = bundle.base_id._compute_previous_version_bundle_id
+            else:
+                previous_version = self.env['runbot.version'].search([
+                    ('number', '<', bundle.version_id.version),
+                    ('is_major', '=', True)
+                ], order='number desc', limit=1)
 
     def _init_column(self, column_name):
         if column_name not in ('version_number',):
