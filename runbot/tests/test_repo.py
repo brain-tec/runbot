@@ -255,9 +255,15 @@ class TestRepo(RunbotCase):
         _test_times('runbot.repo.reftime', 'set_ref_time', 'get_ref_time')
 
 
-class Test_Github(TransactionCase):
+class TestGithub(TransactionCase):
     def test_github(self):
         """ Test different github responses or failures"""
+        self.project = self.env['runbot.project'].create({'name': 'Tests'})
+        self.repo_group = self.env['runbot.repo.group'].create({
+            'name': 'bar', 
+            'project_id': self.project.id,
+            'server_files': 'server.py'
+        })
         repo = self.env['runbot.repo'].create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
         self.assertEqual(repo._github('/repos/:owner/:repo/statuses/abcdef', dict(), ignore_errors=True), None, 'A repo without token should return None')
         repo.token = 'abc'

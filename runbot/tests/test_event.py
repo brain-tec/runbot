@@ -8,7 +8,7 @@ class TestIrLogging(RunbotCase):
 
     def setUp(self):
         super(TestIrLogging, self).setUp()
-        self.repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'server_files': 'server.py', 'addons_paths': 'addons,core/addons'})
+        self.repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
         self.branch = self.Branch.create({
             'repo_id': self.repo.id,
             'name': 'refs/heads/master'

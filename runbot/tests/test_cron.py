@@ -4,10 +4,10 @@ from odoo.tests import common
 from .common import RunbotCase
 
 
-class Test_Cron(RunbotCase):
+class TestCron(RunbotCase):
 
     def setUp(self):
-        super(Test_Cron, self).setUp()
+        super(TestCron, self).setUp()
         self.start_patcher('_get_cron_period', 'odoo.addons.runbot.models.repo.Repo._get_cron_period', 2)
 
     @patch('odoo.addons.runbot.models.repo.config.get')
@@ -36,9 +36,9 @@ class Test_Cron(RunbotCase):
     def test_cron_schedule(self, mock_update, mock_create):
         """ test that cron_fetch_and_schedule do its work """
         self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_update_frequency', 1)
-        self.Repo.create({'name': '/path/somewhere/disabled.git', 'mode': 'disabled'})  # create a disabled
+        self.Repo.create({'name': '/path/somewhere/disabled.git', 'mode': 'disabled', 'repo_group_id': self.repo_group.id})  # create a disabled
         self.Repo.search([]).write({'mode': 'disabled'}) #  disable all depo, in case we have existing ones
-        local_repo = self.Repo.create({'name': '/path/somewhere/rep.git'})  # create active repo
+        local_repo = self.Repo.create({'name': '/path/somewhere/rep.git', 'repo_group_id': self.repo_group.id})  # create active repo
         ret = self.Repo._cron_fetch_and_schedule('host.runbot.com')
         self.assertEqual(None, ret)
         mock_update.assert_called_with(force=False)
@@ -52,9 +52,9 @@ class Test_Cron(RunbotCase):
         """ test that cron_fetch_and_build do its work """
         hostname = 'host.runbot.com'
         self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_update_frequency', 1)
-        self.Repo.create({'name': '/path/somewhere/disabled.git', 'mode': 'disabled'})  # create a disabled
+        self.Repo.create({'name': '/path/somewhere/disabled.git', 'mode': 'disabled', 'repo_group_id': self.repo_group.id})  # create a disabled
         self.Repo.search([]).write({'mode': 'disabled'}) #  disable all depo, in case we have existing ones
-        local_repo = self.Repo.create({'name': '/path/somewhere/rep.git'})  # create active repo
+        local_repo = self.Repo.create({'name': '/path/somewhere/rep.git', 'repo_group_id': self.repo_group.id})  # create active repo
         ret = self.Repo._cron_fetch_and_build(hostname)
         self.assertEqual(None, ret)
         mock_scheduler.assert_called()

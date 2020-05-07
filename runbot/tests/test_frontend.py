@@ -13,7 +13,7 @@ class Test_Frontend(RunbotCase):
     def setUp(self):
         super(Test_Frontend, self).setUp()
         Repo = self.env['runbot.repo']
-        self.repo = Repo.create({'name': 'bla@example.com:foo/bar', 'token': '123'})
+        self.repo = Repo.create({'name': 'bla@example.com:foo/bar', 'token': '123', 'repo_group_id': self.repo_group.id})
         self.Branch = self.env['runbot.branch']
         self.sticky_branch = self.Branch.create({
             'repo_id': self.repo.id,
