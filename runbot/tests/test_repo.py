@@ -324,18 +324,18 @@ class TestFetch(RunbotCase):
         self.assertEqual(fetch_count, 5)
 
 
-class Test_Repo_Scheduler(RunbotCase):
+class TestRepoScheduler(RunbotCase):
 
     def setUp(self):
         # as the _scheduler method commits, we need to protect the database
         registry = odoo.registry()
-        super(Test_Repo_Scheduler, self).setUp()
+        super(TestRepoScheduler, self).setUp()
 
         self.fqdn_patcher = patch('odoo.addons.runbot.models.host.fqdn')
         mock_root = self.patchers['repo_root_patcher']
         mock_root.return_value = '/tmp/static'
 
-        self.foo_repo = self.Repo.create({'name': 'bla@example.com:foo/bar'})
+        self.foo_repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
 
         self.foo_branch = self.Branch.create({
             'repo_id': self.foo_repo.id,
