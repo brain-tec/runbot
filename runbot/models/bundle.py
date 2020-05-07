@@ -29,7 +29,15 @@ class Version(models.Model):
             else:
                 # max version number with this format: 99.99
                 version.number = '.'.join([elem.zfill(2) for elem in re.sub(r'[^0-9\.]', '', version.name).split('.')])
-                version.is_major = all(elem=='00' for elem in version.number.split('.')[1:])
+                version.is_major = all(elem == '00' for elem in version.number.split('.')[1:])
+
+    def _get(self, name):
+        version = self.search([('name', '=', name)])
+        if not version:
+            version = self.create({
+                'name': name,
+            })
+        return version
 
 
 class Project(models.Model):
@@ -45,9 +53,6 @@ class Bundle(models.Model):
 
     name = fields.Char('Bundle name', required=True, unique=True, help="Name of the base branch")
     project_id = fields.Many2one('runbot.project')
-    sticky = fields.Boolean(store=True)
-    version_id = fields.Many2one('runbot.version', 'Version')
-    version_number = fields.Char(related='version_id.number', store=True)
     branch_ids = fields.One2many('runbot.branch', 'bundle_id')
 
     # custom behaviour
@@ -59,13 +64,19 @@ class Bundle(models.Model):
     last_batch = fields.Many2one('runbot.batch', index=True)
     last_batchs = fields.Many2many('runbot.batch', 'Last batchs', compute='_compute_last_batchs')
 
+    sticky = fields.Boolean('Sticky')
     is_base = fields.Boolean('Is base')
     defined_base_id = fields.Many2one('runbot.bundle', 'Forced base bundle') # todo add constrains on project
     base_id = fields.Many2one('runbot.bundle', 'Base bundle', compute='_compute_base_id', store=True)
-    previous_version_base_id = fields.Many2one('runbot.bundle', 'Previous base bundle', compute='_compute_previous_version_base_id', store=True)
+
+    version_id = fields.Many2one('runbot.version', 'Version', compute='_compute_version_id', store=True)
+    version_number = fields.Char(related='version_id.number', store=True)
+
+    previous_version_base_id = fields.Many2one('runbot.bundle', 'Previous base bundle', compute='_compute_previous_version_base_id')
+    intermediate_version_base_ids = fields.Many2many('runbot.bundle', 'Intermediate base bundles', compute='_compute_previous_version_base_id')
 
 
-    @api.depends('is_base', 'defined_base_id', 'base_id.is_base')
+    @api.depends('name', 'is_base', 'defined_base_id', 'base_id.is_base', 'project_id')
     def _compute_base_id(self):
         bases_by_project = {}
         for bundle in self:
@@ -88,17 +99,44 @@ class Bundle(models.Model):
                 elif bundle.name == 'master':
                     bundle.base_id = candidate
 
-    def _compute_previous_version_base_id(self):
+
+    @api.depends('is_base', 'base_id.version_id')
+    def _compute_version_id(self):
         for bundle in self.sorted(key='is_base', reverse=True):
             if not bundle.is_base:
-                bundle.previous_version_bundle_id = bundle.base_id.previous_version_base_id
+                bundle.version_id = bundle.base_id.version_id
+                continue
+            bundle.version_id = self.env['runbot.version']._get(bundle.name)
+
+    @api.depends('is_base', 'base_id.previous_version_base_id')
+    def _compute_previous_version_base_id(self):
+        for bundle in self.sorted(key='is_base', reverse=True):
+
+            if not bundle.is_base:
+                bundle.previous_version_base_id = bundle.base_id.previous_version_base_id
+                bundle.intermediate_version_base_ids = bundle.base_id.intermediate_version_base_ids
             else:
                 previous_version = self.env['runbot.version'].search([
                     ('number', '<', bundle.version_id.number),
                     ('is_major', '=', True)
                 ], order='number desc', limit=1)
                 if previous_version:
-                    self.env['runbot.bundle'].search([('version_id', '=', previous_version.id), ('is_base', '=', True)])
+                    # todo what if multiple results
+                    bundle.previous_version_base_id = self.env['runbot.bundle'].search([
+                        ('version_id', '=', previous_version.id),
+                        ('is_base', '=', True),
+                        ('project_id', '=', bundle.project_id.id)
+                    ])
+                    bundle.intermediate_version_base_ids = self.env['runbot.bundle'].search([
+                        ('version_number', '>', previous_version.number),
+                        ('version_number', '<', bundle.version_id.number),
+                        ('is_base', '=', True),
+                        ('project_id', '=', bundle.project_id.id)
+                    ])
+
+                else:
+                    bundle.previous_version_base_id = False
+                    bundle.intermediate_version_base_ids = False
 
     #def _init_column(self, column_name):
     #    if column_name not in ('version_number',):
@@ -147,11 +185,26 @@ class Bundle(models.Model):
             else:
                 branch.rebuild_requested = False
 
+    def create(self, values_list):
+        self.flush()
+        return super().create(values_list)
+        #if any(values.get('is_base') for values in values_list):
+        #    (self.search([
+        #        ('project_id', 'in', self.mapped('project_id').ids),
+        #        ('is_base', '=', True)
+        #    ]) + self)._compute_previous_version_base_id()
+
     def write(self, values):
         super().write(values)
+        self.flush()
         #if 'is_base' in values:
+        #    (self.search([
+        #        ('project_id', 'in', self.mapped('project_id').ids),
+        #        ('is_base', '=', True)
+        #    ]) + self)._compute_previous_version_base_id()
         #    for bundle in self:
         #        self.env['runbot.bundle'].search([('name', '=like', '%s%%' % bundle.name), ('project_id', '=', self.project_id.id)])._compute_base_id()
+
 
     def _get(self, name, project):
         project.ensure_one()

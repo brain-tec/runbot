@@ -160,7 +160,6 @@ class TestBuildConfigStep(RunbotCase):
             self.assertEqual(log_path, 'dev/null/logpath')
 
         self.patchers['docker_run'].side_effect = docker_run
-
         config_step._run_odoo_install(self.parent_build, 'dev/null/logpath')
 
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')

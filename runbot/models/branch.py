@@ -28,7 +28,6 @@ class Branch(models.Model):
     target_branch_name = fields.Char(compute='_get_branch_infos', string='PR target branch', store=True)
     pull_branch_name = fields.Char(compute='_compute_pull_branch_name', string='Branch display name')
     sticky = fields.Boolean('Sticky')
-    is_main = fields.Boolean('Is main', default=False, compute='_compute_is_main', store=True)
     # TODO remove sticky and main and stuff.
     # should be based on a bundle, but need a project to know corresponding bundle
     # anyway, display will be by project (?)
@@ -79,12 +78,6 @@ class Branch(models.Model):
         #
         # a pr pull head name should be in a repo or one of its forks, we need to check that
 
-    @api.depends('sticky')
-    def _compute_is_main(self):
-        for bundle in self:
-            if bundle.sticky:
-                bundle.is_main = True
-        # else, don't change or use default on create, does it work?
 
     #@api.depends('sticky', 'defined_sticky', 'target_branch_name', 'name')
     ## won't be recompute if a new branch is marked as sticky or sticky is removed, but should be ok if not stored
@@ -238,10 +231,10 @@ class Branch(models.Model):
 
     @api.model_create_single
     def create(self, vals):
-        if not vals.get('config_id') and ('use-coverage' in (vals.get('name') or '')):
-            coverage_config = self.env.ref('runbot.runbot_build_config_test_coverage', raise_if_not_found=False)
-            if coverage_config:
-                vals['config_id'] = coverage_config
+        #if not vals.get('config_id') and ('use-coverage' in (vals.get('name') or '')):
+        #    coverage_config = self.env.ref('runbot.runbot_build_config_test_coverage', raise_if_not_found=False)
+        #    if coverage_config:
+        #        vals['config_id'] = coverage_config
         branch = super().create(vals)
         branch.bundle_id = self.env['runbot.bundle']._get(branch.reference_name, branch.repo_id.repo_group_id.project_id)
         assert branch.bundle_id

@@ -114,11 +114,6 @@ class Repo(models.Model):
     hook_time = fields.Float('Last hook time', compute='_compute_hook_time')
     get_ref_time = fields.Float('Last refs db update', compute='_compute_get_ref_time')
     token = fields.Char("Github token", groups="runbot.group_runbot_admin")
-    #is_main = fields.Boolean('Is main', compute='_compute_is_main')
-
-    #def _compute_is_main(self):
-    #    for repo in self:
-    #        repo.is_main = repo.repo_group.main == repo
 
     def _compute_get_ref_time(self):
         self.env.cr.execute("""
