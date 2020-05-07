@@ -18,7 +18,7 @@ class Version(models.Model):
 
     name = fields.Char('Version name')
     number = fields.Char('Comparable version number', compute='_compute_version_number', store=True)
-    is_major = fields.Char('Comparable version number', compute='_compute_version_number', store=True)
+    is_major = fields.Char('Is major version', compute='_compute_version_number', store=True)
 
     @api.depends('name')
     def _compute_version_number(self):
@@ -60,9 +60,9 @@ class Bundle(models.Model):
     last_batchs = fields.Many2many('runbot.batch', 'Last batchs', compute='_compute_last_batchs')
 
     is_base = fields.Boolean('Is base')
-    base_id = fields.Many2one('runbot.bundle', 'Base bundle', compute='_compute_base_id', store=True)
     defined_base_id = fields.Many2one('runbot.bundle', 'Forced base bundle') # todo add constrains on project
-    previous_version_bundle_id = fields.Many2one('runbot.bundle', 'Base bundle', compute='_compute_previous_version_bundle_id', store=True)
+    base_id = fields.Many2one('runbot.bundle', 'Base bundle', compute='_compute_base_id', store=True)
+    previous_version_base_id = fields.Many2one('runbot.bundle', 'Previous base bundle', compute='_compute_previous_version_base_id', store=True)
 
 
     @api.depends('is_base', 'defined_base_id', 'base_id.is_base')
@@ -88,25 +88,27 @@ class Bundle(models.Model):
                 elif bundle.name == 'master':
                     bundle.base_id = candidate
 
-    def _compute_previous_version_bundle_id(self):
-        for bundle in self:
+    def _compute_previous_version_base_id(self):
+        for bundle in self.sorted(key='is_base', reverse=True):
             if not bundle.is_base:
-                bundle.previous_version_bundle_id = bundle.base_id._compute_previous_version_bundle_id
+                bundle.previous_version_bundle_id = bundle.base_id.previous_version_base_id
             else:
                 previous_version = self.env['runbot.version'].search([
-                    ('number', '<', bundle.version_id.version),
+                    ('number', '<', bundle.version_id.number),
                     ('is_major', '=', True)
                 ], order='number desc', limit=1)
+                if previous_version:
+                    self.env['runbot.bundle'].search([('version_id', '=', previous_version.id), ('is_base', '=', True)])
 
-    def _init_column(self, column_name):
-        if column_name not in ('version_number',):
-            return super()._init_column(column_name)
-
-        if column_name == 'version_number':
-            import traceback
-            traceback.print_stack()
-            for version in self.env['runbot.version'].search([]):
-                self.search([('version_id', '=', version.id)]).write({'version_number':version.number})
+    #def _init_column(self, column_name):
+    #    if column_name not in ('version_number',):
+    #        return super()._init_column(column_name)
+#
+    #    if column_name == 'version_number':
+    #        import traceback
+    #        traceback.print_stack()
+    #        for version in self.env['runbot.version'].search([]):
+    #            self.search([('version_id', '=', version.id)]).write({'version_number':version.number})
 
 
     def _compute_last_batchs(self):
