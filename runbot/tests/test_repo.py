@@ -305,7 +305,7 @@ class TestFetch(RunbotCase):
         git_patcher = self.patchers['git_patcher']
         git_patcher.side_effect = git_side_effect
 
-        repo = self.Repo.create({'name': 'bla@example.com:foo/bar'})
+        repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
         host = self.env['runbot.host']._get_current()
 
         self.assertFalse(host.assigned_only)
