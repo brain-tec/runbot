@@ -10,7 +10,12 @@ class RunbotCase(TransactionCase):
 
     def setUp(self):
         super(RunbotCase, self).setUp()
-
+        self.project = self.env['runbot.project'].create({'name': 'Tests'})
+        self.repo_group = self.env['runbot.repo.group'].create({
+            'name': 'bar', 
+            'project_id': self.project.id,
+            'server_files': 'server.py'
+        })
         self.Build = self.env['runbot.build']
         self.Repo = self.env['runbot.repo']
         self.Branch = self.env['runbot.branch']

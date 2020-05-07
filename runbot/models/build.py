@@ -314,13 +314,8 @@ class BuildResult(models.Model):
 
     @api.model_create_single
     def create(self, vals):
-        if not 'config_id' in vals:
-            branch = self.env['runbot.branch'].browse(vals.get('branch_id'))
-            vals['config_id'] = branch.config_id.id
         build_id = super(BuildResult, self).create(vals)
         extra_info = {}
-        if not build_id.sequence:
-            extra_info['sequence'] = build_id.id
 
         # compute dependencies
         repo = build_id.repo_id

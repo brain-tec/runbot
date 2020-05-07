@@ -8,26 +8,26 @@ class TestBuildConfigStep(RunbotCase):
 
     def setUp(self):
         super(TestBuildConfigStep, self).setUp()
-        self.repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'server_files': 'server.py'})
-        self.branch = self.Branch.create({
-            'repo_id': self.repo.id,
-            'name': 'refs/heads/master'
-        })
-        self.branch_10 = self.Branch.create({
-            'repo_id': self.repo.id,
-            'name': 'refs/heads/10.0'
-        })
-        self.branch_11 = self.Branch.create({
-            'repo_id': self.repo.id,
-            'name': 'refs/heads/11.0'
-        })
+        self.repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
+        #self.branch = self.Branch.create({
+        #    'repo_id': self.repo.id,
+        #    'name': 'refs/heads/master'
+        #})
+        #self.branch_10 = self.Branch.create({
+        #    'repo_id': self.repo.id,
+        #    'name': 'refs/heads/10.0'
+        #})
+        #self.branch_11 = self.Branch.create({
+        #    'repo_id': self.repo.id,
+        #    'name': 'refs/heads/11.0'
+        #})
         self.Build = self.env['runbot.build']
         self.ConfigStep = self.env['runbot.build.config.step']
         self.Config = self.env['runbot.build.config']
 
         self.parent_build = self.Build.create({
-            'branch_id': self.branch.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            #'branch_id': self.branch.id,
+            #'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
             'port': '1234',
         })
         self.start_patcher('_local_pg_createdb', 'odoo.addons.runbot.models.build.BuildResult._local_pg_createdb', True)

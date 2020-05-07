@@ -98,7 +98,7 @@ class Repo(models.Model):
     _description = "Repo"
     _order = 'sequence, id'
 
-    repo_group_id = fields.Many2one('runbot.repo.group')
+    repo_group_id = fields.Many2one('runbot.repo.group', required=True)
     name = fields.Char('Repository', required=True)
     short_name = fields.Char('Short name', compute='_compute_short_name', store=False, readonly=True)
     sequence = fields.Integer('Sequence')
@@ -333,22 +333,16 @@ class Repo(models.Model):
         The returned structure contains all the branches from refs newly created
         or older ones.
         """
-        self.env.cr.execute("""
-            WITH t (branch) AS (SELECT unnest(%s))
-          SELECT t.branch, b.id
-            FROM t LEFT JOIN runbot_branch b ON (b.name = t.branch)
-           WHERE b.repo_id = %s;
-        """, ([r[0] for r in refs], self.id))
-        ref_branches = {r[0]: r[1] for r in self.env.cr.fetchall()}
+        names = [r[0] for r in refs]
+        branches = self.env['runbot.branch'].search([('name', 'in', names), ('repo_id', '=', self.id)])
+        ref_branches = {branch.name: branch for branch in branches}
         for name, sha, date, author, author_email, subject, committer, committer_email in refs:
             if not ref_branches.get(name):
                 _logger.debug('repo %s found new branch %s', self.name, name)
                 new_branch = self.env['runbot.branch'].create({'repo_id': self.id, 'name': name})
+                ref_branches[name] = new_branch
 
-                ref_branches[name] = new_branch.id
-
-        branches = self.env['runbot.branch'].browse(ref_branches.values())
-
+        return ref_branches
 
     def _find_new_commits(self, refs, ref_branches):
         """Find new commits in bare repo
@@ -360,7 +354,7 @@ class Repo(models.Model):
         max_age = int(self.env['ir.config_parameter'].get_param('runbot.runbot_max_age', default=30))
 
         for name, sha, date, author, author_email, subject, committer, committer_email in refs:
-            branch = self.env['runbot.branch'].browse(ref_branches[name])
+            branch = ref_branches[name]
 
             # skip the build for old branches (Could be checked before creating the branch in DB ?)
             # if dateutil.parser.parse(date[:19]) + datetime.timedelta(days=max_age) < datetime.datetime.now():
@@ -384,7 +378,7 @@ class Repo(models.Model):
                 branch.head = commit
 
                 bundle = branch.bundle_id
-                if bundle.no_buld:
+                if bundle.no_build:
                     continue
 
                 # TODO check  if repo group of branch is a trigger
@@ -392,7 +386,7 @@ class Repo(models.Model):
                 bundle_batch = bundle._get_preparing_batch()
                 bundle_batch._new_commit(commit, self)
 
-    def _create_pending_builds(self):
+    def _create_batches(self):
         """ Find new commits in physical repos"""
         refs = {}
         ref_branches = {}
@@ -695,7 +689,7 @@ class Repo(models.Model):
         while time.time() - start_time < timeout:
             repos = self.search([('mode', '!=', 'disabled')])
             repos._update(force=False)
-            repos._create_pending_builds()
+            repos._create_batches()
             self._commit()
             time.sleep(update_frequency)
 

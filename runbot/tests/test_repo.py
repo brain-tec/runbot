@@ -14,10 +14,10 @@ from .common import RunbotCase
 _logger = logging.getLogger(__name__)
 
 
-class Test_Repo(RunbotCase):
+class TestRepo(RunbotCase):
 
     def setUp(self):
-        super(Test_Repo, self).setUp()
+        super(TestRepo, self).setUp()
         self.commit_list = []
         self.mock_root = self.patchers['repo_root_patcher']
 
@@ -30,32 +30,30 @@ class Test_Repo(RunbotCase):
 
     def test_base_fields(self):
         self.mock_root.return_value = '/tmp/static'
-        repo = self.Repo.create({'name': 'bla@example.com:foo/bar'})
+        repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
         self.assertEqual(repo.path, '/tmp/static/repo/bla_example.com_foo_bar')
 
         self.assertEqual(repo.base, 'example.com/foo/bar')
         self.assertEqual(repo.short_name, 'foo/bar')
 
-        https_repo = self.Repo.create({'name': 'https://bla@example.com/user/rep.git'})
-        self.assertEqual(https_repo.short_name, 'user/rep')
+        https_repo = self.Repo.create({'name': 'https://bla@example.com/user/bar.git', 'repo_group_id': self.repo_group.id})
+        self.assertEqual(https_repo.short_name, 'user/bar')
 
-        local_repo = self.Repo.create({'name': '/path/somewhere/rep.git'})
-        self.assertEqual(local_repo.short_name, 'somewhere/rep')
+        local_repo = self.Repo.create({'name': '/path/somewhere/bar.git', 'repo_group_id': self.repo_group.id})
+        self.assertEqual(local_repo.short_name, 'somewhere/bar')
 
     @patch('odoo.addons.runbot.models.repo.Repo._get_fetch_head_time')
-    def test_repo_create_pending_builds(self, mock_fetch_head_time):
+    def test_repo_create_batches(self, mock_fetch_head_time):
         """ Test that when finding new refs in a repo, the missing branches
         are created and new builds are created in pending state
         """
         self.mock_root.return_value = '/tmp/static'
-        repo = self.Repo.create({'name': 'bla@example.com:foo/bar'})
+        repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
 
+
+        foo_group = self.env['runbot.repo.group'].create({'name': 'foo', 'project_id': self.project.id})
         # create another repo and branch to ensure there is no mismatch
-        other_repo = self.Repo.create({'name': 'bla@example.com:foo/foo'})
-        self.env['runbot.branch'].create({
-            'repo_id': other_repo.id,
-            'name': 'refs/heads/bidon'
-        })
+        other_repo = self.Repo.create({'name': 'bla@example.com:foo/foo', 'repo_group_id': foo_group.id})
 
         first_commit = [('refs/heads/bidon',
                              'd0d0caca',
@@ -76,41 +74,23 @@ class Test_Repo(RunbotCase):
         mock_fetch_head_time.side_effect = counter()
 
         with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
-            repo._create_pending_builds()
+            repo._create_batches()
 
         branch = self.env['runbot.branch'].search([('repo_id', '=', repo.id)])
+
+        bundle = branch.bundle_id
         self.assertEqual(branch.name, 'refs/heads/bidon', 'A new branch should have been created')
 
-        build = self.env['runbot.build'].search([('repo_id', '=', repo.id), ('branch_id', '=', branch.id)])
-        self.assertEqual(len(build), 1, 'Build found')
-        self.assertEqual(build.subject, 'A nice subject')
-        self.assertEqual(build.local_state, 'pending')
-        self.assertFalse(build.local_result)
+        batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
+        self.assertEqual(len(batch), 1, 'Batch found')
+        self.assertEqual(batch.batch_commit_ids.commit_id.subject, 'A nice subject')
+        self.assertEqual(batch.state, 'preparing')
+        self.assertEqual(branch.head_name, 'd0d0caca')
+        self.assertEqual(bundle.last_batch, batch)
+        last_batch = batch
 
-        # Simulate that a new commit is found in the other repo
         self.commit_list = [('refs/heads/bidon',
                              'deadbeef',
-                             datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
-                             'Marc Bidule',
-                             '<marc.bidule@somewhere.com>',
-                             'A better subject',
-                             'Marc Bidule',
-                             '<marc.bidule@somewhere.com>')]
-
-        with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
-            other_repo._create_pending_builds()
-
-        branch_count = self.env['runbot.branch'].search_count([('repo_id', '=', repo.id)])
-        self.assertEqual(branch_count, 1, 'No new branch should have been created')
-
-        build = self.env['runbot.build'].search([('repo_id', '=', repo.id), ('branch_id', '=', branch.id)])
-        self.assertEqual(build.subject, 'A nice subject')
-        self.assertEqual(build.local_state, 'pending')
-        self.assertFalse(build.local_result)
-
-        # A new commit is found in the first repo, the previous pending build should be skipped
-        self.commit_list = [('refs/heads/bidon',
-                             'b00b',
                              datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
                              'Marc Bidule',
                              '<marc.bidule@somewhere.com>',
@@ -119,36 +99,98 @@ class Test_Repo(RunbotCase):
                              '<marc.bidule@somewhere.com>')]
 
         with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
-            repo._create_pending_builds()
+            other_repo._create_batches() # updating another repo_group
+
+        other_branch = self.env['runbot.branch'].search([('repo_id', '=', other_repo.id)])
+
+        self.assertEqual(other_branch.bundle_id, bundle)
+
+        self.assertEqual(branch.head_name, 'd0d0caca')
+        self.assertEqual(other_branch.head_name, 'deadbeef')
 
         branch_count = self.env['runbot.branch'].search_count([('repo_id', '=', repo.id)])
         self.assertEqual(branch_count, 1, 'No new branch should have been created')
 
-        build = self.env['runbot.build'].search([('repo_id', '=', repo.id), ('branch_id', '=', branch.id), ('name', '=', 'b00b')])
-        self.assertEqual(len(build), 1)
-        self.assertEqual(build.subject, 'Another subject')
-        self.assertEqual(build.local_state, 'pending')
-        self.assertFalse(build.local_result)
+        batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
+        self.assertEqual(last_batch, batch, "No new batch should have been created")
+        self.assertEqual(bundle.last_batch, batch)
+        self.assertEqual(batch.batch_commit_ids.commit_id.mapped('subject'), ['A nice subject', 'Another subject'])
 
-        previous_build = self.env['runbot.build'].search([('repo_id', '=', repo.id), ('branch_id', '=', branch.id), ('name', '=', 'd0d0caca')])
-        self.assertEqual(previous_build.local_state, 'done', 'Previous pending build should be done')
-        self.assertEqual(previous_build.local_result, 'skipped', 'Previous pending build result should be skipped')
+        # A new commit is found in the first repo
+        self.commit_list = [('refs/heads/bidon',
+                             'b00b',
+                             datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
+                             'Marc Bidule',
+                             '<marc.bidule@somewhere.com>',
+                             'A new subject',
+                             'Marc Bidule',
+                             '<marc.bidule@somewhere.com>')]
+
+        with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
+            repo._create_batches()
+
+        branch_count = self.env['runbot.branch'].search_count([('repo_id', '=', repo.id)])
+        self.assertEqual(branch_count, 1, 'No new branch should have been created')
+
+
+        batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
+        self.assertEqual(bundle.last_batch, batch)
+        self.assertEqual(len(batch), 1, 'No new batch created, updated')
+        self.assertEqual(batch.batch_commit_ids.commit_id.mapped('subject'),  ['A new subject', 'Another subject'], 'commits should have been updated')
+        self.assertEqual(batch.state, 'preparing')
+        self.assertEqual(branch.head_name, 'b00b')
+
+        # TODO move this
+        # previous_build = self.env['runbot.build'].search([('repo_id', '=', repo.id), ('branch_id', '=', branch.id), ('name', '=', 'd0d0caca')])
+        # self.assertEqual(previous_build.local_state, 'done', 'Previous pending build should be done')
+        # self.assertEqual(previous_build.local_result, 'skipped', 'Previous pending build result should be skipped')
 
         self.commit_list = first_commit  # branch reseted hard to an old commit
-        builds = self.env['runbot.build'].search([('repo_id', '=', repo.id), ('branch_id', '=', branch.id), ('name', '=', 'd0d0caca')])
-        self.assertEqual(len(builds), 1)
-        with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
-            repo._create_pending_builds()
 
-        last_build = self.env['runbot.build'].search([], limit=1)
-        self.assertEqual(last_build.name, 'd0d0caca')
-        builds = self.env['runbot.build'].search([('repo_id', '=', repo.id), ('branch_id', '=', branch.id), ('name', '=', 'd0d0caca')])
-        self.assertEqual(len(builds), 2)
-        # self.assertEqual(last_build.duplicate_id, previous_build) False because previous_build is skipped
         with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
-            other_repo._create_pending_builds()
-        builds = self.env['runbot.build'].search([('repo_id', '=', repo.id), ('branch_id', '=', branch.id), ('name', '=', 'd0d0caca')])
-        self.assertEqual(len(builds), 2)
+            repo._create_batches()
+
+        batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
+        self.assertEqual(bundle.last_batch, batch)
+        self.assertEqual(len(batch), 1, 'No new batch created, updated')
+        self.assertEqual(batch.batch_commit_ids.commit_id.mapped('subject'),  ['A nice subject', 'Another subject'], 'commits should have been updated')
+        self.assertEqual(batch.state, 'preparing')
+        self.assertEqual(branch.head_name, 'd0d0caca')
+
+        batch.state = 'done'
+
+        with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
+            repo._create_batches()
+
+        batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
+        self.assertEqual(len(batch), 1, 'No new batch created, no head change')
+
+
+        self.commit_list = [('refs/heads/bidon',
+                            'dead1234',
+                            datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
+                            'Marc Bidule',
+                            '<marc.bidule@somewhere.com>',
+                            'A last subject',
+                            'Marc Bidule',
+                            '<marc.bidule@somewhere.com>')]
+
+        with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
+            repo._create_batches()
+
+        bundles = self.env['runbot.bundle'].search([])
+        self.assertEqual(bundles, bundle)
+        batches = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
+        self.assertEqual(len(batches), 2, 'No preparing instance and new head -> new batch')
+        self.assertEqual(bundle.last_batch.state, 'preparing')
+        self.assertEqual(bundle.last_batch.batch_commit_ids.commit_id.subject, 'A last subject')
+
+
+        # TODO imp : 
+        # Add another branch in another project
+        # Add another bundle
+
+
 
 
     @skip('This test is for performances. It needs a lot of real branches in DB to mean something')
@@ -174,7 +216,7 @@ class Test_Repo(RunbotCase):
         inserted_time = time.time()
         _logger.info('Insert took: %ssec', (inserted_time - start_time))
         with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
-            repo._create_pending_builds()
+            repo._create_batches()
 
         _logger.info('Create pending builds took: %ssec', (time.time() - inserted_time))
 
@@ -182,8 +224,8 @@ class Test_Repo(RunbotCase):
     @common.warmup
     def test_times(self):
         def _test_times(model, setter, field_name):
-            repo1 = self.Repo.create({'name': 'bla@example.com:foo/bar'})
-            repo2 = self.Repo.create({'name': 'bla@example.com:foo2/bar2'})
+            repo1 = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
+            repo2 = self.Repo.create({'name': 'bla@example.com:foo2/bar', 'repo_group_id': self.repo_group.id})
             count = self.cr.sql_log_count
             with self.assertQueryCount(1):
                 getattr(repo1, setter)(1.1)
@@ -216,7 +258,7 @@ class Test_Repo(RunbotCase):
 class Test_Github(TransactionCase):
     def test_github(self):
         """ Test different github responses or failures"""
-        repo = self.env['runbot.repo'].create({'name': 'bla@example.com:foo/foo'})
+        repo = self.env['runbot.repo'].create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
         self.assertEqual(repo._github('/repos/:owner/:repo/statuses/abcdef', dict(), ignore_errors=True), None, 'A repo without token should return None')
         repo.token = 'abc'
         with patch('odoo.addons.runbot.models.repo.requests.Session') as mock_session:
