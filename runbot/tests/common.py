@@ -14,6 +14,7 @@ class RunbotCase(TransactionCase):
         self.Build = self.env['runbot.build']
         self.Repo = self.env['runbot.repo']
         self.Branch = self.env['runbot.branch']
+        self.Version = self.env['runbot.version']
 
         self.patchers = {}
         self.patcher_objects = {}
