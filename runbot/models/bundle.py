@@ -10,10 +10,7 @@ from collections import defaultdict
 
 from odoo import models, fields, api
 
-
-
 #Todo test: create will invalid branch name, pull request
-
 
 class Version(models.Model):
     _name = "runbot.version"
@@ -21,15 +18,19 @@ class Version(models.Model):
 
     name = fields.Char('Version name')
     number = fields.Char('Comparable version number', compute='_compute_version_number', store=True)
+    is_major = fields.Char('Comparable version number', compute='_compute_version_number', store=True)
 
     @api.depends('name')
     def _compute_version_number(self):
         for version in self:
             if version.name == 'master':
                 version.number = '~'
+                version.is_major = False
             else:
                 # max version number with this format: 99.99
                 version.number = '.'.join([elem.zfill(2) for elem in re.sub(r'[^0-9\.]', '', version.name).split('.')])
+                version.is_major = all(elem=='00' for elem in version.number.split('.')[1:])
+
 
 class Project(models.Model):
     _name = 'runbot.project'
@@ -58,6 +59,34 @@ class Bundle(models.Model):
     batch_ids = fields.One2many('runbot.batch', 'bundle_id')
     last_batch = fields.Many2one('runbot.batch', index=True)
     last_batchs = fields.Many2many('runbot.batch', 'Last batchs', compute='_compute_last_batchs')
+
+    base_id = fields.Many2one('runbot.bundle', 'Base bundle', compute='_compute_base_id', store=True)
+    defined_base_id = fields.Many2one('runbot.bundle', 'Forced base bundle') # todo add constrains on project
+    previous_version_bundle_id = fields.Many2one('runbot.bundle', 'Base bundle', compute='_compute_previous_version_bundle_id', store=True)
+
+
+    @api.depends('is_base', 'defined_base_id', 'base_id.is_base')
+    def _compute_base_id(self):
+        bases_by_project = {}
+        for bundle in self:
+            if bundle.is_base:
+                bundle.base_id = bundle
+            project_id = bundle.project_id.id
+            if bundle.defined_base_id:
+                bundle.base_id = bundle.defined_base_id
+            if project_id in bases_by_project:  # small perf imp for udge bartched
+                base_bundles = bases_by_project[project_id]
+            else:
+                base_bundles = self.search([('is_base', '=', True), ('project_id', '=', project_id)])
+                bases_by_project[project_id] = base_bundles
+            for candidate in base_bundles:
+                if bundle.name.startswith(candidate.name):
+                    bundle.base_id = candidate
+                    break
+                elif bundle.name == 'master':
+                    bundle.base_id = candidate
+
+    def _compute_previous_version_bundle_id(self):
 
     def _init_column(self, column_name):
         if column_name not in ('version_number',):
@@ -106,48 +135,21 @@ class Bundle(models.Model):
             else:
                 branch.rebuild_requested = False
 
-    # version can change in case of retarget or manual operation from user
-
-
-    #base_id = fields.Many2one('runbot.bundle', 'Base bundle', compute='_compute_closest_base' 
-    #    help='A corresponding bundle that is a base, ususally a target, (master, or other version)')
-    #forced_base_id = fields.Many2one('runbot.bundle', 'Forced base bundle')
-
     def write(self, values):
         super().write(values)
-        if 'is_base' in values:
-            for bundle in self:
-                self.env['runbot.bundle'].search([('name', '=like', '%s%%' % bundle.name)])._compute_closest_base()
+        #if 'is_base' in values:
+        #    for bundle in self:
+        #        self.env['runbot.bundle'].search([('name', '=like', '%s%%' % bundle.name), ('project_id', '=', self.project_id.id)])._compute_base_id()
 
     def _get(self, name, project):
         project.ensure_one()
         bundle = self.search([('name', '=', name), ('project_id', '=', project.id)])
         if not bundle:
-            self.create({
+            bundle = self.create({
                 'name': name,
-                'project_id': project,
+                'project_id': project.id,
             })
         return bundle
-
-    @api.depends('is_base', 'forced_base', 'base_id.is_base')
-    def _compute_closest_base(self):
-        bases_by_project = {}
-        for bundle in self:
-            if self.is_base:
-                return self
-            project_id = bundle.project_id
-            if project_id in bases_by_project:  # small perf imp for udge bartched
-                base_bundles = bases_by_project[project_id]
-            else:
-                base_bundles = self.search([('is_base', '=', True), ('project_id', '=', project_id)])
-                bases_by_project[project_id] = base_bundles
-            for candidate in base_bundles:
-                if bundle.name.startswith(candidate.name):
-                    bundle.base_id = candidate
-                    break
-                elif bundle.name == 'master':
-                    bundle.base_id = candidate
-
 
     def _get_preparing_batch(self):
         # find last bundle batch or create one

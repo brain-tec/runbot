@@ -243,7 +243,9 @@ class Branch(models.Model):
             if coverage_config:
                 vals['config_id'] = coverage_config
         branch = super().create(vals)
-        branch.bundle_id = self.env['runbot.bundle']._get(self.reference_name, branch.repo_id.repo_group_id.project_id)
+        branch.bundle_id = self.env['runbot.bundle']._get(branch.reference_name, branch.repo_id.repo_group_id.project_id)
+        assert branch.bundle_id
+        return branch
         #note: bundle is created after branch because we need reference_name. Use new? Compute reference another way? or keep bundle_id not required?
 
     def _get_last_coverage_build(self):
