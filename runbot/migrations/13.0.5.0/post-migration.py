@@ -251,10 +251,10 @@ def migrate(cr, version):
         counter+=1
         cr.execute("""
             SELECT
-            id, branch_id, repo_id, extra_params, config_id, config_data, commit_path_mode
+            id, branch_id, repo_id, extra_params, config_id, config_data
             FROM runbot_build WHERE duplicate_id IS NULL ORDER BY id asc LIMIT %s OFFSET %s""", (batch_size, offset))
 
-        for id, branch_id, repo_id, extra_params, config_id, config_data, commit_path_mode in cr.fetchall():
+        for id, branch_id, repo_id, extra_params, config_id, config_data in cr.fetchall():
 
             build_commit_ids_create_values = [
                 {'commit_id': build_commit_ids[id][repo_to_group[repo_id].id],'repo_id': repo_id, 'match_type':'exact'}]
@@ -283,7 +283,6 @@ def migrate(cr, version):
                 'project_id': repo_to_group[repo_id].project_id,
                 #'trigger_id': triggers[repo_to_group[repo_id].id].id,
                 'config_data': config_data,
-                'commit_path_mode':commit_path_mode,
                 'build_commit_ids': [(0, 0, values) for values in build_commit_ids_create_values]
             })
             existing[params.fingerprint] = params

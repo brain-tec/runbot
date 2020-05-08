@@ -46,7 +46,6 @@ COPY_WHITELIST = [
     "build_commit_ids",
     "config_id",
     "orphan_result",
-    "commit_path_mode",
 ]
 
 def make_selection(array):
@@ -71,11 +70,7 @@ class BuildParameters(models.Model):
     config_id = fields.Many2one('runbot.build.config', 'Run Config', required=True,
         default=lambda self: self.env.ref('runbot.runbot_build_config_default', raise_if_not_found=False))
     config_data = JsonDictField('Config Data')
-    commit_path_mode = fields.Selection([('rep_sha', 'repo name + sha'),
-                                    ('soft', 'repo name only'),
-                                    ],
-                                default='soft',
-                                string='Source export path mode') # todo remove
+
 
     build_ids = fields.One2many('runbot.build', 'params_id')
 
@@ -84,7 +79,7 @@ class BuildParameters(models.Model):
 
     fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)
 
-    @api.depends('version_id', 'project_id', 'extra_params', 'config_id', 'config_data', 'modules', 'commit_path_mode', 'build_commit_ids', 'builds_reference_ids')
+    @api.depends('version_id', 'project_id', 'extra_params', 'config_id', 'config_data', 'modules', 'build_commit_ids', 'builds_reference_ids')
     def _compute_fingerprint(self):
         for param in self:
             cleaned_vals = {
@@ -94,7 +89,6 @@ class BuildParameters(models.Model):
                 'config_id': param.config_id.id,
                 'config_data': param.config_data.dict,
                 'modules': param.modules or '',
-                'commit_path_mode': param.commit_path_mode,
                 'build_commit_ids': sorted(param.build_commit_ids.commit_id.ids),
                 'builds_reference_ids': sorted(param.builds_reference_ids.build_id.ids),
             }
@@ -745,11 +739,7 @@ class BuildResult(models.Model):
         # in case some build have commits with the same repo name (ex: foo/bar, foo-ent/bar)
         # it can be usefull to uniquify commit export path using hash
         # TODO FIX or remove TO DISCUSS
-        return build_commit.repo_id._get_repo_name_part()
-        if self.commit_path_mode == 'rep_sha':
-            return '%s-%s' % (build_commit.repo._get_repo_name_part(), commit.name[:8])
-        else:
-            return build_commit.repo._get_repo_name_part()
+        return build_commit.repo_id.repo_group_id.name
 
     def _checkout(self, commits=None):
         self.ensure_one()  # will raise exception if hash not found, we don't want to fail for all build.
