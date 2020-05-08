@@ -18,13 +18,13 @@ class Branch(models.Model):
     head = fields.Many2one('runbot.commit', 'Head Commit')
     head_name = fields.Char('Head name', related='head.name', store=True)
     bundle_id = fields.Many2one('runbot.bundle', 'Bundle', readonly=True, ondelete='cascade')
-    repo_id = fields.Many2one('runbot.repo', 'Repository', required=True, ondelete='cascade')
+    remote_id = fields.Many2one('runbot.remote', 'Remote', required=True, ondelete='cascade')
     name = fields.Char('Ref Name', required=True)
     branch_name = fields.Char(compute='_get_branch_infos', string='Branch', readonly=1, store=True)
     reference_name = fields.Char(compute='_compute_reference_name', store=True)
     branch_url = fields.Char(compute='_get_branch_url', string='Branch url', readonly=1)
     pull_head_name = fields.Char(compute='_get_branch_infos', string='PR HEAD name', readonly=1, store=True)
-    pull_head_repo_id = fields.Many2one('runbot.repo', 'Pull head repository', ondelete='cascade')
+    pull_head_remote_id = fields.Many2one('runbot.remote', 'Pull head repository', ondelete='cascade')
     target_branch_name = fields.Char(compute='_get_branch_infos', string='PR target branch', store=True)
     pull_branch_name = fields.Char(compute='_compute_pull_branch_name', string='Branch display name')
     sticky = fields.Boolean('Sticky')
@@ -44,13 +44,13 @@ class Branch(models.Model):
     dname = fields.Char('Display name', compute='_compute_dname')
     is_pr = fields.Bollean('IS a pr', required=True)
 
-    @api.depends('branch_name', 'repo_id.short_name')
+    @api.depends('branch_name', 'remote_id.short_name')
     def _compute_dname(self):
         for branch in self:
-            branch.dname = '%s:%s' % (branch.repo_id.short_name, branch.branch_name)
+            branch.dname = '%s:%s' % (branch.remote_id.short_name, branch.branch_name)
 
     # todo ass shortcut to create pr in interface as inherited view Create Fast PR
-    @api.depends('target_branch_name', 'pull_head_name', 'pull_head_repo_id')
+    @api.depends('target_branch_name', 'pull_head_name', 'pull_head_remote_id')
     def _compute_reference_name(self):
         """
         a unique reference for a branch inside a bundle.
@@ -61,7 +61,7 @@ class Branch(models.Model):
         for branch in self:
             if branch.target_branch_name and branch.pull_head_name:  # odoo:master-remove-duplicate-idx, owner:xxx, 
                 _, name = branch.pull_head_name.split(':')  # TODO fix where pullheadname doesnt have : -> old branch, redo get_pull_info
-                if branch.pull_head_repo_id:
+                if branch.pull_head_remote_id:
                     branch.reference_name = name
                 else:
                     branch.reference_name = branch.pull_head_name  # repo is not known, not in repo list must be an external pr, so use complete label
@@ -155,7 +155,7 @@ class Branch(models.Model):
                     branch.target_branch_name = pi['base']['ref']
                     branch.pull_head_name = pi['head']['label']
                     pull_head_repo_name = pi['head']['repo']['full_name']
-                    branch.pull_head_repo_id = self.env['runbot.repo'].search([('name', 'like', '%%:%s' % pull_head_repo_name)], limit=1)
+                    branch.pull_head_remote_id = self.env['runbot.remote'].search([('name', 'like', '%%:%s' % pull_head_repo_name)], limit=1)
 
             else:
                 branch.branch_name = ''
@@ -170,64 +170,29 @@ class Branch(models.Model):
         for branch in self:
             if branch.name:
                 if branch.is_pr:
-                    branch.branch_url = "https://%s/pull/%s" % (branch.repo_id.base, branch.branch_name)
+                    branch.branch_url = "https://%s/pull/%s" % (branch.remote_id.base, branch.branch_name)
                 else:
-                    branch.branch_url = "https://%s/tree/%s" % (branch.repo_id.base, branch.branch_name)
+                    branch.branch_url = "https://%s/tree/%s" % (branch.remote_id.base, branch.branch_name)
             else:
                 branch.branch_url = ''
 
     def _get_pull_info(self):
         self.ensure_one()
-        repo = self.repo_id
-        if repo.token and self.is_pr:
-            return repo._github('/repos/:owner/:repo/pulls/%s' % self.name, ignore_errors=True) or {}
+        remote = self.remote_id
+        if remote.token and self.is_pr:
+            return remote._github('/repos/:owner/:repo/pulls/%s' % self.name, ignore_errors=True) or {}
         return {}
 
     def _is_on_remote(self):
         # check that a branch still exists on remote
         self.ensure_one()
         branch = self
-        repo = branch.repo_id
+        remote = branch.remote_id
         try:
-            repo._git(['ls-remote', '-q', '--exit-code', repo.name, branch.name])
+            remote.repo_id._git(['ls-remote', '-q', '--exit-code', remote.name, branch.name])
         except CalledProcessError:
             return False
         return True
-
-    # this is now the bundle
-    #def _get_last_branch_name_builds(self): 
-    #    # naive way to find corresponding build, only matching branch name or pr pull_head_name and target_branch_name.
-    #    self.ensure_one()
-    #    domain = []
-    #    if self.pull_head_name:
-    #        domain = [('pull_head_name', 'like', '%%:%s' % self.pull_head_name.split(':')[-1]), ('target_branch_name', '=', self.target_branch_name)] # pr matching pull head name
-    #    else:
-    #        domain = [('name', '=', self.name)]
-    #    #domain += [('id', '!=', self.branch_id.id)]
-#
-    #    e = expression.expression(domain, self)
-    #    where_clause, where_params = e.to_sql()
-#
-    #    repo_ids = tuple(self.env['runbot.repo'].search([]).ids) # access rights
-    #    query = """
-    #        SELECT max(b.id)
-    #        FROM runbot_build b
-    #        JOIN runbot_branch br ON br.id = b.branch_id
-#
-    #        WHERE b.branch_id IN (
-    #            SELECT id from runbot_branch WHERE %s
-    #        )
-    #        AND b.build_type IN ('normal', 'rebuild')
-    #        AND b.repo_id in %%s
-    #        AND (b.hidden = false OR b.hidden IS NULL)
-    #        AND b.parent_id IS NULL
-    #        AND (br.no_build = false OR br.no_build IS NULL)
-    #        GROUP BY b.repo_id
-    #    """ % where_clause
-#
-    #    self.env.cr.execute(query, where_params + [repo_ids])
-    #    results = [r[0] for r in self.env.cr.fetchall()]
-    #    return self.env['runbot.build'].browse(results)
 
     @api.model_create_single
     def create(self, vals):
@@ -236,7 +201,7 @@ class Branch(models.Model):
         #    if coverage_config:
         #        vals['config_id'] = coverage_config
         branch = super().create(vals)
-        branch.bundle_id = self.env['runbot.bundle']._get(branch.reference_name, branch.repo_id.repo_group_id.project_id)
+        branch.bundle_id = self.env['runbot.bundle']._get(branch.reference_name, branch.remote_id.repo_id.project_id)
         assert branch.bundle_id
         return branch
         #note: bundle is created after branch because we need reference_name. Use new? Compute reference another way? or keep bundle_id not required?
@@ -256,128 +221,5 @@ class Branch(models.Model):
             last_build = branch._get_last_coverage_build()
             branch.coverage_result = last_build.coverage_result or 0.0
 
-    #def _get_closest_branch(self, target_repo_id):
-    #    """
-    #        Return branch id of the closest branch based on name or pr informations.
-    #    """
-    #    self.ensure_one()
-    #    Branch = self.env['runbot.branch']
-#
-    #    repo = self.repo_id
-    #    name = self.pull_head_name or self.branch_name
-#
-    #    target_repo = self.env['runbot.repo'].browse(target_repo_id)
-#
-    #    target_repo_ids = [target_repo.id]
-    #    r = target_repo.duplicate_id
-    #    while r:
-    #        if r.id in target_repo_ids:
-    #            break
-    #        target_repo_ids.append(r.id)
-    #        r = r.duplicate_id
-#
-    #    _logger.debug('Search closest of %s (%s) in repos %r', name, repo.name, target_repo_ids)
-#
-    #    def sort_by_repo(branch):
-    #        return (
-    #            not branch.sticky,      # sticky first
-    #            target_repo_ids.index(branch.repo_id[0].id),
-    #            -1 * len(branch.branch_name),  # little change of logic here, was only sorted on branch_name in prefix matching case before
-    #            -1 * branch.id
-    #        )
-#
-    #    # 1. same name, not a PR
-    #    if not self.pull_head_name:  # not a pr
-    #        domain = [
-    #            ('repo_id', 'in', target_repo_ids),
-    #            ('branch_name', '=', self.branch_name),
-    #            ('name', '=like', 'refs/heads/%'),
-    #        ]
-    #        targets = Branch.search(domain, order='id DESC')
-    #        targets = sorted(targets, key=sort_by_repo)
-    #        if targets and targets[0]._is_on_remote():
-    #            return (targets[0], 'exact')
-#
-    #    # 2. PR with head name equals
-    #    if self.pull_head_name:
-    #        domain = [
-    #            ('repo_id', 'in', target_repo_ids),
-    #            ('pull_head_name', '=', self.pull_head_name),
-    #            ('name', '=like', 'refs/pull/%'),
-    #        ]
-    #        pulls = Branch.search(domain, order='id DESC')
-    #        pulls = sorted(pulls, key=sort_by_repo)
-    #        for pull in Branch.browse([pu['id'] for pu in pulls]):
-    #            pi = pull._get_pull_info()
-    #            if pi.get('state') == 'open':
-    #                if ':' in self.pull_head_name:
-    #                    (repo_name, pr_branch_name) = self.pull_head_name.split(':')
-    #                    repo = self.env['runbot.repo'].browse(target_repo_ids).filtered(lambda r: ':%s/' % repo_name in r.name)
-    #                    # most of the time repo will be pull.repo_id.duplicate_id, but it is still possible to have a pr pointing the same repo
-    #                    if repo:
-    #                        pr_branch_ref = 'refs/heads/%s' % pr_branch_name
-    #                        pr_branch = self._get_or_create_branch(repo.id, pr_branch_ref)
-    #                        # use _get_or_create_branch in case a pr is scanned before pull_head_name branch.
-    #                        return (pr_branch, 'exact PR')
-    #                return (pull, 'exact PR')
-#
-    #    # 4.Match a PR in enterprise without community PR
-    #    # Moved before 3 because it makes more sense
-    #    if self.pull_head_name:
-    #        if self.name.startswith('refs/pull'):
-    #            if ':' in self.pull_head_name:
-    #                (repo_name, pr_branch_name) = self.pull_head_name.split(':')
-    #                repos = self.env['runbot.repo'].browse(target_repo_ids).filtered(lambda r: ':%s/' % repo_name in r.name)
-    #            else:
-    #                pr_branch_name = self.pull_head_name
-    #                repos = target_repo
-    #            if repos:
-    #                duplicate_branch_name = 'refs/heads/%s' % pr_branch_name
-    #                domain = [
-    #                    ('repo_id', 'in', tuple(repos.ids)),
-    #                    ('branch_name', '=', pr_branch_name),
-    #                    ('pull_head_name', '=', False),
-    #                ]
-    #                targets = Branch.search(domain, order='id DESC')
-    #                targets = sorted(targets, key=sort_by_repo)
-    #                if targets and targets[0]._is_on_remote():
-    #                    return (targets[0], 'no PR')
-#
-    #    # 3. Match a branch which is the dashed-prefix of current branch name
-    #    if not self.pull_head_name:
-    #        if '-' in self.branch_name:
-    #            name_start = 'refs/heads/%s' % self.branch_name.split('-')[0]
-    #            domain = [('repo_id', 'in', target_repo_ids), ('name', '=like', '%s%%' % name_start)]
-    #            branches = Branch.search(domain, order='id DESC')
-    #            branches = sorted(branches, key=sort_by_repo)
-    #            for branch in branches:
-    #                if self.branch_name.startswith('%s-' % branch.branch_name) and branch._is_on_remote():
-    #                    return (branch, 'prefix')
-#
-    #    # 5. last-resort value
-    #    if self.target_branch_name:
-    #        default_target_ref = 'refs/heads/%s' % self.target_branch_name
-    #        default_branch = self.search([('repo_id', 'in', target_repo_ids), ('name', '=', default_target_ref)], limit=1)
-    #        if default_branch:
-    #            return (default_branch, 'pr_target')
-#
-    #    default_target_ref = 'refs/heads/master'
-    #    default_branch = self.search([('repo_id', 'in', target_repo_ids), ('name', '=', default_target_ref)], limit=1)
-    #    # we assume that master will always exists
-    #    return (default_branch, 'default')
-
-    def _branch_exists(self, branch_id):
-        Branch = self.env['runbot.branch']
-        branch = Branch.search([('id', '=', branch_id)])
-        if branch and branch[0]._is_on_remote():
-            return True
-        return False
-
-    def _get_or_create_branch(self, repo_id, name):
-        res = self.search([('repo_id', '=', repo_id), ('name', '=', name)], limit=1)
-        if res:
-            return res
-        _logger.warning('creating missing branch %s', name)
-        Branch = self.env['runbot.branch']
-        branch = Branch.create({'repo_id': repo_id, 'name': name})
-        return branch
+    # TODO check get_closest_branch corner cases
+    # TODO branch alive field

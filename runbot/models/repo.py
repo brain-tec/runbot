@@ -45,16 +45,92 @@ class RepoTrigger(models.Model):
     repos_group_ids = fields.Many2many('runbot.repo.group', relation='runbot_trigger_triggers', string="Triggers")
     dependency_ids = fields.Many2many('runbot.repo.group', relation='runbot_trigger_dependencies', string="Dependencies")
     config_id = fields.Many2one('runbot.build.config', 'Config')
+
     # TODO add repo_module_id to replace modules_auto (many2many or option to only use trigger)
 
 
-class RepoGroup(models.Model):
+class Remote(models.Model):
     """
     Regroups repo and it duplicates (forks): odoo+odoo-dev for each repo
     """
-    _name = 'runbot.repo.group'
-    _inherit = 'mail.thread'
-    _description = 'Main repository and forks'
+    _name = 'runbot.remote'
+    _description = 'Remote'
+    _order = 'sequence, id'
+
+    name = fields.Char('Repository', required=True)
+    sequence = fields.Integer('Sequence')
+    repo_id = fields.Many2one('runbot.repo', required=True)
+    short_name = fields.Char('Short name', compute='_compute_short_name')
+    remote_name = fields.Char('Remote name', compute='_compute_remote_name')
+    base = fields.Char(compute='_get_base_url', string='Base URL', readonly=True)  # Could be renamed to a more explicit name like base_url
+    fetch_pull = fields.Boolean('Fetch PR', default=True)
+    fetch_heads = fields.Boolean('Fetch branches', default=True)
+    token = fields.Char("Github token", groups="runbot.group_runbot_admin")
+
+    @api.model
+    def _sanitized_name(self, name):
+        for i in '@:/':
+            name = name.replace(i, '_')
+        return name
+
+    @api.depends('name')
+    def _get_base_url(self):
+        for repo in self:
+            name = re.sub('.+@', '', repo.name)
+            name = re.sub('^https://', '', name)  # support https repo style
+            name = re.sub('.git$', '', name)
+            name = name.replace(':', '/')
+            repo.base = name
+
+    @api.depends('name', 'base')
+    def _compute_short_name(self):
+        for repo in self:
+            repo.short_name = '/'.join(repo.base.split('/')[-2:])
+
+    def _compute_remote_name(self):
+        for repo in self:
+            repo.remote_name = self._sanitized_name(repo.short_name)
+
+    def _github(self, url, payload=None, ignore_errors=False, nb_tries=2):
+        """Return a http request to be sent to github"""
+        for repo in self:
+            if not repo.token:
+                return
+            match_object = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
+            if match_object:
+                url = url.replace(':owner', match_object.group(2))
+                url = url.replace(':repo', match_object.group(3))
+                url = 'https://api.%s%s' % (match_object.group(1), url)
+                session = requests.Session()
+                session.auth = (repo.token, 'x-oauth-basic')
+                session.headers.update({'Accept': 'application/vnd.github.she-hulk-preview+json'})
+                try_count = 0
+                while try_count < nb_tries:
+                    try:
+                        if payload:
+                            response = session.post(url, data=json.dumps(payload))
+                        else:
+                            response = session.get(url)
+                        response.raise_for_status()
+                        if try_count > 0:
+                            _logger.info('Success after %s tries' % (try_count + 1))
+                        return response.json()
+                    except Exception as e:
+                        try_count += 1
+                        if try_count < nb_tries:
+                            time.sleep(2)
+                        else:
+                            if ignore_errors:
+                                _logger.exception('Ignored github error %s %r (try %s/%s)' % (url, payload, try_count + 1, nb_tries))
+                            else:
+                                raise
+
+class Repo(models.Model):
+
+    _name = "runbot.repo"
+    _description = "Repo"
+    _order = 'sequence, id'
+
 
     name = fields.Char("Repo forks descriptions", unique=True)  # odoo/enterprise/upgrade/security/runbot/design_theme
     #main = fields.Many2one('runbot.repo', "Main repo")
@@ -70,30 +146,15 @@ class RepoGroup(models.Model):
     manifest_files = fields.Char('Manifest files', help='Comma separated list of possible manifest files', default='__manifest__.py')
     addons_paths = fields.Char('Addons paths', help='Comma separated list of possible addons path', default='')
 
-
-class Repo(models.Model):
-
-    _name = "runbot.repo"
-    _description = "Repo"
-    _order = 'sequence, id'
-
-    repo_group_id = fields.Many2one('runbot.repo.group', required=True)
-    name = fields.Char('Repository', required=True)
-    short_name = fields.Char('Short name', compute='_compute_short_name')
-    remote_name = fields.Char('Remote name', compute='_compute_remote_name')
     sequence = fields.Integer('Sequence')
     path = fields.Char(compute='_get_path', string='Directory', readonly=True)
-    base = fields.Char(compute='_get_base_url', string='Base URL', readonly=True)  # Could be renamed to a more explicit name like base_url
     mode = fields.Selection([('disabled', 'Disabled'),
                              ('poll', 'Poll'),
                              ('hook', 'Hook')],
                             default='poll',
                             string="Mode", required=True, help="hook: Wait for webhook on /runbot/hook/<id> i.e. github push event")
-    fetch_pull = fields.Boolean('Fetch PR', default=True)
-    fetch_heads = fields.Boolean('Fetch branches', default=True)
     hook_time = fields.Float('Last hook time', compute='_compute_hook_time')
     get_ref_time = fields.Float('Last refs db update', compute='_compute_get_ref_time')
-    token = fields.Char("Github token", groups="runbot.group_runbot_admin")
 
     def _compute_get_ref_time(self):
         self.env.cr.execute("""
@@ -161,30 +222,6 @@ class Repo(models.Model):
         for repo in self:
             repo.path = os.path.join(root, 'repo', repo._sanitized_name(repo.name))
 
-    @api.model
-    def _sanitized_name(self, name):
-        for i in '@:/':
-            name = name.replace(i, '_')
-        return name
-
-    @api.depends('name')
-    def _get_base_url(self):
-        for repo in self:
-            name = re.sub('.+@', '', repo.name)
-            name = re.sub('^https://', '', name)  # support https repo style
-            name = re.sub('.git$', '', name)
-            name = name.replace(':', '/')
-            repo.base = name
-
-    @api.depends('name', 'base')
-    def _compute_short_name(self):
-        for repo in self:
-            repo.short_name = '/'.join(repo.base.split('/')[-2:])
-
-    def _compute_remote_name(self):
-        for repo in self:
-            repo.remote_name = self._sanitized_name(repo.short_name)
-
     def _git(self, cmd):
         """Execute a git command 'cmd'"""
         self.ensure_one()
@@ -247,40 +284,6 @@ class Repo(models.Model):
         except subprocess.CalledProcessError:
             return False
         return True
-
-    def _github(self, url, payload=None, ignore_errors=False, nb_tries=2):
-        """Return a http request to be sent to github"""
-        for repo in self:
-            if not repo.token:
-                return
-            match_object = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
-            if match_object:
-                url = url.replace(':owner', match_object.group(2))
-                url = url.replace(':repo', match_object.group(3))
-                url = 'https://api.%s%s' % (match_object.group(1), url)
-                session = requests.Session()
-                session.auth = (repo.token, 'x-oauth-basic')
-                session.headers.update({'Accept': 'application/vnd.github.she-hulk-preview+json'})
-                try_count = 0
-                while try_count < nb_tries:
-                    try:
-                        if payload:
-                            response = session.post(url, data=json.dumps(payload))
-                        else:
-                            response = session.get(url)
-                        response.raise_for_status()
-                        if try_count > 0:
-                            _logger.info('Success after %s tries' % (try_count + 1))
-                        return response.json()
-                    except Exception as e:
-                        try_count += 1
-                        if try_count < nb_tries:
-                            time.sleep(2)
-                        else:
-                            if ignore_errors:
-                                _logger.exception('Ignored github error %s %r (try %s/%s)' % (url, payload, try_count + 1, nb_tries))
-                            else:
-                                raise
 
     def _get_fetch_head_time(self):
         self.ensure_one()
@@ -502,7 +505,7 @@ class Repo(models.Model):
 
     def build_domain_host(self, host, domain=None):
         domain = domain or []
-        return [('repo_id', 'in', self.ids), ('host', '=', host.name)] + domain
+        return [('host', '=', host.name)] + domain
 
     def _get_builds_with_requested_actions(self, host):
         return self.env['runbot.build'].search(self.build_domain_host(host, [('requested_action', 'in', ['wake_up', 'deathrow'])]))
