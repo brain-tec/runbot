@@ -202,7 +202,7 @@ class TestBuildResult(RunbotCase):
         # self.assertEqual(cmd[addons_path_pos], 'bar/addons,bar/core/addons')
 
     def test_build_cmd_server_path_with_dep(self):
-        """ test that the server path and addons path """
+        """ test that the server path and addons path are correct"""
 
         def is_file(file):
             self.assertIn(file, [
@@ -232,8 +232,9 @@ class TestBuildResult(RunbotCase):
             'name': 'refs/heads/master'
         })
 
-        commit = self.Commit.create ({
+        commit = self.Commit.create({
             'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'repo_group_id': self.repo_ent.repo_group_id.id,
         })
 
         self.build_commit = self.BuildCommit.create({
@@ -385,7 +386,7 @@ class TestBuildResult(RunbotCase):
             'parent_id': build_other_host.id
         })
 
-        self.branch.repo_id._gc_testing(host)
+        self.repo._gc_testing(host)
         self.assertFalse(build_other_host.requested_action)
         self.assertFalse(child_build.requested_action)
 
@@ -395,7 +396,7 @@ class TestBuildResult(RunbotCase):
             'host': 'runbot_xxx',
         })
 
-        self.branch.repo_id._gc_testing(host)
+        self.repo._gc_testing(host)
         self.assertFalse(build_same_branch.requested_action)
 
         build_pending = self.create_build({
@@ -403,7 +404,7 @@ class TestBuildResult(RunbotCase):
             'local_state': 'pending',
         })
 
-        self.branch.repo_id._gc_testing(host)
+        self.repo._gc_testing(host)
         self.assertEqual(build_other_host.requested_action, 'deathrow')
         self.assertEqual(child_build.requested_action, 'deathrow')
         self.assertFalse(build_same_branch.requested_action)
@@ -461,33 +462,24 @@ class TestBuildResult(RunbotCase):
 
     def test_children(self):
         build1 = self.create_build({
-            'branch_id': self.branch_10.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'params_id': self.params.id,
         })
         build1_1 = self.create_build({
-            'branch_id': self.branch_10.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'params_id': self.params.id,
             'parent_id': build1.id,
             'hidden': True,
-            'extra_params': '2',  # avoid duplicate
         })
         build1_2 = self.create_build({
-            'branch_id': self.branch_10.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'params_id': self.params.id,
             'parent_id': build1.id,
-            'extra_params': '3',
         })
         build1_1_1 = self.create_build({
-            'branch_id': self.branch_10.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'params_id': self.params.id,
             'parent_id': build1_1.id,
-            'extra_params': '4',
         })
         build1_1_2 = self.create_build({
-            'branch_id': self.branch_10.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'params_id': self.params.id,
             'parent_id': build1_1.id,
-            'extra_params': '5',
         })
 
         def assert_state(global_state, build):
@@ -544,31 +536,6 @@ class TestBuildResult(RunbotCase):
         assert_state('done', build1_1_1)
         assert_state('done', build1_1_2)
 
-    #def test_duplicate_childrens(self):
-    #    build_old = self.create_build({
-    #        'branch_id': self.branch_10.id,
-    #        'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-    #        'extra_params': '0',
-    #        'local_state': 'done'
-    #    })
-    #    build_parent = self.create_build({
-    #        'branch_id': self.branch_10.id,
-    #        'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-    #        'extra_params': '1',
-    #    })
-    #    build_child = self.create_build({
-    #        'branch_id': self.branch_10.id,
-    #        'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-    #        'parent_id': build_parent.id,
-    #        'extra_params': '0',
-    #    })
-    #    build_parent.local_state = 'done'
-    #    self.assertEqual(build_child.local_state, 'duplicate')
-    #    self.assertEqual(build_child.duplicate_id, build_old)
-    #    self.assertEqual(build_child.global_state, 'done')
-    #    self.assertEqual(build_parent.global_state, 'done')
-
-
 class TestClosestBranch(RunbotCase):
 
     def branch_description(self, branch):
@@ -579,6 +546,7 @@ class TestClosestBranch(RunbotCase):
         extra_repo = branch.repo_id.dependency_ids[0]
         self.assertEqual(closest, branch._get_closest_branch(extra_repo.id), "build on %s didn't had the extected closest branch" % self.branch_description(branch))
 
+    # TODO adapt to project matching
     #def assertDuplicate(self, branch1, branch2, b1_closest=None, b2_closest=None, noDuplicate=False):
     #    """
     #    Test that the creation of a build on branch1 and branch2 detects duplicate, no matter the order.

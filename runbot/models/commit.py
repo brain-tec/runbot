@@ -29,8 +29,9 @@ class Commit(models.Model):
                     module = os.path.basename(os.path.dirname(manifest_path))
                     yield (addons_path, module, manifest_file_name)
 
-    def export(self):
-        return self.repo._git_export(self.name)
+    def export(self, base_repo):
+        assert base_repo.repo_group_id = self.repo_group_id
+        return base_repo._git_export(self.name) 
 
     def read_source(self, file, mode='r'):
         file_path = self._source_path(file)

@@ -33,7 +33,8 @@ class TestBranch(RunbotCase):
         }
         pr = self.Branch.create({
             'repo_id': self.repo.id,
-            'name': 'refs/pull/12345'
+            'name': '12345',
+            'is_pr': True,
         })
         self.assertEqual(pr.branch_name, '12345')
         self.assertEqual(pr.branch_url, 'https://example.com/foo/bar/pull/12345')

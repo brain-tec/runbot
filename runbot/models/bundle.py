@@ -265,21 +265,19 @@ class Batch(models.Model):
             add_direction=True, locale='en'
         )
 
-    def _new_commit(self, commit, repo):
+    def _new_commit(self, commit):
         # if not the same hash for repo_group:
         self.last_update = fields.Datetime.now()
         for batch_commit in self.batch_commit_ids:
             # case 1: a commit already exists for the repo (pr+branch, or fast push)
             if batch_commit.commit_id.repo_group_id == commit.repo_group_id:
                 batch_commit.commit_id = commit
-                batch_commit.repo_id = repo
                 break
         else:
             self.env['runbot.batch.commit'].create({
                 'commit_id': commit.id,
                 'batch_id': self.id,
-                'match_type': 'head',
-                'repo_id': repo.id,
+                'match_type': 'new',
             })
 
     def _skip(self):

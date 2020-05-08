@@ -42,6 +42,7 @@ class Branch(models.Model):
     no_auto_build = fields.Boolean("Don't automatically build commit on this branch", default=False)
     make_stats = fields.Boolean('Extract stats from logs', compute='_compute_make_stats', store=True)
     dname = fields.Char('Display name', compute='_compute_dname')
+    is_pr = fields.Bollean('IS a pr', required=True)
 
     @api.depends('branch_name', 'repo_id.short_name')
     def _compute_dname(self):
@@ -168,7 +169,7 @@ class Branch(models.Model):
         """compute the branch url based on branch_name"""
         for branch in self:
             if branch.name:
-                if re.match('^[0-9]+$', branch.branch_name):
+                if branch.is_pr:
                     branch.branch_url = "https://%s/pull/%s" % (branch.repo_id.base, branch.branch_name)
                 else:
                     branch.branch_url = "https://%s/tree/%s" % (branch.repo_id.base, branch.branch_name)
@@ -178,9 +179,8 @@ class Branch(models.Model):
     def _get_pull_info(self):
         self.ensure_one()
         repo = self.repo_id
-        if repo.token and self.name.startswith('refs/pull/'):
-            pull_number = self.name[len('refs/pull/'):]
-            return repo._github('/repos/:owner/:repo/pulls/%s' % pull_number, ignore_errors=True) or {}
+        if repo.token and self.is_pr:
+            return repo._github('/repos/:owner/:repo/pulls/%s' % self.name, ignore_errors=True) or {}
         return {}
 
     def _is_on_remote(self):

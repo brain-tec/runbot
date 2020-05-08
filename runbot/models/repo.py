@@ -56,7 +56,7 @@ class RepoGroup(models.Model):
     _inherit = 'mail.thread'
     _description = 'Main repository and forks'
 
-    name = fields.Char("Repo forks descriptions")  # odoo/enterprise/upgrade/security/runbot/design_theme
+    name = fields.Char("Repo forks descriptions", unique=True)  # odoo/enterprise/upgrade/security/runbot/design_theme
     #main = fields.Many2one('runbot.repo', "Main repo")
     #main_regex = fields.Char('regex to define if a branch is a version or not')
     repo_ids = fields.One2many('runbot.repo', 'repo_group_id', "Repo and forks")
@@ -69,28 +69,7 @@ class RepoGroup(models.Model):
     server_files = fields.Char('Server files', help='Comma separated list of possible server files')  # odoo-bin,openerp-server,openerp-server.py
     manifest_files = fields.Char('Manifest files', help='Comma separated list of possible manifest files', default='__manifest__.py')
     addons_paths = fields.Char('Addons paths', help='Comma separated list of possible addons path', default='')
-    #default_branch/bundle?
 
-    #odoo
-    #   -odoo/odoo
-    #   -odoo-dev/odoo
-    #enterprise
-    #   -odoo/enterprise
-    #   -odoo-dev/enterprise
-    #upgarde
-    #   -odoo/upgrade
-    #design-theme
-    #   -odoo/design-theme
-    #   -odoo-dev/design-theme
-    #design-theme
-    #   -odoo/design-theme
-    #   -odoo-dev/design-theme
-    #odoo-security
-    #   -odoo/odoo-security
-    #enterprise-security
-    #   -enterprise/enterprise-security
-    #runbot
-    #   -odoo/runbot
 
 class Repo(models.Model):
 
@@ -100,7 +79,8 @@ class Repo(models.Model):
 
     repo_group_id = fields.Many2one('runbot.repo.group', required=True)
     name = fields.Char('Repository', required=True)
-    short_name = fields.Char('Short name', compute='_compute_short_name', store=False, readonly=True)
+    short_name = fields.Char('Short name', compute='_compute_short_name')
+    remote_name = fields.Char('Remote name', compute='_compute_remote_name')
     sequence = fields.Integer('Sequence')
     path = fields.Char(compute='_get_path', string='Directory', readonly=True)
     base = fields.Char(compute='_get_base_url', string='Base URL', readonly=True)  # Could be renamed to a more explicit name like base_url
@@ -109,8 +89,8 @@ class Repo(models.Model):
                              ('hook', 'Hook')],
                             default='poll',
                             string="Mode", required=True, help="hook: Wait for webhook on /runbot/hook/<id> i.e. github push event")
-    fetch_pr = fields.Boolean('Fetch PR', default=True)
-    fetch_branches = fields.Boolean('Fetch branches', default=True)
+    fetch_pull = fields.Boolean('Fetch PR', default=True)
+    fetch_heads = fields.Boolean('Fetch branches', default=True)
     hook_time = fields.Float('Last hook time', compute='_compute_hook_time')
     get_ref_time = fields.Float('Last refs db update', compute='_compute_get_ref_time')
     token = fields.Char("Github token", groups="runbot.group_runbot_admin")
@@ -172,7 +152,7 @@ class Repo(models.Model):
         returns the absolute path to the source folder of the repo (adding option *path)
         """
         self.ensure_one()
-        return os.path.join(self._root(), 'sources', self._get_repo_name_part(), sha, *path)
+        return os.path.join(self._root(), 'sources', self.repo_group_id.name, sha, *path)
 
     @api.depends('name')
     def _get_path(self):
@@ -201,9 +181,9 @@ class Repo(models.Model):
         for repo in self:
             repo.short_name = '/'.join(repo.base.split('/')[-2:])
 
-    def _get_repo_name_part(self):
-        self.ensure_one()
-        return self._sanitized_name(self.name.split('/')[-1])
+    def _compute_remote_name(self):
+        for repo in self:
+            repo.remote_name = self._sanitized_name(repo.short_name)
 
     def _git(self, cmd):
         """Execute a git command 'cmd'"""
@@ -229,7 +209,7 @@ class Repo(models.Model):
             self._update(force=True)
             if not self._hash_exists(sha):
                 try:
-                    result = self._git(['fetch', 'origin', sha])
+                    result = self._git(['fetch', 'all', sha])
                 except:
                     pass
                 if not self._hash_exists(sha):
@@ -250,7 +230,7 @@ class Repo(models.Model):
         ln_param = icp.get_param('runbot_migration_ln', default='')
         migration_repo_id = int(icp.get_param('runbot_migration_repo_id', default=0))
         if ln_param and migration_repo_id and self.server_files:
-            scripts_dir = self.env['runbot.repo'].browse(migration_repo_id)._get_repo_name_part()
+            scripts_dir = self.env['runbot.repo'].browse(migration_repo_id).repo_group_id.name
             try:
                 os.symlink('/data/build/%s' % scripts_dir,  self._source_path(sha, ln_param))
             except FileNotFoundError:
@@ -336,12 +316,16 @@ class Repo(models.Model):
         names = [r[0] for r in refs]
         branches = self.env['runbot.branch'].search([('name', 'in', names), ('repo_id', '=', self.id)])
         ref_branches = {branch.name: branch for branch in branches}
-        for name, sha, date, author, author_email, subject, committer, committer_email in refs:
+        for ref_name, sha, date, author, author_email, subject, committer, committer_email in refs:
             if not ref_branches.get(name):
+                # format example:
+                # refs/ruodoo-dev/heads/12.0-must-fail
+                # refs/ruodoo/pull/1
+                _, remote_name, branch_type, name = ref_name.split('/')
+                repo_id = self.repo_ids.filtered(lambda r: r.remote_name = remote_name).id
                 _logger.debug('repo %s found new branch %s', self.name, name)
-                new_branch = self.env['runbot.branch'].create({'repo_id': self.id, 'name': name})
-                ref_branches[name] = new_branch
-
+                new_branch = self.env['runbot.branch'].create({'repo_id': repo_id, 'name': name, 'is_pr': branch_type == 'pull'})
+                ref_branches[ref_name] = new_branch
         return ref_branches
 
     def _find_new_commits(self, refs, ref_branches):
@@ -363,7 +347,7 @@ class Repo(models.Model):
             if branch.head_name != sha: # new push on branch
                 _logger.debug('repo %s branch %s new commit found: %s', self.name, branch.name, sha)
                 repo_group_id = self.repo_group_id.id
-                commit = self.env['runbot.commit'].search([('name', '=', sha), ('repo_group_id', '=', repo_group_id)])
+                commit = self.env['runbot.'commit''].search([('name', '=', sha), ('repo_group_id', '=', repo_group_id)])
                 if not commit:
                     commit = self.env['runbot.commit'].create({
                         'name': sha,
@@ -384,7 +368,8 @@ class Repo(models.Model):
                 # TODO check  if repo group of branch is a trigger
                 # todo move following logic to bundle ? bundle._notify_new_commit()
                 bundle_batch = bundle._get_preparing_batch()
-                bundle_batch._new_commit(commit, self)
+                bundle_batch._new_commit(commit)
+                # TODO add reflog
 
     def _create_batches(self):
         """ Find new commits in physical repos"""
@@ -416,6 +401,24 @@ class Repo(models.Model):
         if not os.path.isdir(os.path.join(repo.path, 'refs')):
             _logger.info("Cloning repository '%s' in '%s'" % (repo.name, repo.path))
             subprocess.call(['git', 'clone', '--bare', repo.name, repo.path])
+            # TODO bare init and add remote per repo
+            # TODO bare update remotes on write/create
+            # -> maybe the easiest solution would be to create a qweb view to write on config.
+            # -> configure by repo what to fecth and add this to remote config
+            # example: 
+            # [core]
+            #     repositoryformatversion = 0
+            #     filemode = true
+            #     bare = true
+            # [remote "ruodoo"]
+            #     url = git@github.com:ruodoo/odoo.git
+            #     fetch = +refs/heads/*:refs/remotes/ruodoo/*
+            #     fetch = +refs/pull/*/head:refs/remotes/ruodoo-dev/pr/*
+            # [remote "ruodoo-dev"]
+            #     url = git@github.com:ruodoo-dev/odoo.git
+            #     fetch = +refs/heads/*:refs/remotes/ruodoo-dev/*
+
+            # this example will fetch pr on ruodoo/odoo but not on odoo/odoo
 
     def _update_git(self, force):
         """ Update the git repo on FS """
@@ -426,6 +429,7 @@ class Repo(models.Model):
         if not os.path.isdir(os.path.join(repo.path)):
             os.makedirs(repo.path)
         self._clone()
+        # TODO bare check repo in remotes
 
         # check for mode == hook
         fname_fetch_head = os.path.join(repo.path, 'FETCH_HEAD')
@@ -767,7 +771,7 @@ class Repo(models.Model):
             to_keep = set()
             repos = self.search([('mode', '!=', 'disabled')])
             for repo in repos:
-                repo_source = os.path.join(repo._root(), 'sources', repo._get_repo_name_part(), '*')
+                repo_source = os.path.join(repo._root(), 'sources', repo.repo_group_id.name, '*')
                 for source_dir in glob.glob(repo_source):
                     if source_dir not in cannot_be_deleted_path:
                         to_delete.add(source_dir)

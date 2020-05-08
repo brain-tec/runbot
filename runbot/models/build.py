@@ -736,9 +736,6 @@ class BuildResult(models.Model):
         return commit._source_path('openerp', *path)
 
     def _docker_source_folder(self, build_commit):
-        # in case some build have commits with the same repo name (ex: foo/bar, foo-ent/bar)
-        # it can be usefull to uniquify commit export path using hash
-        # TODO FIX or remove TO DISCUSS
         return build_commit.repo_id.repo_group_id.name
 
     def _checkout(self, commits=None):

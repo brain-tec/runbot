@@ -13,14 +13,6 @@ class TestBuildConfigStep(RunbotCase):
         #    'repo_id': self.repo.id,
         #    'name': 'refs/heads/master'
         #})
-        #self.branch_10 = self.Branch.create({
-        #    'repo_id': self.repo.id,
-        #    'name': 'refs/heads/10.0'
-        #})
-        #self.branch_11 = self.Branch.create({
-        #    'repo_id': self.repo.id,
-        #    'name': 'refs/heads/11.0'
-        #})
         self.Build = self.env['runbot.build']
         self.ConfigStep = self.env['runbot.build.config.step']
         self.Config = self.env['runbot.build.config']
