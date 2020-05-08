@@ -5,27 +5,15 @@ from .common import RunbotCase
 
 class TestBranch(RunbotCase):
 
-    def setUp(self):
-        super(TestBranch, self).setUp()
-        self.remote = self.env['runbot.remote'].create({
-            'name': 'bla@example.com:foo/bar',
-            'token': '123',
-            'repo_id': self.repo_bar.id
-        })
-        self.remote_dev = self.env['runbot.remote'].create({
-            'name': 'bla@example.com:foo-dev/bar',
-            'token': '123', 
-            'repo_id': self.repo_bar.id
-        })
-
     def test_base_fields(self):
         branch = self.Branch.create({
-            'remote_id': self.remote.id,
-            'name': 'master'
+            'remote_id': self.remote_server.id,
+            'name': 'master',
+            'is_pr': False,
         })
 
         self.assertEqual(branch.branch_name, 'master')
-        self.assertEqual(branch.branch_url, 'https://example.com/foo/bar/tree/master')
+        self.assertEqual(branch.branch_url, 'https://example.com/base/server/tree/master')
         #self.assertEqual(branch.config_id, self.env.ref('runbot.runbot_build_config_default'))
 
     def test_pull_request(self):
@@ -35,43 +23,29 @@ class TestBranch(RunbotCase):
             'head' : {'label': 'foo-dev:bar_branch', 'repo': {'full_name': 'foo-dev/bar'}},
         }
         pr = self.Branch.create({
-            'repo_id': self.repo.id,
+            'remote_id': self.remote_server.id,
             'name': '12345',
             'is_pr': True,
         })
         self.assertEqual(pr.name, '12345')
-        self.assertEqual(pr.branch_name, 'bar_branch') # TODO check juste an idea to recycle branch_name
-        self.assertEqual(pr.branch_url, 'https://example.com/foo/bar/pull/12345')
+        #self.assertEqual(pr.branch_name, 'bar_branch') # TODO check juste an idea to recycle branch_name
+        self.assertEqual(pr.branch_url, 'https://example.com/base/server/pull/12345')
         self.assertEqual(pr.target_branch_name, 'master')
         self.assertEqual(pr.pull_head_name, 'foo-dev:bar_branch')
 
-    #def test_coverage_in_name(self):
-    #    """Test that coverage in branch name enables coverage"""
-    #    branch = self.Branch.create({
-    #        'repo_id': self.repo.id,
-    #        'name': 'refs/head/foo-branch-bar'
-    #    })
-    #    #self.assertEqual(branch.config_id, self.env.ref('runbot.runbot_build_config_default'))
-    #    cov_branch = self.Branch.create({
-    #        'repo_id': self.repo.id,
-    #        'name': 'refs/head/foo-use-coverage-branch-bar'
-    #    })
-    #    #self.assertEqual(cov_branch.config_id, self.env.ref('runbot.runbot_build_config_test_coverage'))
-
-    # TODO fix this feature?
+    # TODO fix coverage feature?
 
 
 class TestBranchRelations(RunbotCase):
 
     def setUp(self):
         super(TestBranchRelations, self).setUp()
-        self.repo = self.env['runbot.repo'].create({'name': 'bla@example.com:foo/bar', 'token': '123', 'repo_group_id': self.repo_group.id})
-        self.repodev = self.env['runbot.repo'].create({'name': 'bla@example.com:foo-dev/bar',  'token': '123', 'repo_group_id':self.repo_group.id })
 
         def create_base(name):
             branch = self.Branch.create({
-                'repo_id': self.repo.id,
-                'name': 'refs/heads/%s' % name,
+                'remote_id': self.remote_server.id,
+                'name': name,
+                'is_pr': False,
             })
             branch.bundle_id.is_base = True
             return branch
@@ -86,8 +60,9 @@ class TestBranchRelations(RunbotCase):
 
     def test_relations_master_dev(self):
         b = self.Branch.create({
-                'repo_id': self.repodev.id,
-                'name': 'refs/heads/master-test-tri',
+                'remote_id': self.remote_server_dev.id,
+                'name': 'master-test-tri',
+                'is_pr': False,
             })
         self.assertEqual(b.bundle_id.base_id.name, 'master')
         self.assertEqual(b.bundle_id.previous_version_base_id.name, '13.0')
@@ -101,8 +76,9 @@ class TestBranchRelations(RunbotCase):
 
     def test_relations_no_intermediate(self):
         b = self.Branch.create({
-                'repo_id': self.repodev.id,
-                'name': 'refs/heads/saas-13.1-test-tri',
+                'remote_id': self.remote_server_dev.id,
+                'name': 'saas-13.1-test-tri',
+                'is_pr': False,
             })
         self.assertEqual(b.bundle_id.base_id.name, 'saas-13.1')
         self.assertEqual(b.bundle_id.previous_version_base_id.name, '13.0')
@@ -110,8 +86,9 @@ class TestBranchRelations(RunbotCase):
 
     def test_relations_old_branch(self):
         b = self.Branch.create({
-                'repo_id': self.repodev.id,
-                'name': 'refs/heads/11.0-test-tri',
+                'remote_id': self.remote_server_dev.id,
+                'name': '11.0-test-tri',
+                'is_pr': False,
             })
         self.assertEqual(b.bundle_id.base_id.name, '11.0')
         self.assertEqual(b.bundle_id.previous_version_base_id.name, False)
@@ -119,8 +96,9 @@ class TestBranchRelations(RunbotCase):
 
     def test_relations_closest_forced(self):
         b = self.Branch.create({
-                'repo_id': self.repodev.id,
-                'name': 'refs/heads/master-test-tri',
+                'remote_id': self.remote_server_dev.id,
+                'name': 'master-test-tri',
+                'is_pr': False,
             })
         self.assertEqual(b.bundle_id.base_id.name, 'master')
         self.assertEqual(b.bundle_id.previous_version_base_id.name, '13.0')
@@ -134,8 +112,9 @@ class TestBranchRelations(RunbotCase):
 
     def test_relations_no_match(self):
         b = self.Branch.create({
-                'repo_id': self.repodev.id,
-                'name': 'refs/heads/icantnamemybranches',
+                'remote_id': self.remote_server_dev.id,
+                'name': 'icantnamemybranches',
+                'is_pr': False,
             })
 
         self.assertEqual(b.bundle_id.base_id.name, False)
@@ -145,17 +124,19 @@ class TestBranchRelations(RunbotCase):
 
     def test_relations_pr(self):
         self.Branch.create({
-                'repo_id': self.repodev.id,
-                'name': 'refs/heads/master-test-tri',
+                'remote_id': self.remote_server_dev.id,
+                'name': 'master-test-tri',
+                'is_pr': False,
             })
 
         self.patchers['github_patcher'].return_value = {
             'base':{'ref':'master-test-tri'},
-            'head':{'label':'foo-dev:master-test-tri-imp', 'repo':{'full_name': 'foo-dev/bar'}},
+            'head':{'label':'dev:master-test-tri-imp', 'repo':{'full_name': 'dev/server'}},
             }
         b = self.Branch.create({
-                'repo_id': self.repodev.id,
-                'name': 'refs/pull/100',
+                'remote_id': self.remote_server_dev.id,
+                'name': '100',
+                'is_pr': True,
             })
 
         self.assertEqual(b.bundle_id.name, 'master-test-tri-imp')

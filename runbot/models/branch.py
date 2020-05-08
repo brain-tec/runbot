@@ -42,7 +42,7 @@ class Branch(models.Model):
     no_auto_build = fields.Boolean("Don't automatically build commit on this branch", default=False)
     make_stats = fields.Boolean('Extract stats from logs', compute='_compute_make_stats', store=True)
     dname = fields.Char('Display name', compute='_compute_dname')
-    is_pr = fields.Bollean('IS a pr', required=True)
+    is_pr = fields.Boolean('IS a pr', required=True)
 
     @api.depends('branch_name', 'remote_id.short_name')
     def _compute_dname(self):

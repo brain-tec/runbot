@@ -4,7 +4,7 @@ import logging
 import re
 import shlex
 import time
-from ..common import now, grep, time2str, rfind, Commit, s2human, os
+from ..common import now, grep, time2str, rfind, s2human, os
 from ..container import docker_run, docker_get_gateway_ip, Command
 from odoo import models, fields, api
 from odoo.exceptions import UserError, ValidationError
@@ -284,7 +284,6 @@ class ConfigStep(models.Model):
             'log_path': build._path('logs', '%s.txt' % self.name),
             'glob': glob.glob,
             'Command': Command,
-            'Commit': Commit,
             'base64': base64,
             're': re,
             'time': time,

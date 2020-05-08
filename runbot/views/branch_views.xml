@@ -11,7 +11,7 @@
             <sheet>
               <group name="branch_group">
                 <field name="bundle_id"/>
-                <field name="repo_id"/>
+                <field name="remote_id"/>
                 <field name="name"/>
                 <field name="branch_name"/>
                 <field name="branch_url"/>
@@ -32,7 +32,7 @@
         <field name="model">runbot.branch</field>
         <field name="arch" type="xml">
             <tree string="Branches">
-                <field name="repo_id"/>
+                <field name="remote_id"/>
                 <field name="name"/>
                 <field name="sticky"/>
                 <field name="priority"/>

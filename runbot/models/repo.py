@@ -18,7 +18,7 @@ from odoo import models, fields, api, registry
 from odoo.modules.module import get_module_resource
 from odoo.tools import config
 from odoo.osv import expression
-from ..common import fqdn, dt2time, Commit, dest_reg, os
+from ..common import fqdn, dt2time, dest_reg, os
 from ..container import docker_ps, docker_stop
 from psycopg2.extensions import TransactionRollbackError
 
@@ -327,7 +327,7 @@ class Repo(models.Model):
                 # refs/ruodoo-dev/heads/12.0-must-fail
                 # refs/ruodoo/pull/1
                 _, remote_name, branch_type, name = ref_name.split('/')
-                repo_id = self.repo_ids.filtered(lambda r: r.remote_name = remote_name).id
+                repo_id = self.repo_ids.filtered(lambda r: r.remote_name == remote_name).id
                 _logger.debug('repo %s found new branch %s', self.name, name)
                 new_branch = self.env['runbot.branch'].create({'repo_id': repo_id, 'name': name, 'is_pr': branch_type == 'pull'})
                 ref_branches[ref_name] = new_branch
@@ -352,7 +352,7 @@ class Repo(models.Model):
             if branch.head_name != sha: # new push on branch
                 _logger.debug('repo %s branch %s new commit found: %s', self.name, branch.name, sha)
 
-                commit = self.env['runbot.'commit''].search([('name', '=', sha), ('repo_id', '=', self.id)])
+                commit = self.env['runbot.commit'].search([('name', '=', sha), ('repo_id', '=', self.id)])
                 if not commit:
                     commit = self.env['runbot.commit'].create({
                         'name': sha,

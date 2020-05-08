@@ -1,6 +1,7 @@
 import glob
 import re
 import time
+import logging
 
 from ..common import s2human, dt2time
 from babel.dates import format_timedelta

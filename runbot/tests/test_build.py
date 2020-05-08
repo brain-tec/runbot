@@ -21,9 +21,6 @@ class TestBuildParams(RunbotCase):
 
     def setUp(self):
         super(TestBuildParams, self).setUp()
-        project = self.Project.create({'name': 'rd_bar'})
-        repo_group = self.env['runbot.repo.group'].create({'name': 'bar', 'project_id': project.id})
-        self.repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': repo_group.id})
 
     def test_params(self):
         version = self.Version.create({'name': '13.0'})
@@ -31,14 +28,14 @@ class TestBuildParams(RunbotCase):
 
         params = self.BuildParameters.create({
             'version_id': version.id,
-            'project_id': self.repo.repo_group_id.project_id.id,
+            'project_id': self.project_id.id,
             'config_id': config.id,
         })
 
         # test that when the same params does not create a new record
         same_params = self.BuildParameters.create({
             'version_id': version.id,
-            'project_id': self.repo.repo_group_id.project_id.id,
+            'project_id': self.project_id.id,
             'config_id': config.id,
         })
 
@@ -67,30 +64,22 @@ class TestBuildResult(RunbotCase):
 
     def setUp(self):
         super(TestBuildResult, self).setUp()
-        self.repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
         version = self.Version.create({'name': '13.0'})
         config = self.Config.create({'name': 'Dummy Config'})
 
         self.params = self.BuildParameters.create({
             'version_id': version.id,
-            'project_id': self.repo.repo_group_id.project_id.id,
+            'project_id': self.project_id.id,
             'config_id': config.id,
         })
 
-        self.repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
         commit = self.Commit.create ({
             'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'repo_id': self.repo_server.id
         })
         self.build_commit = self.BuildCommit.create({
             'params_id': self.params.id,
             'commit_id': commit.id,
-            'repo_id': self.repo.id,
-        })
-
-        self.repo_group_ent = self.env['runbot.repo.group'].create({
-            'name': 'bar-ent',
-            'project_id': self.project.id,
-            'server_files': ''
         })
 
         self.repo_ent = self.env['runbot.repo'].create({
@@ -228,7 +217,7 @@ class TestBuildResult(RunbotCase):
         self.patchers['isdir'].side_effect = is_dir
 
         enterprise_branch = self.env['runbot.branch'].create({
-            'repo_id': self.repo_ent.id,
+            'repo_id': self.repo_addons.id,
             'name': 'refs/heads/master'
         })
 

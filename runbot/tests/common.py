@@ -11,10 +11,35 @@ class RunbotCase(TransactionCase):
     def setUp(self):
         super(RunbotCase, self).setUp()
         self.project = self.env['runbot.project'].create({'name': 'Tests'})
-        self.repo_group = self.env['runbot.repo.group'].create({
-            'name': 'bar', 
+        self.repo_server = self.env['runbot.repo'].create({
+            'name': 'server',
             'project_id': self.project.id,
-            'server_files': 'server.py'
+            'server_files': 'server.py',
+        })
+        self.repo_addons = self.env['runbot.repo'].create({
+            'name': 'addons',
+            'project_id': self.project.id,
+        })
+
+        self.remote_server = self.env['runbot.remote'].create({
+            'name': 'bla@example.com:base/server',
+            'repo_id': self.repo_server.id,
+            'token': '123',
+        })
+        self.remote_server_dev = self.env['runbot.remote'].create({
+            'name': 'bla@example.com:dev/server',
+            'repo_id': self.repo_server.id,
+            'token': '123',
+        })
+        self.remote_addons = self.env['runbot.remote'].create({
+            'name': 'bla@example.com:base/addons',
+            'repo_id': self.repo_addons.id,
+            'token': '123',
+        })
+        self.remote_addons_dev = self.env['runbot.remote'].create({
+            'name': 'bla@example.com:dev/addons',
+            'repo_id': self.repo_addons.id,
+            'token': '123',
         })
 
         self.Project = self.env['runbot.project']
@@ -41,7 +66,7 @@ class RunbotCase(TransactionCase):
 
         self.start_patcher('git_patcher', 'odoo.addons.runbot.models.repo.Repo._git', side_effect=git_side_effect)
         self.start_patcher('fqdn_patcher', 'odoo.addons.runbot.common.socket.getfqdn', 'host.runbot.com')
-        self.start_patcher('github_patcher', 'odoo.addons.runbot.models.repo.Repo._github', {})
+        self.start_patcher('github_patcher', 'odoo.addons.runbot.models.repo.Remote._github', {})
         self.start_patcher('is_on_remote_patcher', 'odoo.addons.runbot.models.branch.Branch._is_on_remote', True)
         self.start_patcher('repo_root_patcher', 'odoo.addons.runbot.models.repo.Repo._root', '/tmp/runbot_test/static')
         self.start_patcher('makedirs', 'odoo.addons.runbot.common.os.makedirs', True)
