@@ -42,8 +42,8 @@ class RepoTrigger(models.Model):
 
     name = fields.Char("Repo trigger descriptions")
     project_id = fields.Many2one('runbot.project', required=True)  # main/security/runbot
-    repos_group_ids = fields.Many2many('runbot.repo.group', relation='runbot_trigger_triggers', string="Triggers")
-    dependency_ids = fields.Many2many('runbot.repo.group', relation='runbot_trigger_dependencies', string="Dependencies")
+    repos_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_triggers', string="Triggers")
+    dependency_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_dependencies', string="Dependencies")
     config_id = fields.Many2one('runbot.build.config', 'Config')
 
     # TODO add repo_module_id to replace modules_auto (many2many or option to only use trigger)
@@ -75,34 +75,34 @@ class Remote(models.Model):
 
     @api.depends('name')
     def _get_base_url(self):
-        for repo in self:
-            name = re.sub('.+@', '', repo.name)
+        for remote in self:
+            name = re.sub('.+@', '', remote.name)
             name = re.sub('^https://', '', name)  # support https repo style
             name = re.sub('.git$', '', name)
             name = name.replace(':', '/')
-            repo.base = name
+            remote.base = name
 
     @api.depends('name', 'base')
     def _compute_short_name(self):
-        for repo in self:
-            repo.short_name = '/'.join(repo.base.split('/')[-2:])
+        for remote in self:
+            remote.short_name = '/'.join(remote.base.split('/')[-2:])
 
     def _compute_remote_name(self):
-        for repo in self:
-            repo.remote_name = self._sanitized_name(repo.short_name)
+        for remote in self:
+            remote.remote_name = self._sanitized_name(remote.short_name)
 
     def _github(self, url, payload=None, ignore_errors=False, nb_tries=2):
         """Return a http request to be sent to github"""
-        for repo in self:
-            if not repo.token:
+        for remote in self:
+            if not remote.token:
                 return
-            match_object = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', repo.base)
+            match_object = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', remote.base)
             if match_object:
                 url = url.replace(':owner', match_object.group(2))
                 url = url.replace(':repo', match_object.group(3))
                 url = 'https://api.%s%s' % (match_object.group(1), url)
                 session = requests.Session()
-                session.auth = (repo.token, 'x-oauth-basic')
+                session.auth = (remote.token, 'x-oauth-basic')
                 session.headers.update({'Accept': 'application/vnd.github.she-hulk-preview+json'})
                 try_count = 0
                 while try_count < nb_tries:
@@ -133,9 +133,8 @@ class Repo(models.Model):
 
 
     name = fields.Char("Repo forks descriptions", unique=True)  # odoo/enterprise/upgrade/security/runbot/design_theme
-    #main = fields.Many2one('runbot.repo', "Main repo")
-    #main_regex = fields.Char('regex to define if a branch is a version or not')
-    repo_ids = fields.One2many('runbot.repo', 'repo_group_id', "Repo and forks")
+    main_remote = fields.Many2one('runbot.remote', "Main remote")
+    remote_ids = fields.One2many('runbot.remote', 'repo_id', "Repo and forks")
     project_id = fields.Many2one('runbot.project', required=True,
         help="Default bundle project to use when pushing on this repos")
     # -> not verry usefull, remove it? (iterate on projects or contraints triggers:
@@ -213,7 +212,7 @@ class Repo(models.Model):
         returns the absolute path to the source folder of the repo (adding option *path)
         """
         self.ensure_one()
-        return os.path.join(self._root(), 'sources', self.repo_group_id.name, sha, *path)
+        return os.path.join(self._root(), 'sources', self.name, sha, *path)
 
     @api.depends('name')
     def _get_path(self):
@@ -266,8 +265,9 @@ class Repo(models.Model):
         icp = self.env['ir.config_parameter']
         ln_param = icp.get_param('runbot_migration_ln', default='')
         migration_repo_id = int(icp.get_param('runbot_migration_repo_id', default=0))
+        # TODO check that
         if ln_param and migration_repo_id and self.server_files:
-            scripts_dir = self.env['runbot.repo'].browse(migration_repo_id).repo_group_id.name
+            scripts_dir = self.env['runbot.repo'].browse(migration_repo_id).name
             try:
                 os.symlink('/data/build/%s' % scripts_dir,  self._source_path(sha, ln_param))
             except FileNotFoundError:
@@ -316,8 +316,10 @@ class Repo(models.Model):
         The returned structure contains all the branches from refs newly created
         or older ones.
         """
+
+        # FIXME WIP
         names = [r[0] for r in refs]
-        branches = self.env['runbot.branch'].search([('name', 'in', names), ('repo_id', '=', self.id)])
+        branches = self.env['runbot.branch'].search([('name', 'in', names), ('remote_id', '=', self.id)])
         ref_branches = {branch.name: branch for branch in branches}
         for ref_name, sha, date, author, author_email, subject, committer, committer_email in refs:
             if not ref_branches.get(name):
@@ -340,8 +342,8 @@ class Repo(models.Model):
         self.ensure_one()
         max_age = int(self.env['ir.config_parameter'].get_param('runbot.runbot_max_age', default=30))
 
-        for name, sha, date, author, author_email, subject, committer, committer_email in refs:
-            branch = ref_branches[name]
+        for ref_name, sha, date, author, author_email, subject, committer, committer_email in refs:
+            branch = ref_branches[ref_name]
 
             # skip the build for old branches (Could be checked before creating the branch in DB ?)
             # if dateutil.parser.parse(date[:19]) + datetime.timedelta(days=max_age) < datetime.datetime.now():
@@ -349,12 +351,12 @@ class Repo(models.Model):
             # create build (and mark previous builds as skipped) if not found
             if branch.head_name != sha: # new push on branch
                 _logger.debug('repo %s branch %s new commit found: %s', self.name, branch.name, sha)
-                repo_group_id = self.repo_group_id.id
-                commit = self.env['runbot.'commit''].search([('name', '=', sha), ('repo_group_id', '=', repo_group_id)])
+
+                commit = self.env['runbot.'commit''].search([('name', '=', sha), ('repo_id', '=', self.id)])
                 if not commit:
                     commit = self.env['runbot.commit'].create({
                         'name': sha,
-                        'repo_group_id': repo_group_id,
+                        'repo_id': self.id,
                         'author': author,
                         'author_email': author_email,
                         'committer': committer,
@@ -774,7 +776,7 @@ class Repo(models.Model):
             to_keep = set()
             repos = self.search([('mode', '!=', 'disabled')])
             for repo in repos:
-                repo_source = os.path.join(repo._root(), 'sources', repo.repo_group_id.name, '*')
+                repo_source = os.path.join(repo._root(), 'sources', repo.name, '*') # TODO check source folder
                 for source_dir in glob.glob(repo_source):
                     if source_dir not in cannot_be_deleted_path:
                         to_delete.add(source_dir)

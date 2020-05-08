@@ -7,12 +7,12 @@ class Commit(models.Model):
     _sql_constraints = [
         (
             "commit_unique",
-            "unique (name, repo_group_id)",
+            "unique (name, repo_id)",
             "Commit must be unique to ensure correct duplicate matching",
         )
     ]
     name = fields.Char('SHA')
-    repo_group_id = fields.Many2one('runbot.repo.group', string='Repo group')
+    repo_id = fields.Many2one('runbot.repo', string='Repo group')
     date = fields.Datetime('Commit date')
     author = fields.Char('Author')
     author_email = fields.Char('Author Email')
@@ -29,9 +29,8 @@ class Commit(models.Model):
                     module = os.path.basename(os.path.dirname(manifest_path))
                     yield (addons_path, module, manifest_file_name)
 
-    def export(self, base_repo):
-        assert base_repo.repo_group_id = self.repo_group_id
-        return base_repo._git_export(self.name) 
+    def export(self):
+        return self.repo_id._git_export(self.name)
 
     def read_source(self, file, mode='r'):
         file_path = self._source_path(file)
@@ -41,10 +40,13 @@ class Commit(models.Model):
         except:
             return False
 
-    @api.depends('name', 'repo_group_id.name')
+    def _source_path(self, *path):
+        return self.repo_id._source_path(self.commit_id.name, *path)
+
+    @api.depends('name', 'repo_id.name')
     def _compute_dname(self):
         for commit in self:
-            commit.dname = '%s:%s' % (commit.repo_group_id.name, commit.name[:8])
+            commit.dname = '%s:%s' % (commit.repo_id.name, commit.name[:8])
 
 
 class RunbotBuildCommit(models.Model):
@@ -53,19 +55,7 @@ class RunbotBuildCommit(models.Model):
 
     params_id = fields.Many2one('runbot.build.params', 'Build', required=True, ondelete='cascade', index=True)
     commit_id = fields.Many2one('runbot.commit', 'Dependency commit', required=True)
-    repo_id = fields.Many2one('runbot.repo', string='Repo') # discovered in repo
     match_type = fields.Char('Match Type')
-    git_url = fields.Char('Url to commit', compute='_compute_commit_url')
+    #git_url = fields.Char('Url to commit', compute='_compute_commit_url')
 
-    def _get_repo(self):
-        raise NotImplementedError()
-        return self.repo_id or self.commit_id.group_repo_ids.repo_ids
 
-    @api.depends('commit_id.name', 'repo_id.base')
-    def _compute_commit_url(self):
-        """compute the branch url based on branch_name"""
-        for slot in self:
-            slot.git_url = 'https://%s/commit/%s' % (slot.repo_id.base, slot.commit_id.name)
-
-    def _source_path(self, *path):
-        return self.repo_id._source_path(self.commit_id.name, *path)

@@ -185,6 +185,8 @@ class Runbot(Controller):
 
     def _glances_ctx(self):
         repos = request.env['runbot.repo'].search([])   # respect record rules
+        # TODO adapt
+        # TODO for record rule, replace by project instead
         default_config_id = request.env.ref('runbot.runbot_build_config_default').id
         query = """
             SELECT split_part(r.name, ':', 2),

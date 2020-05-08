@@ -386,6 +386,7 @@ class BuildResult(models.Model):
             else:
                 build.build_age = 0
 
+    # TODO move this logic to batch: use param to check consistency of found commits
     def _get_params(self):
         try:
             message = self.repo_id._git(['show', '-s', self.name])
@@ -399,6 +400,7 @@ class BuildResult(models.Model):
                 params['dep'][result[0]] = result[1]
         return params
 
+    # TODO move to params copy helper
     def _copy_dependency_ids(self):
         return [(0, 0, {
             'match_type': dep.match_type,
@@ -735,8 +737,8 @@ class BuildResult(models.Model):
             return commit._source_path('odoo', *path)
         return commit._source_path('openerp', *path)
 
-    def _docker_source_folder(self, build_commit):
-        return build_commit.repo_id.repo_group_id.name
+    def _docker_source_folder(self, commit):
+        return commit.repo_id.name
 
     def _checkout(self, commits=None):
         self.ensure_one()  # will raise exception if hash not found, we don't want to fail for all build.
@@ -762,7 +764,7 @@ class BuildResult(models.Model):
                         level='WARNING'
                     )
                 else:
-                    available_modules[commit.repo_group_id].append(module)
+                    available_modules[commit.repo_id].append(module)
         #return repo_modules, available_modules
         return available_modules
 
@@ -868,30 +870,30 @@ class BuildResult(models.Model):
     def _get_all_commit(self):
         return self.build_commit_ids.mapped('commit_id') # todo remove
 
-    def _get_server_commit(self, build_commits=None):
+    def _get_server_commit(self, commits=None):
         """
         returns a Commit() of the first repo containing server files found in commits or in build commits
         the commits param is not used in code base but could be usefull for jobs and crons
         """
-        for build_commit in (build_commits or self.params_id.build_commit_ids):
-            if build_commit.repo_id.repo_group_id.server_files:
-                return build_commit
+        for commit in (commits or self.params_id.build_commit_ids.mapped('commit_id')):
+            if commit.repo_id.server_files:
+                return commit
         raise ValidationError('No repo found with defined server_files')
 
     def _get_addons_path(self, build_commits=None):
-        for build_commit in (build_commits or self.params_id.build_commit_ids):
-            source_path = self._docker_source_folder(build_commit)
-            for addons_path in (build_commit.repo_id.repo_group_id.addons_paths or '').split(','):
-                if os.path.isdir(build_commit._source_path(addons_path)):
+        for commit in (build_commits or self.params_id.build_commit_ids.mapped('commit_id')):
+            source_path = self._docker_source_folder(commit)
+            for addons_path in (commit.repo_id.addons_paths or '').split(','):
+                if os.path.isdir(commit._source_path(addons_path)):
                     yield os.path.join(source_path, addons_path).strip(os.sep)
 
-    def _get_server_info(self, build_commit=None):
-        build_commit = build_commit or self._get_server_commit()
-        for server_file in build_commit.repo_id.repo_group_id.server_files.split(','):
-            if os.path.isfile(build_commit._source_path(server_file)):
-                return (build_commit, server_file)
-        _logger.error('None of %s found in commit, actual commit content:\n %s' % (build_commit.repo_id.repo_group_id.server_files, os.listdir(build_commit._source_path())))
-        raise RunbotException('No server found in %s' % build_commit)
+    def _get_server_info(self, commit=None):
+        commit = commit or self._get_server_commit()
+        for server_file in commit.repo_id.server_files.split(','):
+            if os.path.isfile(commit._source_path(server_file)):
+                return (commit, server_file)
+        _logger.error('None of %s found in commit, actual commit content:\n %s' % (commit.repo_id.server_files, os.listdir(commit._source_path())))
+        raise RunbotException('No server found in %s' % commit.dname)
 
     def _cmd(self, python_params=None, py_version=None, local_only=True, sub_command=None):
         """Return a list describing the command to start the build
@@ -950,70 +952,6 @@ class BuildResult(models.Model):
             command.add_config_tuple("data_dir", '/data/build/datadir')
 
         return command
-
-    def _github_status_notify_all(self, status):
-        """Notify each repo with a status"""
-        self.ensure_one()
-        if self.config_id.update_github_state:
-            repos_ids = {b.repo_id.id for b in self.search([('name', '=', self.name)])}
-            build_name = self.name
-            user_id = self.env.user.id
-            _dbname = self.env.cr.dbname
-            _context = self.env.context
-            build_id = self.id
-            def send_github_status():
-                try:
-                    db_registry = registry(_dbname)
-                    with api.Environment.manage(), db_registry.cursor() as cr:
-                        env = api.Environment(cr, user_id, _context)
-                        repos = env['runbot.repo'].browse(repos_ids)
-                        for repo in repos:
-                            _logger.debug(
-                                "github updating %s status %s to %s in repo %s",
-                                status['context'], build_name, status['state'], repo.name)
-                            repo._github('/repos/:owner/:repo/statuses/%s' % build_name, status, ignore_errors=True)
-                except:
-                    _logger.exception('Something went wrong sending notification for %s', build_id)
-            self._cr.after('commit', send_github_status)
-
-
-    # TODO should be on bundle: multiple build for the same hash
-    def _github_status(self):
-        """Notify github of failed/successful builds"""
-        for build in self:
-            if build.parent_id:
-                if build.orphan_result:
-                    _logger.debug('Skipping result for orphan build %s', self.id)
-                else:
-                    build.parent_id._github_status()
-            elif build.config_id.update_github_state:
-                runbot_domain = self.env['runbot.repo']._domain()
-                desc = "runbot build %s" % (build.dest,)
-
-                if build.global_result in ('ko', 'warn'):
-                    state = 'failure'
-                elif build.global_state == 'testing':
-                    state = 'pending'
-                elif build.global_state in ('running', 'done'):
-                    state = 'error'
-                    if build.global_result == 'ok':
-                        state = 'success'
-                else:
-                    _logger.debug("skipping github status for build %s ", build.id)
-                    continue
-                desc += " (runtime %ss)" % (build.job_time,)
-
-                status = {
-                    "state": state,
-                    "target_url": "http://%s/runbot/build/%s" % (runbot_domain, build.id),
-                    "description": desc,
-                    "context": "ci/runbot"
-                }
-                if self.last_github_state != state:
-                    build._github_status_notify_all(status)
-                    self.last_github_state = state
-                else:
-                    _logger.debug('Skipping unchanged status for %s', self.id)
 
     def _next_job_values(self):
         self.ensure_one()

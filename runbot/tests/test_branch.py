@@ -7,18 +7,21 @@ class TestBranch(RunbotCase):
 
     def setUp(self):
         super(TestBranch, self).setUp()
-        Repo = self.env['runbot.repo']
-        self.repo = Repo.create({'name': 'bla@example.com:foo/bar', 'token': '123', 'repo_group_id': self.repo_group.id})
-        self.repo_dev = Repo.create({'name': 'bla@example.com:foo-dev/bar', 'token': '123', 'repo_group_id': self.repo_group.id})
-
-        #mock_patch = patch('odoo.addons.runbot.models.repo.Repo._github', self._github)
-        #mock_patch.start()
-        #self.addCleanup(mock_patch.stop)
+        self.remote = self.env['runbot.remote'].create({
+            'name': 'bla@example.com:foo/bar',
+            'token': '123',
+            'repo_id': self.repo_bar.id
+        })
+        self.remote_dev = self.env['runbot.remote'].create({
+            'name': 'bla@example.com:foo-dev/bar',
+            'token': '123', 
+            'repo_id': self.repo_bar.id
+        })
 
     def test_base_fields(self):
         branch = self.Branch.create({
-            'repo_id': self.repo.id,
-            'name': 'refs/head/master'
+            'remote_id': self.remote.id,
+            'name': 'master'
         })
 
         self.assertEqual(branch.branch_name, 'master')
@@ -36,7 +39,8 @@ class TestBranch(RunbotCase):
             'name': '12345',
             'is_pr': True,
         })
-        self.assertEqual(pr.branch_name, '12345')
+        self.assertEqual(pr.name, '12345')
+        self.assertEqual(pr.branch_name, 'bar_branch') # TODO check juste an idea to recycle branch_name
         self.assertEqual(pr.branch_url, 'https://example.com/foo/bar/pull/12345')
         self.assertEqual(pr.target_branch_name, 'master')
         self.assertEqual(pr.pull_head_name, 'foo-dev:bar_branch')

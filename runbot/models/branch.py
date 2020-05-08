@@ -13,7 +13,7 @@ class Branch(models.Model):
     _name = "runbot.branch"
     _description = "Branch"
     _order = 'name'
-    _sql_constraints = [('branch_repo_uniq', 'unique (name,repo_id)', 'The branch must be unique per repository !')]
+    _sql_constraints = [('branch_repo_uniq', 'unique (name,remote_id)', 'The branch must be unique per repository !')]
 
     head = fields.Many2one('runbot.commit', 'Head Commit')
     head_name = fields.Char('Head name', related='head.name', store=True)
@@ -79,58 +79,6 @@ class Branch(models.Model):
         #
         # a pr pull head name should be in a repo or one of its forks, we need to check that
 
-
-    #@api.depends('sticky', 'defined_sticky', 'target_branch_name', 'name')
-    ## won't be recompute if a new branch is marked as sticky or sticky is removed, but should be ok if not stored
-    #def _compute_closest_sticky(self):
-    #    for branch in self:
-    #        if branch.sticky:
-    #            branch.closest_sticky = branch
-    #        elif branch.defined_sticky:
-    #            branch.closest_sticky = branch.defined_sticky # be carefull with loop
-    #        elif branch.target_branch_name:
-    #            corresponding_branch = self.search([('branch_name', '=', branch.target_branch_name), ('repo_id', '=', branch.repo_id.id)])
-    #            branch.closest_sticky = corresponding_branch.closest_sticky
-    #        else:
-    #            repo_ids = (branch.repo_id | branch.repo_id.duplicate_id).ids
-    #            self.env.cr.execute("select id from runbot_branch where sticky = 't' and repo_id = any(%s) and %s like name||'%%'", (repo_ids, branch.name or ''))
-    #            branch.closest_sticky = self.browse(self.env.cr.fetchone())
-#
-    #@api.depends('closest_sticky') #, 'closest_sticky.previous_version')
-    #def _compute_previous_version(self):
-    #    for branch in self.sorted(key='sticky', reverse=True):
-    #        # orm does not support non_searchable.non_stored dependency.
-    #        # thus, the closest_sticky.previous_version dependency will log an error
-    #        # when previous_version is written.
-    #        # this dependency is usefull to make the compute recursive, avoiding to have 
-    #        # both record and record.closest_sticky in self, in that order, making the record.previous_version
-    #        # empty in all cases.
-    #        # Sorting self on sticky will mitigate the problem. but it is still posible to
-    #        # have computation errors if defined_sticky is not sticky. (which is not a normal use case)
-    #        if branch.closest_sticky == branch:
-    #            repo_ids = (branch.repo_id | branch.repo_id.duplicate_id).ids
-    #            domain = [('branch_name', 'like', '%.0'), ('sticky', '=', True), ('branch_name', '!=', 'master'), ('repo_id', 'in', repo_ids)]
-    #            if branch.branch_name != 'master' and branch.id:
-    #                domain += [('id', '<', branch.id)]
-    #            branch.previous_version = self.search(domain, limit=1, order='id desc')
-    #        else:
-    #            branch.previous_version = branch.closest_sticky.previous_version
-#
-    #@api.depends('previous_version', 'closest_sticky')
-    #def _compute_intermediate_stickies(self):
-    #    for branch in self.sorted(key='sticky', reverse=True):
-    #        if branch.closest_sticky == branch:
-    #            if not branch.previous_version:
-    #                branch.intermediate_stickies = [(5, 0, 0)]
-    #                continue
-    #            repo_ids = (branch.repo_id | branch.repo_id.duplicate_id).ids
-    #            domain = [('id', '>', branch.previous_version.id), ('sticky', '=', True), ('branch_name', '!=', 'master'), ('repo_id', 'in', repo_ids)]
-    #            if branch.closest_sticky.branch_name != 'master' and branch.closest_sticky.id:
-    #                domain += [('id', '<', branch.closest_sticky.id)]
-    #            branch.intermediate_stickies = [(6, 0, self.search(domain, order='id desc').ids)]
-    #        else:
-    #            branch.intermediate_stickies = [(6, 0, branch.closest_sticky.intermediate_stickies.ids)]
-
     def _inverse_config_id(self):
         for branch in self:
             branch.branch_config_id = branch.config_id
@@ -183,7 +131,7 @@ class Branch(models.Model):
             return remote._github('/repos/:owner/:repo/pulls/%s' % self.name, ignore_errors=True) or {}
         return {}
 
-    def _is_on_remote(self):
+    def _is_on_remote(self): # TODO move that to repo branch discovery
         # check that a branch still exists on remote
         self.ensure_one()
         branch = self

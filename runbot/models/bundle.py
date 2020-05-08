@@ -12,6 +12,8 @@ from odoo import models, fields, api
 
 #Todo test: create will invalid branch name, pull request
 
+_logger = logging.getLogger(__name__)
+
 class Version(models.Model):
     _name = "runbot.version"
     _description = "Version"
@@ -176,8 +178,7 @@ class Bundle(models.Model):
             for bundle in self:
                 bundle.last_batchs = [(6, 0, batch_ids[bundle.id])]
 
-
-    def toggle_request_bundle_rebuild(self):
+    def toggle_request_bundle_rebuild(self): # TODO check
         for branch in self:
             if not branch.rebuild_requested:
                 branch.rebuild_requested = True
@@ -270,7 +271,7 @@ class Batch(models.Model):
         self.last_update = fields.Datetime.now()
         for batch_commit in self.batch_commit_ids:
             # case 1: a commit already exists for the repo (pr+branch, or fast push)
-            if batch_commit.commit_id.repo_group_id == commit.repo_group_id:
+            if batch_commit.commit_id.repo_id == commit.repo_id:
                 batch_commit.commit_id = commit
                 break
         else:
@@ -290,15 +291,15 @@ class Batch(models.Model):
         #  For all commit on real branches:
         self.state = 'ready'
         triggers = self.env['runbot.trigger'].search([('project_id', '=', self.bundle_id.project_id)])
-        pushed_repo_groups = self.batch_commit_ids.mapped('repos_group_ids') | self.batch_commit_ids.mapped('dependency_ids')
+        pushed_repo = self.batch_commit_ids.mapped('repo_id') # TODO check match_type?
 
         #  save commit state for all trigger dependencies and repo
-        trigger_repos_groups = triggers.mapped('repo_group_id')
-        for missing_repo_group in pushed_repo_groups-trigger_repos_groups:
+        trigger_repos = triggers.mapped('repo_id')
+        for missing_repo in pushed_repo-trigger_repos:
             break
             # find commit for missing_repo_group in a corresponding branch: branch head in the same bundle, or fallback on base_repo
         for trigger in triggers:
-            if trigger.repo_group_ids & pushed_repo_groups:  # there is a new commit in this in this trigger
+            if trigger.repo_ids & pushed_repo:  # there is a new commit in this in this trigger
                 break
                 # todo create build
 
@@ -308,12 +309,76 @@ class Batch(models.Model):
             # todo execute triggers
 
 
+    def _github_status_notify_all(self, status):
+        """Notify each repo with a status"""
+        self.ensure_one()
+        if self.config_id.update_github_state:
+            remote_ids = {b.repo_id.id for b in self.search([('name', '=', self.name)])}
+            build_name = self.name # todo adapt: custom ci per trigger
+            user_id = self.env.user.id
+            _dbname = self.env.cr.dbname
+            _context = self.env.context
+            build_id = self.id
+            def send_github_status():
+                try:
+                    db_registry = registry(_dbname)
+                    with api.Environment.manage(), db_registry.cursor() as cr:
+                        env = api.Environment(cr, user_id, _context)
+                        remotes = env['runbot.repo'].browse(remote_ids)
+                        for remote in remotes:
+                            _logger.debug(
+                                "github updating %s status %s to %s in repo %s",
+                                status['context'], build_name, status['state'], remote.name)
+                            repo._github('/repos/:owner/:repo/statuses/%s' % build_name, status, ignore_errors=True)
+                except:
+                    _logger.exception('Something went wrong sending notification for %s', build_id)
+            self._cr.after('commit', send_github_status)
+
+
+    # TODO should be on bundle: multiple build for the same hash
+    def _github_status(self):
+        """Notify github of failed/successful builds"""
+        for build in self:
+            if build.parent_id:
+                if build.orphan_result:
+                    _logger.debug('Skipping result for orphan build %s', self.id)
+                else:
+                    build.parent_id._github_status()
+            elif build.config_id.update_github_state:
+                runbot_domain = self.env['runbot.repo']._domain()
+                desc = "runbot build %s" % (build.dest,)
+
+                if build.global_result in ('ko', 'warn'):
+                    state = 'failure'
+                elif build.global_state == 'testing':
+                    state = 'pending'
+                elif build.global_state in ('running', 'done'):
+                    state = 'error'
+                    if build.global_result == 'ok':
+                        state = 'success'
+                else:
+                    _logger.debug("skipping github status for build %s ", build.id)
+                    continue
+                desc += " (runtime %ss)" % (build.job_time,)
+
+                status = {
+                    "state": state,
+                    "target_url": "http://%s/runbot/build/%s" % (runbot_domain, build.id),
+                    "description": desc,
+                    "context": "ci/runbot"
+                }
+                if self.last_github_state != state:
+                    build._github_status_notify_all(status)
+                    self.last_github_state = state
+                else:
+                    _logger.debug('Skipping unchanged status for %s', self.id)
+
+
 class BatchCommit(models.Model):
     _name = 'runbot.batch.commit'
     _description = "Bundle batch commit"
 
     commit_id = fields.Many2one('runbot.commit', index=True)
-    repo_id = fields.Many2one('runbot.repo', string='Repo') # discovered in repo
     batch_id = fields.Many2one('runbot.batch', index=True)
     match_type = fields.Selection([('new', 'New head of branch'), ('head', 'Head of branch'), ('default', 'Found on base branch')])  # HEAD, DEFAULT
 

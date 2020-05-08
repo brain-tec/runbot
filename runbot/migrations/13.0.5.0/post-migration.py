@@ -18,7 +18,7 @@ _logger = logging.getLogger(__name__)
 def migrate(cr, version):
     env = Environment(cr, SUPERUSER_ID, {})
     # some checks:
-    for keyword in ('real_build', 'duplicate_id', '_get_all_commit'):
+    for keyword in ('real_build', 'duplicate_id', '_get_all_commit', '_get_repo', '_copy_dependency_ids'):
         matches = env['runbot.build.config.step'].search([('python_code', 'like', keyword)])
         if matches:
             _logger.warning('Some python steps found with %s ref: %s', keyword, matches)

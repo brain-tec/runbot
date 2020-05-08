@@ -12,4 +12,7 @@ def migrate(cr, version):
     cr.execute("UPDATE runbot_build SET local_state='done' WHERE duplicate_id IS NULL AND local_state = 'duplicate';")
     # Remove builds without a repo
     cr.execute("DELETE FROM runbot_build WHERE repo_id IS NULL")
+
+
+    # TODO empty runbot_repo_hooktime and reftime
     return
