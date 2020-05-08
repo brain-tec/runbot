@@ -4,6 +4,7 @@ import datetime
 from unittest.mock import patch
 
 from odoo import fields
+from odoo.exceptions import UserError
 from .common import RunbotCase
 
 
@@ -16,39 +17,100 @@ def rev_parse(repo, branch_name):
     head_hash = 'rp_%s_%s_head' % (repo.name.split(':')[1], branch_name.split('/')[-1])
     return head_hash
 
-
-class Test_Build(RunbotCase):
+class TestBuildParams(RunbotCase):
 
     def setUp(self):
-        super(Test_Build, self).setUp()
-        self.repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'server_files': 'server.py', 'addons_paths': 'addons,core/addons'})
-        self.branch = self.Branch.create({
-            'repo_id': self.repo.id,
-            'name': 'refs/heads/master'
+        super(TestBuildParams, self).setUp()
+        project = self.Project.create({'name': 'rd_bar'})
+        repo_group = self.env['runbot.repo.group'].create({'name': 'bar', 'project_id': project.id})
+        self.repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': repo_group.id})
+
+    def test_params(self):
+        version = self.Version.create({'name': '13.0'})
+        config = self.Config.create({'name': 'Dummy Config'})
+
+        params = self.BuildParameters.create({
+            'version_id': version.id,
+            'project_id': self.repo.repo_group_id.project_id.id,
+            'config_id': config.id,
         })
-        self.branch_10 = self.Branch.create({
-            'repo_id': self.repo.id,
-            'name': 'refs/heads/10.0'
+
+        # test that when the same params does not create a new record
+        same_params = self.BuildParameters.create({
+            'version_id': version.id,
+            'project_id': self.repo.repo_group_id.project_id.id,
+            'config_id': config.id,
         })
-        self.branch_11 = self.Branch.create({
-            'repo_id': self.repo.id,
-            'name': 'refs/heads/11.0'
+
+        self.assertEqual(params.fingerprint, same_params.fingerprint)
+        self.assertEqual(params.id, same_params.id)
+
+        # test that params cannot be overwitten
+        with self.assertRaises(UserError):
+            params.write({'modules': 'bar'})
+
+        # TODO
+        # test non initialized json stored _data field and data property
+        # other.config_data['test_info'] = 'foo'
+        # self.assertEqual(other.config_data, {'test_info': 'foo'})
+        # (build|other).write({'config_data': {'test_write': 'written'}})
+        # build.config_data['test_build'] = 'foo'
+        # other.config_data['test_other'] = 'bar'
+        # self.assertEqual(build.config_data, {'test_write': 'written', 'test_build': 'foo'})
+        # self.assertEqual(other.config_data, {'test_write': 'written', 'test_other': 'bar'})
+        # build.flush()
+        # build.env.cr.execute("SELECT config_data, config_data->'test_write' AS written, config_data->'test_build' AS test_build FROM runbot_build WHERE id = %s", [build.id])
+        # self.assertEqual([({'test_write': 'written', 'test_build': 'foo'}, 'written', 'foo')], self.env.cr.fetchall())
+
+
+class TestBuildResult(RunbotCase):
+
+    def setUp(self):
+        super(TestBuildResult, self).setUp()
+        self.repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
+        version = self.Version.create({'name': '13.0'})
+        config = self.Config.create({'name': 'Dummy Config'})
+
+        self.params = self.BuildParameters.create({
+            'version_id': version.id,
+            'project_id': self.repo.repo_group_id.project_id.id,
+            'config_id': config.id,
         })
+
+        self.repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
+        commit = self.Commit.create ({
+            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+        })
+        self.build_commit = self.BuildCommit.create({
+            'params_id': self.params.id,
+            'commit_id': commit.id,
+            'repo_id': self.repo.id,
+        })
+
+        self.repo_group_ent = self.env['runbot.repo.group'].create({
+            'name': 'bar-ent',
+            'project_id': self.project.id,
+            'server_files': ''
+        })
+
+        self.repo_ent = self.env['runbot.repo'].create({
+            'name': 'bla@example.com:foo/bar-ent',
+            'repo_group_id': self.repo_group_ent.id,
+        })
+        self.repo_ent.dependency_ids = self.repo
         self.start_patcher('find_patcher', 'odoo.addons.runbot.common.find', 0)
 
     def test_base_fields(self):
+
         build = self.create_build({
-            'branch_id': self.branch.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-            'port': '1234',
+            'params_id': self.params.id,
+            'port': '1234'
         })
-        self.assertEqual(build.id, build.sequence)
-        self.assertEqual(build.dest, '%05d-master-d0d0ca' % build.id)
-        # test dest change on new commit
-        build.name = 'deadbeef0000ffffffffffffffffffffffffffff'
-        self.assertEqual(build.dest, '%05d-master-deadbe' % build.id)
+
+        self.assertEqual(build.dest, '%05d-13-0' % build.id)
 
         # Test domain compute with fqdn and ir.config_parameter
+        self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_nginx', False)
         self.patchers['fqdn_patcher'].return_value = 'runbot98.nowhere.org'
         self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_domain', False)
         self.assertEqual(build.domain, 'runbot98.nowhere.org:1234')
@@ -64,9 +126,9 @@ class Test_Build(RunbotCase):
         self.assertEqual(build.config_data, {"restore_url": "foobar", "test_info": "dummy"})
         del build.config_data['restore_url']
         self.assertEqual(build.config_data, {"test_info": "dummy"})
+
         other = self.create_build({
-            'branch_id': self.branch.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'params_id': self.params.id,
             'port': '5678',
             'local_result': 'ko'
         })
@@ -76,26 +138,9 @@ class Test_Build(RunbotCase):
         with self.assertRaises(AssertionError):
             builds.write({'local_result': 'ok'})
 
-        # test that a build cannot have local state 'duplicate' without a duplicate_id
-        with self.assertRaises(AssertionError):
-            builds.write({'local_state': 'duplicate'})
-
-        # test non initialized json stored _data field and data property
-        other.config_data['test_info'] = 'foo'
-        self.assertEqual(other.config_data, {'test_info': 'foo'})
-        (build|other).write({'config_data': {'test_write': 'written'}})
-        build.config_data['test_build'] = 'foo'
-        other.config_data['test_other'] = 'bar'
-        self.assertEqual(build.config_data, {'test_write': 'written', 'test_build': 'foo'})
-        self.assertEqual(other.config_data, {'test_write': 'written', 'test_other': 'bar'})
-        build.flush()
-        build.env.cr.execute("SELECT config_data, config_data->'test_write' AS written, config_data->'test_build' AS test_build FROM runbot_build WHERE id = %s", [build.id])
-        self.assertEqual([({'test_write': 'written', 'test_build': 'foo'}, 'written', 'foo')], self.env.cr.fetchall())
-
     def test_markdown_description(self):
         build = self.create_build({
-            'branch_id': self.branch.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'params_id': self.params.id,
             'port': '1234',
             'description': 'A nice **description**'
         })
@@ -104,46 +149,11 @@ class Test_Build(RunbotCase):
         build.description = "<script>console.log('foo')</script>"
         self.assertEqual(build.md_description, "&lt;script&gt;console.log('foo')&lt;/script&gt;")
 
-    #def test_config_data_duplicate(self):
-#
-    #    build = self.create_build({
-    #        'branch_id': self.branch.id,
-    #        'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-    #    })
-#
-    #    build2 = self.create_build({
-    #        'branch_id': self.branch.id,
-    #        'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-    #    })
-    #    self.assertEqual(build2.duplicate_id, build)
-#
-    #    build3 = self.create_build({
-    #        'branch_id': self.branch.id,
-    #        'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-    #        'config_data': {'test':'aa'},
-    #    })
-    #    self.assertFalse(build3.duplicate_id)
-    #    build4 = self.create_build({
-    #        'branch_id': self.branch.id,
-    #        'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-    #        'config_data': {'test':'aa'},
-    #    })
-    #    self.assertEqual(build4.duplicate_id, build3)
-#
-    #    build5 = self.create_build({
-    #        'branch_id': self.branch.id,
-    #        'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-    #        'config_data': {'test':'bb'},
-    #    })
-    #    self.assertFalse(build5.duplicate_id)
-
-
     @patch('odoo.addons.runbot.models.build.BuildResult._get_repo_available_modules')
     def test_filter_modules(self, mock_get_repo_mods):
         """ test module filtering """
         build = self.create_build({
-            'branch_id': self.branch.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'params_id': self.params.id,
             'port': '1234',
         })
 
@@ -169,9 +179,9 @@ class Test_Build(RunbotCase):
         """ test that the logdb connection URI is taken from the .odoorc file """
         uri = 'postgres://someone:pass@somewhere.com/db'
         self.env['ir.config_parameter'].sudo().set_param("runbot.runbot_logdb_uri", uri)
+
         build = self.create_build({
-            'branch_id': self.branch.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'params_id': self.params.id,
             'port': '1234',
         })
         cmd = build._cmd(py_version=3)
@@ -180,16 +190,16 @@ class Test_Build(RunbotCase):
     def test_build_cmd_server_path_no_dep(self):
         """ test that the server path and addons path """
         build = self.create_build({
-            'branch_id': self.branch.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'params_id': self.params.id,
             'port': '1234',
         })
         cmd = build._cmd(py_version=3)
         self.assertEqual('python3', cmd[0])
         self.assertEqual('bar/server.py', cmd[1])
         self.assertIn('--addons-path', cmd)
-        addons_path_pos = cmd.index('--addons-path') + 1
-        self.assertEqual(cmd[addons_path_pos], 'bar/addons,bar/core/addons')
+        # TODO fix the _get_addons_path and/or _docker_source_folder
+        # addons_path_pos = cmd.index('--addons-path') + 1
+        # self.assertEqual(cmd[addons_path_pos], 'bar/addons,bar/core/addons')
 
     def test_build_cmd_server_path_with_dep(self):
         """ test that the server path and addons path """
@@ -217,14 +227,19 @@ class Test_Build(RunbotCase):
         self.patchers['isfile'].side_effect = is_file
         self.patchers['isdir'].side_effect = is_dir
 
-        repo_ent = self.env['runbot.repo'].create({
-            'name': 'bla@example.com:foo/bar-ent',
-            'server_files': '',
-        })
-        repo_ent.dependency_ids = self.repo
         enterprise_branch = self.env['runbot.branch'].create({
-            'repo_id': repo_ent.id,
+            'repo_id': self.repo_ent.id,
             'name': 'refs/heads/master'
+        })
+
+        commit = self.Commit.create ({
+            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+        })
+
+        self.build_commit = self.BuildCommit.create({
+            'params_id': self.params.id,
+            'commit_id': commit.id,
+            'repo_id': self.repo_ent.id,
         })
 
         def rev_parse(repo, branch_name):
@@ -234,8 +249,7 @@ class Test_Build(RunbotCase):
 
         with patch('odoo.addons.runbot.models.repo.Repo._git_rev_parse', new=rev_parse):
             build = self.create_build({
-                'branch_id': enterprise_branch.id,
-                'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+                'params_id': self.params.id,
                 'port': '1234',
             })
         cmd = build._cmd(py_version=3)
@@ -260,13 +274,9 @@ class Test_Build(RunbotCase):
             return True
 
         self.patchers['isfile'].side_effect = is_file
-        repo_ent = self.env['runbot.repo'].create({
-            'name': 'bla@example.com:foo-ent/bar',
-            'server_files': '',
-        })
-        repo_ent.dependency_ids = self.repo
+
         enterprise_branch = self.env['runbot.branch'].create({
-            'repo_id': repo_ent.id,
+            'repo_id': self.repo_ent.id,
             'name': 'refs/heads/master'
         })
 
@@ -277,7 +287,7 @@ class Test_Build(RunbotCase):
 
         with patch('odoo.addons.runbot.models.repo.Repo._git_rev_parse', new=rev_parse):
             build = self.create_build({
-                'branch_id': enterprise_branch.id,
+                'params_id': self.params.id,
                 'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
                 'port': '1234',
             })
@@ -288,46 +298,45 @@ class Test_Build(RunbotCase):
         self.assertEqual('bar-dfdfcfcf/server.py', cmd[1])
         self.assertEqual('python3', cmd[0])
 
-    def test_build_config_from_branch_default(self):
-        """test build config_id is computed from branch default config_id"""
-        build = self.create_build({
-            'branch_id': self.branch.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-        })
-        self.assertEqual(build.config_id, self.env.ref('runbot.runbot_build_config_default'))
+    # TODO move to TestBuildParams
+    # def test_build_config_from_branch_default(self):
+    #     """test build config_id is computed from branch default config_id"""
+    #     build = self.create_build({
+    #         'branch_id': self.branch.id,
+    #         'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+    #     })
+    #     self.assertEqual(build.config_id, self.env.ref('runbot.runbot_build_config_default'))
 
-    def test_build_config_from_branch_testing(self):
-        """test build config_id is computed from branch"""
-        self.branch.config_id = self.env.ref('runbot.runbot_build_config_default_no_run')
-        build = self.create_build({
-            'branch_id': self.branch.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-        })
-        self.assertEqual(build.config_id, self.branch.config_id, "config_id should be the same as the branch")
+    # TODO move to TestBuildParams
+    # def test_build_config_from_branch_testing(self):
+    #     """test build config_id is computed from branch"""
+    #     self.branch.config_id = self.env.ref('runbot.runbot_build_config_default_no_run')
+    #     build = self.create_build({
+    #         'branch_id': self.branch.id,
+    #         'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+    #     })
+    #     self.assertEqual(build.config_id, self.branch.config_id, "config_id should be the same as the branch")
 
-    def test_build_config_can_be_set(self):
-        """test build config_id can be set to something different than the one on the branch"""
-        self.branch.config_id = self.env.ref('runbot.runbot_build_config_default')
-        build = self.create_build({
-            'branch_id': self.branch.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-            'config_id': self.env.ref('runbot.runbot_build_config_default_no_run').id
-        })
-        self.assertEqual(build.config_id, self.env.ref('runbot.runbot_build_config_default_no_run'), "config_id should be the one set on the build")
+    # TODO move to TestBuildParams
+    # def test_build_config_can_be_set(self):
+    #     """test build config_id can be set to something different than the one on the branch"""
+    #     self.branch.config_id = self.env.ref('runbot.runbot_build_config_default')
+    #     build = self.create_build({
+    #         'branch_id': self.branch.id,
+    #         'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+    #         'config_id': self.env.ref('runbot.runbot_build_config_default_no_run').id
+    #     })
+    #     self.assertEqual(build.config_id, self.env.ref('runbot.runbot_build_config_default_no_run'), "config_id should be the one set on the build")
 
     def test_build_gc_date(self):
         """ test build gc date and gc_delay"""
-        self.branch.config_id = self.env.ref('runbot.runbot_build_config_default')
         build = self.create_build({
-            'branch_id': self.branch.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'params_id': self.params.id,
             'local_state': 'done'
         })
 
         child_build = self.create_build({
-            'branch_id': self.branch.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-            'extra_params': '2',
+            'params_id': self.params.id,
             'parent_id': build.id,
             'local_state': 'done'
         })
@@ -364,18 +373,15 @@ class Test_Build(RunbotCase):
         })
 
         build_other_host = self.create_build({
-            'branch_id': self.branch.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'params_id': self.params.id,
             'local_state': 'testing',
             'host': 'runbot_yyy'
         })
 
         child_build = self.create_build({
-            'branch_id': self.branch.id,
-            'name': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            'params_id': self.params.id,
             'local_state': 'testing',
             'host': 'runbot_xxx',
-            'extra_params': '2',
             'parent_id': build_other_host.id
         })
 
@@ -384,8 +390,7 @@ class Test_Build(RunbotCase):
         self.assertFalse(child_build.requested_action)
 
         build_same_branch = self.create_build({
-            'branch_id': self.branch_11.id,
-            'name': 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            'params_id': self.params.id,
             'local_state': 'testing',
             'host': 'runbot_xxx',
         })
@@ -394,8 +399,7 @@ class Test_Build(RunbotCase):
         self.assertFalse(build_same_branch.requested_action)
 
         build_pending = self.create_build({
-            'branch_id': self.branch.id,
-            'name': 'deadbeafffffffffffffffffffffffffffffffff',
+            'params.id': self.params.id,
             'local_state': 'pending',
         })
 
@@ -409,8 +413,7 @@ class Test_Build(RunbotCase):
     def test_build_skip(self, mock_logger):
         """test build is skipped"""
         build = self.create_build({
-            'branch_id': self.branch.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'params_id': self.params.id,
             'port': '1234',
         })
         build._skip()
@@ -418,8 +421,7 @@ class Test_Build(RunbotCase):
         self.assertEqual(build.local_result, 'skipped')
 
         other_build = self.create_build({
-            'branch_id': self.branch.id,
-            'name': 'deadbeef0000ffffffffffffffffffffffffffff',
+            'params_id': self.params.id,
             'port': '1234',
         })
         other_build._skip(reason='A good reason')

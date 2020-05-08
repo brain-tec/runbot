@@ -109,11 +109,10 @@ class BuildParameters(models.Model):
         return super().create(values)
 
     def _find_existing(self, fingerprint):
-        print('Nope')
         self.env['runbot.build'].flush()
         return self.env['runbot.build.params'].search([('fingerprint', '=', fingerprint)], limit=1)
 
-    def write(self):
+    def write(self, vals):
         raise UserError('Params cannot be modified')
 
 
@@ -139,8 +138,7 @@ class BuildResult(models.Model):
     # -> commit corresponding to repo of trigger_id
     # -> display all?
 
-    params_id = fields.Many2one('runbot.build.params', index=True)
-    config_id = fields.Many2one('runbot.build.config', related='params_id.config_id')
+    params_id = fields.Many2one('runbot.build.params', required=True, index=True)
     config_data = JsonDictField('Config Data', related='params_id.config_data')
     # could be a default value, but possible to change it to allow duplicate accros branches
 
@@ -215,8 +213,10 @@ class BuildResult(models.Model):
 
     @api.depends('params_id.config_id')
     def _compute_log_list(self):  # storing this field because it will be access trhoug repo viewn and keep track of the list at create
-        for build in self:
-            build.log_list = ','.join({step.name for step in build.config_id.step_ids() if step._has_log()})
+        #for build in self:
+        #    build.log_list = ','.join({step.name for step in build.config_id.step_ids() if step._has_log()})
+        # should be moved
+        pass
 
     @api.depends('children_ids.global_state', 'local_state')
     def _compute_global_state(self):
@@ -311,111 +311,6 @@ class BuildResult(models.Model):
     def copy(self, default=None):
         return super(BuildResult, self.with_context(force_rebuild=True)).copy(default)
 
-
-    @api.model_create_single
-    def create(self, vals):
-        build_id = super(BuildResult, self).create(vals)
-        extra_info = {}
-
-        # compute dependencies
-        repo = build_id.repo_id
-        dep_create_vals = []
-        build_id._log('create', 'Build created') # mainly usefull to log creation time
-        if not vals.get('build_commit_ids'):
-            params = build_id._get_params() # calling git show, dont call that if not usefull.
-            for extra_repo in repo.dependency_ids:
-                repo_name = extra_repo.short_name
-                last_commit = params['dep'][repo_name]  # not name
-                if last_commit:
-                    match_type = 'params'
-                    build_closest_branch = False
-                    message = 'Dependency for repo %s defined in commit message' % (repo_name)
-                else:
-                    (build_closest_branch, match_type) = build_id.branch_id._get_closest_branch(extra_repo.id)
-                    closest_name = build_closest_branch.name
-                    closest_branch_repo = build_closest_branch.repo_id
-                    last_commit = closest_branch_repo._git_rev_parse(closest_name)
-                    message = 'Dependency for repo %s defined from closest branch %s' % (repo_name, closest_name)
-                try:
-                    commit_oneline = extra_repo._git(['show', '--pretty="%H -- %s"', '-s', last_commit]).strip()
-                except CalledProcessError:
-                    commit_oneline = 'Commit %s not found on build creation' % last_commit
-                    # possible that oneline fail if given from commit message. Do it on build? or keep this information
-
-                build_id._log('create', '%s: %s' % (message, commit_oneline))
-
-                dep_create_vals.append({
-                    'build_id': build_id.id,
-                    'dependecy_repo_id': extra_repo.id,
-                    'dependency_hash': last_commit,
-                    'match_type': match_type,
-                })
-            for dep_vals in dep_create_vals:
-                self.env['runbot.build.commit'].sudo().create(dep_vals)
-
-        #if not self.env.context.get('force_rebuild') and not vals.get('build_type') == 'rebuild':
-        #    # detect duplicate
-        #    duplicate_id = None
-        #    domain = [
-        #        ('repo_id', 'in', (build_id.repo_id.duplicate_id.id, build_id.repo_id.id)),  # before, was only looking in repo.duplicate_id looks a little better to search in both
-        #        ('id', '!=', build_id.id),
-        #        ('name', '=', build_id.name),
-        #        ('duplicate_id', '=', False),
-        #        # ('build_type', '!=', 'indirect'),  # in case of performance issue, this little fix may improve performance a little but less duplicate will be detected when pushing an empty branch on repo with duplicates
-        #        '|', ('local_result', '=', False), ('local_result', '!=', 'skipped'),  # had to reintroduce False posibility for selections
-        #        ('config_id', '=', build_id.config_id.id),
-        #        ('extra_params', '=', build_id.extra_params),
-        #        ('config_data', '=', build_id.config_data or False),
-        #    ]
-        #    candidates = self.search(domain)
-
-        #    nb_deps = len(build_id.dependency_ids)
-        #    if candidates and nb_deps:
-        #        # check that all depedencies are matching.
-
-        #        # Note: We avoid to compare closest_branch_id, because the same hash could be found on
-        #        # 2 different branches (pr + branch).
-        #        # But we may want to ensure that the hash is comming from the right repo, we dont want to compare community
-        #        # hash with enterprise hash.
-        #        # this is unlikely to happen so branch comparaison is disabled
-        #        self.env.cr.execute("""
-        #            SELECT DUPLIDEPS.build_id
-        #            FROM runbot_build_dependency as DUPLIDEPS
-        #            JOIN runbot_build_dependency as BUILDDEPS
-        #            ON BUILDDEPS.dependency_hash = DUPLIDEPS.dependency_hash
-        #            AND BUILDDEPS.build_id = %s
-        #            AND DUPLIDEPS.build_id in %s
-        #            GROUP BY DUPLIDEPS.build_id
-        #            HAVING COUNT(DUPLIDEPS.*) = %s
-        #            ORDER BY DUPLIDEPS.build_id  -- remove this in case of performance issue, not so usefull
-        #            LIMIT 1
-        #        """, (build_id.id, tuple(candidates.ids), nb_deps))
-        #        filtered_candidates_ids = self.env.cr.fetchall()
-
-        #        if filtered_candidates_ids:
-        #            duplicate_id = filtered_candidates_ids[0]
-        #    else:
-        #        duplicate_id = candidates[0].id if candidates else False
-
-        #    if duplicate_id:
-        #        extra_info.update({'local_state': 'duplicate', 'duplicate_id': duplicate_id})
-        #        # maybe update duplicate priority if needed
-
-        docker_source_folders = set()
-        for build_commit in build_id.build_commit_ids:
-            docker_source_folder = build_id._docker_source_folder(build_commit.commit_id)
-            if docker_source_folder in docker_source_folders:
-                extra_info['commit_path_mode'] = 'rep_sha'
-                continue
-            docker_source_folders.add(docker_source_folder)
-
-        if extra_info:
-            build_id.write(extra_info)
-
-        #if build_id.local_state == 'duplicate' and build_id.duplicate_id.global_state in ('running', 'done'):
-        #    build_id._github_status()
-        return build_id
-
     def write(self, values):
         # some validation to ensure db consistency
         if 'local_state' in values:
@@ -455,7 +350,7 @@ class BuildResult(models.Model):
     @api.depends('port', 'dest', 'host')
     def _compute_domain(self):
         icp = self.env['ir.config_parameter'].sudo()
-        nginx = icp.get_param('runbot.runbot_nginx', True)  # or just force nginx?
+        nginx = icp.get_param('runbot.runbot_nginx', False)  # or just force nginx?
         domain = icp.get_param('runbot.runbot_domain', fqdn())
         for build in self:
             if nginx:
@@ -846,13 +741,15 @@ class BuildResult(models.Model):
             return commit._source_path('odoo', *path)
         return commit._source_path('openerp', *path)
 
-    def _docker_source_folder(self, commit):
+    def _docker_source_folder(self, build_commit):
         # in case some build have commits with the same repo name (ex: foo/bar, foo-ent/bar)
         # it can be usefull to uniquify commit export path using hash
+        # TODO FIX or remove TO DISCUSS
+        return build_commit.repo_id._get_repo_name_part()
         if self.commit_path_mode == 'rep_sha':
-            return '%s-%s' % (commit.repo._get_repo_name_part(), commit.name[:8])
+            return '%s-%s' % (build_commit.repo._get_repo_name_part(), commit.name[:8])
         else:
-            return commit.repo._get_repo_name_part()
+            return build_commit.repo._get_repo_name_part()
 
     def _checkout(self, commits=None):
         self.ensure_one()  # will raise exception if hash not found, we don't want to fail for all build.
@@ -984,32 +881,30 @@ class BuildResult(models.Model):
     def _get_all_commit(self):
         return self.build_commit_ids.mapped('commit_id') # todo remove
 
-    def _get_server_commit(self, commits=None):
+    def _get_server_commit(self, build_commits=None):
         """
         returns a Commit() of the first repo containing server files found in commits or in build commits
         the commits param is not used in code base but could be usefull for jobs and crons
         """
-        for commit in (commits or self.build_commit_ids.mapped('commit_id')):
-            if commit.repo_group_id.server_files:
-                return commit
+        for build_commit in (build_commits or self.params_id.build_commit_ids):
+            if build_commit.repo_id.repo_group_id.server_files:
+                return build_commit
         raise ValidationError('No repo found with defined server_files')
 
-    def _get_addons_path(self, commits=None):
-        for commit in (commits or self.build_commit_ids.mapped('commit_id')):
-            source_path = self._docker_source_folder(commit)
-            for addons_path in (commit.repo.addons_paths or '').split(','):
-                if os.path.isdir(commit._source_path(addons_path)):
+    def _get_addons_path(self, build_commits=None):
+        for build_commit in (build_commits or self.params_id.build_commit_ids):
+            source_path = self._docker_source_folder(build_commit)
+            for addons_path in (build_commit.repo_id.repo_group_id.addons_paths or '').split(','):
+                if os.path.isdir(build_commit._source_path(addons_path)):
                     yield os.path.join(source_path, addons_path).strip(os.sep)
 
-    def _get_server_info(self, commit=None):
-        server_dir = False
-        server = False
-        commit = commit or self._get_server_commit()
-        for server_file in commit.repo.server_files.split(','):
-            if os.path.isfile(commit._source_path(server_file)):
-                return (commit, server_file)
-        _logger.error('None of %s found in commit, actual commit content:\n %s' % (commit.repo.server_files, os.listdir(commit._source_path())))
-        raise RunbotException('No server found in %s' % commit)
+    def _get_server_info(self, build_commit=None):
+        build_commit = build_commit or self._get_server_commit()
+        for server_file in build_commit.repo_id.repo_group_id.server_files.split(','):
+            if os.path.isfile(build_commit._source_path(server_file)):
+                return (build_commit, server_file)
+        _logger.error('None of %s found in commit, actual commit content:\n %s' % (build_commit.repo_id.repo_group_id.server_files, os.listdir(build_commit._source_path())))
+        raise RunbotException('No server found in %s' % build_commit)
 
     def _cmd(self, python_params=None, py_version=None, local_only=True, sub_command=None):
         """Return a list describing the command to start the build
@@ -1019,9 +914,9 @@ class BuildResult(models.Model):
         python_params = python_params or []
         py_version = py_version if py_version is not None else build._get_py_version()
         pres = []
-        for commit in self.build_commit_ids.mapped('commit_id'):
-            if os.path.isfile(commit._source_path('requirements.txt')): # this is a change I think
-                repo_dir = self._docker_source_folder(commit)
+        for build_commit in self.params_id.build_commit_ids:
+            if os.path.isfile(build_commit._source_path('requirements.txt')): # this is a change I think
+                repo_dir = self._docker_source_folder(build_commit)
                 requirement_path = os.path.join(repo_dir, 'requirements.txt')
                 pres.append(['sudo', 'pip%s' % py_version, 'install', '-r', '%s' % requirement_path])
 

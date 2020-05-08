@@ -29,9 +29,6 @@ class Commit(models.Model):
                     module = os.path.basename(os.path.dirname(manifest_path))
                     yield (addons_path, module, manifest_file_name)
 
-    def _source_path(self, *path):
-        return self.repo._source_path(self.name, *path)
-
     def export(self):
         return self.repo._git_export(self.name)
 
@@ -69,4 +66,5 @@ class RunbotBuildCommit(models.Model):
         for slot in self:
             slot.git_url = 'https://%s/commit/%s' % (slot.repo_id.base, slot.commit_id.name)
 
-
+    def _source_path(self, *path):
+        return self.repo_id._source_path(self.commit_id.name, *path)

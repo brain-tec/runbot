@@ -56,7 +56,6 @@
                         <field name="build_time" groups="base.group_no_one"/>
                         <field name="build_age" groups="base.group_no_one"/>
                         <field name="build_type"/>
-                        <field name="config_id"/>
                         <field name="parent_id"/>
                         <field name="orphan_result"/>
                         <field name="hidden" groups="base.group_no_one"/>

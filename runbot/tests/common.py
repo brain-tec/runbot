@@ -16,10 +16,17 @@ class RunbotCase(TransactionCase):
             'project_id': self.project.id,
             'server_files': 'server.py'
         })
+
+        self.Project = self.env['runbot.project']
         self.Build = self.env['runbot.build']
+        self.BuildParameters = self.env['runbot.build.params']
         self.Repo = self.env['runbot.repo']
         self.Branch = self.env['runbot.branch']
         self.Version = self.env['runbot.version']
+        self.BuildParameters = self.env['runbot.build.params']
+        self.Config = self.env['runbot.build.config']
+        self.Commit = self.env['runbot.commit']
+        self.BuildCommit = self.env['runbot.build.commit']
 
         self.patchers = {}
         self.patcher_objects = {}
