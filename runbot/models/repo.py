@@ -399,31 +399,27 @@ class Repo(models.Model):
             if repo in refs:
                 repo._find_new_commits(refs[repo], ref_branches[repo])
 
+    def _update_git_config(self):
+        """ Update repo git config file """
+        self.ensure_one()
+        git_config_path = os.path.join(self.path, '.git', 'config')
+        template_params = {'repo': self}
+        git_config = self.env['ir.ui.view'].render_template("runbot.git_config", template_params)
+        with open(git_config_path, 'w') as config_file:
+            config_file.write(git_config)
+
     def _clone(self):
         """ Clone the remote repo if needed """
         self.ensure_one()
         repo = self
         if not os.path.isdir(os.path.join(repo.path, 'refs')):
             _logger.info("Cloning repository '%s' in '%s'" % (repo.name, repo.path))
-            subprocess.call(['git', 'clone', '--bare', repo.name, repo.path])
-            # TODO bare init and add remote per repo
-            # TODO bare update remotes on write/create
-            # -> maybe the easiest solution would be to create a qweb view to write on config.
-            # -> configure by repo what to fecth and add this to remote config
-            # example: 
-            # [core]
-            #     repositoryformatversion = 0
-            #     filemode = true
-            #     bare = true
-            # [remote "ruodoo"]
-            #     url = git@github.com:ruodoo/odoo.git
-            #     fetch = +refs/heads/*:refs/remotes/ruodoo/*
-            #     fetch = +refs/pull/*/head:refs/remotes/ruodoo-dev/pr/*
-            # [remote "ruodoo-dev"]
-            #     url = git@github.com:ruodoo-dev/odoo.git
-            #     fetch = +refs/heads/*:refs/remotes/ruodoo-dev/*
-
-            # this example will fetch pr on ruodoo/odoo but not on odoo/odoo
+            git_init = subprocess.run(['git', 'init', '--bare', repo.path], stderr=subprocess.PIPE)
+            if git_init.returncode:
+                _logger.warning('Git init failed with code %s and message: "%s"', git_init.returncode, git_init.stderr)
+                return
+            self._update_git_config()
+            self._update_git()
 
     def _update_git(self, force):
         """ Update the git repo on FS """
