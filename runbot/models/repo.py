@@ -228,9 +228,6 @@ class Repo(models.Model):
         cmd = ['git', '--git-dir=%s' % self.path] + cmd
         return subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode()
 
-    def _git_rev_parse(self, branch_name):
-        return self._git(['rev-parse', branch_name]).strip()
-
     def _git_export(self, sha):
         """Export a git repo into a sources"""
         # TODO add automated tests

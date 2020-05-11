@@ -766,7 +766,7 @@ class BuildResult(models.Model):
     def _get_available_modules(self):
         available_modules = defaultdict(list)
         #repo_modules = []
-        for commit in self.build_commit_ids.mapped('commit_ids'):
+        for commit in self.params_id.build_commit_ids.mapped('commit_id'):
             for (addons_path, module, manifest_file_name) in commit._get_available_modules():
                 if module in available_modules:
                     self._log(
@@ -779,10 +779,11 @@ class BuildResult(models.Model):
         #return repo_modules, available_modules
         return available_modules
 
-    def _get_modules_to_test(self, commits=None, modules_patterns=''):
+    def _get_modules_to_test(self, modules_patterns=''):
         self.ensure_one()
 
         def filter_patterns(patterns, default, all):
+            default = set(default)
             patterns_list = (patterns or '').split(',')
             patterns_list = [p.strip() for p in patterns_list]
             for pat in patterns_list:
@@ -791,13 +792,13 @@ class BuildResult(models.Model):
                     default -= {mod for mod in default if fnmatch.fnmatch(mod, pat)}
                 else:
                     default |= {mod for mod in all if fnmatch.fnmatch(mod, pat)}
+            return default
 
         available_modules = []
         modules_to_install = set()
         for repo, module_list in self._get_available_modules().items():
             available_modules += module_list
-            modules_to_install |= filter_patterns(repo.modules , set(), module_list)
-
+            modules_to_install |= filter_patterns(repo.modules, module_list, module_list)
         modules_to_install = filter_patterns(modules_patterns, modules_to_install, available_modules)
 
         return sorted(modules_to_install)

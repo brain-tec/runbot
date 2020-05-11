@@ -63,13 +63,13 @@ class TestBuildResult(RunbotCase):
     def setUp(self):
         super(TestBuildResult, self).setUp()
 
-        commit = self.Commit.create ({
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+        self.server_commit = self.Commit.create ({
+            'name': 'dfdfcfcf0000ffffffffffffffffffffffffffff',
             'repo_id': self.repo_server.id
         })
-        self.build_commit = self.BuildCommit.create({
+        self.build_server_commit = self.BuildCommit.create({
             'params_id': self.base_params.id,
-            'commit_id': commit.id,
+            'commit_id': self.server_commit.id,
         })
 
         self.start_patcher('find_patcher', 'odoo.addons.runbot.common.find', 0)
@@ -121,30 +121,42 @@ class TestBuildResult(RunbotCase):
         build.description = "<script>console.log('foo')</script>"
         self.assertEqual(build.md_description, "&lt;script&gt;console.log('foo')&lt;/script&gt;")
 
-    @patch('odoo.addons.runbot.models.build.BuildResult._get_repo_available_modules')
-    def test_filter_modules(self, mock_get_repo_mods):
+    @patch('odoo.addons.runbot.models.build.BuildResult._get_available_modules')
+    def test_filter_modules(self, mock_get_available_modules):
         """ test module filtering """
+
+        commit_addons = self.Commit.create({
+            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'repo_id': self.repo_addons.id,
+        })
+
+        self.BuildCommit.create({
+            'params_id': self.base_params.id,
+            'commit_id': commit_addons.id,
+        })
+
         build = self.Build.create({
             'params_id': self.base_params.id,
         })
 
-        repo_mods = ['good_module', 'bad_module', 'other_good', 'l10n_be', 'hw_foo', 'hwgood', 'hw_explicit']
-        available_mods = ['good_module', 'bad_module', 'other_good', 'l10n_be', 'hw_foo', 'hwgood', 'hw_explicit', 'other_mod_1', 'other_mod_2']
-        mock_get_repo_mods.return_value = (repo_mods, available_mods)
-        #self.repo.modules_auto = 'repo'
-        #self.repo.modules = '-bad_module,-hw_*,hw_explicit,-l10n_*'
-        #modules_to_test = build._get_modules_to_test(self, modules_patterns='')
-        #self.assertEqual(modules_to_test, sorted(['good_module', 'hwgood', 'other_good', 'hw_explicit']))
+        mock_get_available_modules.return_value = {
+            self.repo_server: ['good_module', 'bad_module', 'other_good', 'l10n_be', 'hw_foo', 'hwgood', 'hw_explicit'],
+            self.repo_addons: ['other_mod_1', 'other_mod_2'],
+        }
 
-        #modules_to_test = build._get_modules_to_test(self, modules_patterns='-*, l10n_be')
-        #self.assertEqual(modules_to_test, sorted(['l10n_be']))
+        self.repo_server.modules = '-bad_module,-hw_*,hw_explicit,-l10n_*'
+        self.repo_addons.modules = '-*'
 
-        #modules_to_test = build._get_modules_to_test(self, modules_patterns='l10n_be')
-        #self.assertEqual(modules_to_test, sorted(['good_module', 'hwgood', 'other_good', 'hw_explicit', 'l10n_be']))
+        modules_to_test = build._get_modules_to_test(modules_patterns='')
+        self.assertEqual(modules_to_test, sorted(['good_module', 'hwgood', 'other_good', 'hw_explicit']))
 
-        ## star to get all available mods
-        #modules_to_test = build._get_modules_to_test(self, modules_patterns='*, -hw_*, hw_explicit')
-        #self.assertEqual(modules_to_test, sorted(['good_module', 'bad_module', 'other_good', 'l10n_be', 'hwgood', 'hw_explicit', 'other_mod_1', 'other_mod_2']))
+        modules_to_test = build._get_modules_to_test(modules_patterns='-*, l10n_be')
+        self.assertEqual(modules_to_test, sorted(['l10n_be']))
+        modules_to_test = build._get_modules_to_test(modules_patterns='l10n_be')
+        self.assertEqual(modules_to_test, sorted(['good_module', 'hwgood', 'other_good', 'hw_explicit', 'l10n_be']))
+        # star to get all available mods
+        modules_to_test = build._get_modules_to_test(modules_patterns='*, -hw_*, hw_explicit')
+        self.assertEqual(modules_to_test, sorted(['good_module', 'bad_module', 'other_good', 'l10n_be', 'hwgood', 'hw_explicit', 'other_mod_1', 'other_mod_2']))
 
     def test_build_cmd_log_db(self, ):
         """ test that the logdb connection URI is taken from the .odoorc file """
@@ -164,7 +176,7 @@ class TestBuildResult(RunbotCase):
         })
         cmd = build._cmd(py_version=3)
         self.assertEqual('python3', cmd[0])
-        self.assertEqual('bar/server.py', cmd[1])
+        self.assertEqual('server/server.py', cmd[1])
         self.assertIn('--addons-path', cmd)
         # TODO fix the _get_addons_path and/or _docker_source_folder
         # addons_path_pos = cmd.index('--addons-path') + 1
@@ -180,7 +192,7 @@ class TestBuildResult(RunbotCase):
                 '/tmp/runbot_test/static/sources/server/dfdfcfcf0000ffffffffffffffffffffffffffff/server.py',
                 '/tmp/runbot_test/static/sources/server/dfdfcfcf0000ffffffffffffffffffffffffffff/openerp/tools/config.py'
             ])
-            if file == '/tmp/runbot_test/static/sources/bar-ent/d0d0caca0000ffffffffffffffffffffffffffff/requirements.txt':
+            if file == '/tmp/runbot_test/static/sources/addons/d0d0caca0000ffffffffffffffffffffffffffff/requirements.txt':
                 return False
             return True
 
@@ -196,10 +208,7 @@ class TestBuildResult(RunbotCase):
         self.patchers['isfile'].side_effect = is_file
         self.patchers['isdir'].side_effect = is_dir
 
-        commit_server = self.Commit.create({
-            'name': 'dfdfcfcf0000ffffffffffffffffffffffffffff',
-            'repo_id': self.repo_server.id,
-        })
+
         commit_addons = self.Commit.create({
             'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
             'repo_id': self.repo_addons.id,
@@ -207,26 +216,18 @@ class TestBuildResult(RunbotCase):
 
         self.BuildCommit.create({
             'params_id': self.base_params.id,
-            'commit_id': commit_server.id,
-        })
-        self.BuildCommit.create({
-            'params_id': self.base_params.id,
             'commit_id': commit_addons.id,
         })
 
-        def rev_parse(repo, branch_name):
-            self.assertEqual(repo, self.repo)
-            self.assertEqual(branch_name, 'refs/heads/master')
-            return 'dfdfcfcf0000ffffffffffffffffffffffffffff'
 
-        with patch('odoo.addons.runbot.models.repo.Repo._git_rev_parse', new=rev_parse):
-            build = self.Build.create({
-                'params_id': self.base_params.id,
-            })
+        build = self.Build.create({
+            'params_id': self.base_params.id,
+        })
+
         cmd = build._cmd(py_version=3)
         self.assertIn('--addons-path', cmd)
         addons_path_pos = cmd.index('--addons-path') + 1
-        self.assertEqual(cmd[addons_path_pos], 'addons,server/addons,server/core/addons')
+        self.assertEqual(cmd[addons_path_pos], 'server/addons,server/core/addons,addons')
         self.assertEqual('server/server.py', cmd[1])
         self.assertEqual('python3', cmd[0])
 

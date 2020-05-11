@@ -117,9 +117,7 @@ class TestBranchRelations(RunbotCase):
                 'is_pr': False,
             })
 
-        self.assertEqual(b.bundle_id.base_id.name, False)
-        self.assertEqual(b.bundle_id.previous_version_base_id.name, False)
-        self.assertEqual(sorted(b.bundle_id.intermediate_version_base_ids.mapped('name')), [])
+        self.assertEqual(b.bundle_id.base_id.name, 'master')
 
 
     def test_relations_pr(self):

@@ -39,6 +39,7 @@ class RunbotCase(TransactionCase):
             'name': 'server',
             'project_id': self.project.id,
             'server_files': 'server.py',
+            'addons_paths': 'addons,core/addons'
         })
         self.repo_addons = self.env['runbot.repo'].create({
             'name': 'addons',
@@ -82,7 +83,7 @@ class RunbotCase(TransactionCase):
             'project_id': self.project.id,
         })
 
-        self.trigger_server = self.env['runbot.trigger'].create({
+        self.trigger_addons = self.env['runbot.trigger'].create({
             'name': 'Addons trigger',
             'repo_ids': [(4, self.repo_addons.id)],
             'dependency_ids': [(4, self.repo_addons.id)],
