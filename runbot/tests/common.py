@@ -32,6 +32,7 @@ class RunbotCase(TransactionCase):
         self.Version = self.env['runbot.version']
         self.Config = self.env['runbot.build.config']
         self.Commit = self.env['runbot.commit']
+        self.Runbot = self.env['runbot.runbot']
 
         self.project = self.env['runbot.project'].create({'name': 'Tests'})
         self.repo_server = self.env['runbot.repo'].create({
@@ -99,7 +100,7 @@ class RunbotCase(TransactionCase):
         self.start_patcher('fqdn_patcher', 'odoo.addons.runbot.common.socket.getfqdn', 'host.runbot.com')
         self.start_patcher('github_patcher', 'odoo.addons.runbot.models.repo.Remote._github', {})
         self.start_patcher('is_on_remote_patcher', 'odoo.addons.runbot.models.branch.Branch._is_on_remote', True)
-        self.start_patcher('repo_root_patcher', 'odoo.addons.runbot.models.repo.Repo._root', '/tmp/runbot_test/static')
+        self.start_patcher('repo_root_patcher', 'odoo.addons.runbot.models.runbot.Runbot._root', '/tmp/runbot_test/static')
         self.start_patcher('makedirs', 'odoo.addons.runbot.common.os.makedirs', True)
         self.start_patcher('mkdir', 'odoo.addons.runbot.common.os.mkdir', True)
         self.start_patcher('local_pgadmin_cursor', 'odoo.addons.runbot.common.local_pgadmin_cursor', False)  # avoid to create databases
@@ -107,16 +108,16 @@ class RunbotCase(TransactionCase):
         self.start_patcher('isfile', 'odoo.addons.runbot.common.os.path.isfile', True)
         self.start_patcher('docker_run', 'odoo.addons.runbot.models.build_config.docker_run')
         self.start_patcher('docker_build', 'odoo.addons.runbot.models.build.docker_build')
-        self.start_patcher('docker_ps', 'odoo.addons.runbot.models.repo.docker_ps', [])
-        self.start_patcher('docker_stop', 'odoo.addons.runbot.models.repo.docker_stop')
-        self.start_patcher('docker_ps', 'odoo.addons.runbot.models.build_config.docker_get_gateway_ip', None)
+        self.start_patcher('docker_ps', 'odoo.addons.runbot.models.runbot.docker_ps', [])
+        self.start_patcher('docker_stop', 'odoo.addons.runbot.models.runbot.docker_stop')
+        self.start_patcher('docker_get_gateway_ip', 'odoo.addons.runbot.models.build_config.docker_get_gateway_ip', None)
 
         self.start_patcher('cr_commit', 'odoo.sql_db.Cursor.commit', None)
-        self.start_patcher('repo_commit', 'odoo.addons.runbot.models.repo.Repo._commit', None)
+        self.start_patcher('repo_commit', 'odoo.addons.runbot.models.runbot.Runbot._commit', None)
         self.start_patcher('_local_cleanup_patcher', 'odoo.addons.runbot.models.build.BuildResult._local_cleanup')
         self.start_patcher('_local_pg_dropdb_patcher', 'odoo.addons.runbot.models.build.BuildResult._local_pg_dropdb')
 
-        self.start_patcher('reload_nginx', 'odoo.addons.runbot.models.repo.Repo._reload_nginx', None)
+        self.start_patcher('reload_nginx', 'odoo.addons.runbot.models.runbot.Runbot._reload_nginx', None)
 
     def start_patcher(self, patcher_name, patcher_path, return_value=DEFAULT, side_effect=DEFAULT, new=DEFAULT):
 

@@ -521,7 +521,7 @@ class BuildResult(models.Model):
             self._logger('Removing database')
             self._local_pg_dropdb(db)
 
-        root = self.env['runbot.repo']._root()
+        root = self.env['runbot.runbot']._root()
         builds_dir = os.path.join(root, 'build')
 
         if force is True:
@@ -734,7 +734,7 @@ class BuildResult(models.Model):
         """Return the repo build path"""
         self.ensure_one()
         build = self
-        root = self.env['runbot.repo']._root()
+        root = self.env['runbot.runbot']._root()
         return os.path.join(root, 'build', build.dest, *l)
 
     def http_log_url(self):
@@ -1096,7 +1096,7 @@ class BuildResult(models.Model):
                 else:
                     build.parent_id._github_status()
             elif build.params_id.config_id.update_github_state:
-                runbot_domain = self.env['runbot.repo']._domain()
+                runbot_domain = self.env['runbot.runbot']._domain()
                 desc = "runbot build %s" % (build.dest,)
 
                 if build.global_result in ('ko', 'warn'):

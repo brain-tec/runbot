@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
-import os
+
+from ..common import os
 import re
 
 from odoo import models, fields, api

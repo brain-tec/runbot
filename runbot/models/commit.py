@@ -1,4 +1,5 @@
-import os
+
+from ..common import os
 import glob
 from odoo import models, fields, api
 

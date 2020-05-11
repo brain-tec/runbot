@@ -3,11 +3,11 @@
 import contextlib
 import itertools
 import logging
-import os
 import psycopg2
 import re
 import socket
 import time
+import os
 
 from collections import OrderedDict
 from datetime import timedelta

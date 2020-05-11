@@ -431,7 +431,7 @@ class TestRepoScheduler(RunbotCase):
         })
         builds.append(build)
         host = self.env['runbot.host']._get_current()
-        self.repo_server._scheduler(host)
+        self.Runbot._scheduler(host)
 
         build.invalidate_cache()
         scheduled_build.invalidate_cache()
@@ -441,4 +441,4 @@ class TestRepoScheduler(RunbotCase):
         # give some room for the pending build
         builds[0].write({'local_state': 'done'})
 
-        self.repo_server._scheduler(host)
+        self.Runbot._scheduler(host)

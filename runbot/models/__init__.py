@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+from . import runbot
 from . import repo
 from . import commit
 from . import branch

@@ -343,7 +343,7 @@ class ConfigStep(models.Model):
         self.env.cr.commit()  # commit before docker run to be 100% sure that db state is consistent with dockers
         self.invalidate_cache()
         res = docker_run(cmd, log_path, build_path, docker_name, exposed_ports=[build_port, build_port + 1], ro_volumes=exports)
-        self.env['runbot.repo']._reload_nginx()
+        self.env['runbot.runbot']._reload_nginx()
         return res
 
     def _run_odoo_install(self, build, log_path):

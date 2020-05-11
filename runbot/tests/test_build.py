@@ -307,7 +307,7 @@ class TestBuildResult(RunbotCase):
         })
 
         # no room needed, verify that nobody got killed
-        self.repo_server._gc_testing(host)
+        self.Runbot._gc_testing(host)
         self.assertFalse(build_other_host.requested_action)
         self.assertFalse(child_build.requested_action)
 
@@ -318,7 +318,7 @@ class TestBuildResult(RunbotCase):
         })
 
         # still enough room, no need to kill
-        self.repo_server._gc_testing(host)
+        self.Runbot._gc_testing(host)
         self.assertFalse(build_same_params.requested_action)
 
         version_ten = self.Version.create({'name': '10.0'})
@@ -334,7 +334,7 @@ class TestBuildResult(RunbotCase):
         })
 
         # room needed for the pending build, verify that the parent build is killed
-        self.repo_server._gc_testing(host)
+        self.Runbot._gc_testing(host)
         self.assertEqual(build_other_host.requested_action, 'deathrow')
         self.assertEqual(child_build.requested_action, 'deathrow')
         self.assertFalse(build_same_params.requested_action)
