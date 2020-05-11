@@ -600,7 +600,7 @@ class ConfigStep(models.Model):
         return build_values
 
     def _make_stats(self, build):
-        if not (build.config_data.get('make_stats') and self.make_stats):
+        if not (build.params_id.config_data.get('make_stats') and self.make_stats):
             return
         build._log('make_stats', 'Getting stats from log file')
         log_path = build._path('logs', '%s.txt' % self.name)
