@@ -19,7 +19,8 @@ from odoo.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT
 
 _logger = logging.getLogger(__name__)
 
-dest_reg = re.compile(r'^\d{5,}-.{1,32}-[\da-f]{6}(.*)*$')
+# TODO check for accidental drop_db
+dest_reg = re.compile(r'^\d{5}-.+-.*$')
 
 #class Commit():
 #    def __init__(self, repo, sha):
