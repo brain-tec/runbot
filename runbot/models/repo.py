@@ -585,16 +585,32 @@ class Repo(models.Model):
         nb_pending = Build.search_count([('local_state', '=', 'pending'), ('host', '=', False)])
         if available_slots > 0 or nb_pending == 0:
             return
+        self.env.cr.execute("""
+            SELECT
+                runbot_build.id
+            FROM
+                runbot_build
+            LEFT JOIN
+                runbot_batch_slot ON runbot_batch_slot.build_id = runbot_build.id
+            LEFT JOIN
+                runbot_batch ON runbot_batch_slot.batch_id = runbot_batch.id
+            LEFT JOIN
+                runbot_bundle ON runbot_bundle.id = runbot_batch.bundle_id
+            WHERE
+                runbot_build.local_state in ('testing', 'pending')
+            AND
+                runbot_bundle.sticky = true;
+            """)
+        cannot_be_killed_ids = self.env.cr.fetchall()
         for build in testing_builds:
             top_parent = build._get_top_parent()
-            if not build.branch_id.sticky:
+            if build.id not in cannot_be_killed_ids and top_parent.id not in cannot_be_killed_ids:
                 newer_candidates = Build.search([
                     ('id', '>', build.id),
-                    ('branch_id', '=', build.branch_id.id),
+                    ('params_id', '=', top_parent.params_id.id),
                     ('build_type', '=', 'normal'),
                     ('parent_id', '=', False),
                     ('hidden', '=', False),
-                    ('config_id', '=', top_parent.config_id.id)
                 ])
                 if newer_candidates:
                     top_parent._ask_kill(message='Build automatically killed, newer build found %s.' % newer_candidates.ids)

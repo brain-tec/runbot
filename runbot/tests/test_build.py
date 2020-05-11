@@ -78,6 +78,7 @@ class TestBuildResult(RunbotCase):
 
         build = self.Build.create({
             'params_id': self.base_params.id,
+            'port': '1234'
         })
 
         self.assertEqual(build.dest, '%05d-13-0' % build.id)
@@ -316,28 +317,38 @@ class TestBuildResult(RunbotCase):
             'parent_id': build_other_host.id
         })
 
-        self.repo._gc_testing(host)
+        # no room needed, verify that nobody got killed
+        self.repo_server._gc_testing(host)
         self.assertFalse(build_other_host.requested_action)
         self.assertFalse(child_build.requested_action)
 
-        build_same_branch = self.Build.create({
+        build_same_params = self.Build.create({
             'params_id': self.base_params.id,
             'local_state': 'testing',
             'host': 'runbot_xxx',
         })
 
-        self.repo._gc_testing(host)
-        self.assertFalse(build_same_branch.requested_action)
+        # still enough room, no need to kill
+        self.repo_server._gc_testing(host)
+        self.assertFalse(build_same_params.requested_action)
+
+        version_ten = self.Version.create({'name': '10.0'})
+        new_params = self.BuildParameters.create({
+            'version_id': version_ten.id,
+            'project_id': self.project.id,
+            'config_id': self.default_config.id,
+        })
 
         build_pending = self.Build.create({
-            'params.id': self.base_params.id,
+            'params_id': new_params.id,
             'local_state': 'pending',
         })
 
-        self.repo._gc_testing(host)
+        # room needed for the pending build, verify that the parent build is killed
+        self.repo_server._gc_testing(host)
         self.assertEqual(build_other_host.requested_action, 'deathrow')
         self.assertEqual(child_build.requested_action, 'deathrow')
-        self.assertFalse(build_same_branch.requested_action)
+        self.assertFalse(build_same_params.requested_action)
         self.assertFalse(build_pending.requested_action)
 
     @patch('odoo.addons.runbot.models.build._logger')
