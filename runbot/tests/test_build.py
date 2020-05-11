@@ -27,14 +27,14 @@ class TestBuildParams(RunbotCase):
         params = self.BuildParameters.create({
             'version_id': self.version_master.id,
             'project_id': self.project.id,
-            'config_id': self.config.id,
+            'config_id': self.default_config.id,
         })
 
         # test that when the same params does not create a new record
         same_params = self.BuildParameters.create({
             'version_id': self.version_master.id,
             'project_id': self.project.id,
-            'config_id': config.id,
+            'config_id': self.default_config.id,
         })
 
         self.assertEqual(params.fingerprint, same_params.fingerprint)
