@@ -42,7 +42,7 @@ class RepoTrigger(models.Model):
 
     name = fields.Char("Repo trigger descriptions")
     project_id = fields.Many2one('runbot.project', required=True)  # main/security/runbot
-    repos_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_triggers', string="Triggers")
+    repo_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_triggers', string="Triggers")
     dependency_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_dependencies', string="Dependencies")
     config_id = fields.Many2one('runbot.build.config', 'Config')
 
@@ -320,9 +320,16 @@ class Repo(models.Model):
         """
 
         # FIXME WIP
-        names = [r[0] for r in refs]
-        branches = self.env['runbot.branch'].search([('name', 'in', names), ('remote_id', '=', self.id)])
-        ref_branches = {branch.name: branch for branch in branches}
+        names = [r[0].split('/')[-1] for r in refs]
+        branches = self.env['runbot.branch'].search([('name', 'in', names), ('remote_id', 'in', self.remote_ids.ids)])
+        ref_branches = {
+            'refs/%s/%s/%s' % (
+                branch.remote_id.remote_name,
+                'pull' if branch.is_pr else 'heads',
+                branch.name
+                ): branch
+            for branch in branches
+        }
         for ref_name, sha, date, author, author_email, subject, committer, committer_email in refs:
             if not ref_branches.get(ref_name):
                 # format example:

@@ -59,7 +59,7 @@ class Branch(models.Model):
             - pull_head_name (organisation:branch_name) for external pr
         """
         for branch in self:
-            if branch.target_branch_name and branch.pull_head_name:  # odoo:master-remove-duplicate-idx, owner:xxx, 
+            if branch.is_pr:  # odoo:master-remove-duplicate-idx, owner:xxx, 
                 _, name = branch.pull_head_name.split(':')
                 if branch.pull_head_remote_id:
                     branch.reference_name = name
@@ -67,7 +67,6 @@ class Branch(models.Model):
                     branch.reference_name = branch.pull_head_name  # repo is not known, not in repo list must be an external pr, so use complete label
             else:
                 branch.reference_name = branch.name
-            print('reference_name', branch.reference_name)
         # cases to test:
         # organisation:patch-x (no pull_head_name, should be changed)
         # odoo-dev:master-my-dev
@@ -150,8 +149,7 @@ class Branch(models.Model):
         #    if coverage_config:
         #        vals['config_id'] = coverage_config
         branch = super().create(vals)
-        print('created')
-        branch.bundle_id = self.env['runbot.bundle']._get(branch.reference_name, branch.remote_id.repo_id.project_id)
+        branch.bundle_id = self.env['runbot.bundle']._get(branch)
         assert branch.bundle_id
         return branch
         #note: bundle is created after branch because we need reference_name. Use new? Compute reference another way? or keep bundle_id not required?

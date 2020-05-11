@@ -11,7 +11,7 @@
               <group name="repo_group">
                 <field name="name"/>
                 <field name="project_id"/>
-                <field name="repos_ids"/>
+                <field name="repo_ids"/>
                 <field name="dependency_ids"/>
                 <field name="config_id"/>
               </group>

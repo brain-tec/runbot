@@ -5,6 +5,22 @@ from unittest.mock import patch, DEFAULT
 
 class RunbotCase(TransactionCase):
 
+    def mock_git_helper(self):
+        """Helper that returns a mock for repo._git()"""
+        def mock_git(repo, cmd):
+            if cmd[:2] == ['show', '-s'] or cmd[:3] == ['show', '--pretty="%H -- %s"', '-s']:
+                return 'commit message for %s' % cmd[-1]
+            if cmd[:2] == ['cat-file', '-e']:
+                return True
+            if cmd[0] == 'for-each-ref':
+                if self.commit_list.get(repo.id):
+                    return '\n'.join(['\0'.join(commit_fields) for commit_fields in self.commit_list[repo.id]])
+                else:
+                    return ''
+            else:
+                print('Unsupported mock command %s' % cmd)
+        return mock_git
+
     def setUp(self):
         super(RunbotCase, self).setUp()
         self.Project = self.env['runbot.project']
@@ -63,21 +79,6 @@ class RunbotCase(TransactionCase):
         self.patcher_objects = {}
         self.commit_list = {}
 
-        def mock_git_helper(self):
-            """Helper that returns a mock for repo._git()"""
-            def mock_git(repo, cmd):
-                if cmd[:2] == ['show', '-s'] or cmd[:3] == ['show', '--pretty="%H -- %s"', '-s']:
-                    return 'commit message for %s' % cmd[-1]
-                if cmd[:2] == ['cat-file', '-e']:
-                    return True
-                if cmd[0] == 'for-each-ref':
-                    if self.commit_list.get(repo.id):
-                        return '\n'.join(['\0'.join(commit_fields) for commit_fields in self.commit_list[repo.id]])
-                    else:
-                        return ''
-                else:
-                    print('Unsupported mock command %s' % cmd)
-            return mock_git
 
         self.start_patcher('git_patcher', 'odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper())
         self.start_patcher('fqdn_patcher', 'odoo.addons.runbot.common.socket.getfqdn', 'host.runbot.com')

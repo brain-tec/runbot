@@ -1,0 +1,6 @@
+<odoo>
+    <record model="runbot.bundle" id="runbot.bundle_dummy">
+        <field name="name">Dummy</field>
+        <field name="no_build">False</field>
+    </record>
+</odoo>

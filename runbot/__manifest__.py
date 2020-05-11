@@ -37,5 +37,6 @@
         'data/runbot_error_regex_data.xml',
         'data/error_link.xml',
         'data/website_data.xml',
+        'data/bundle.xml',
     ],
 }

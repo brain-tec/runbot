@@ -95,12 +95,15 @@ class Bundle(models.Model):
             else:
                 base_bundles = self.search([('is_base', '=', True), ('project_id', '=', project_id)])
                 bases_by_project[project_id] = base_bundles
+            master=False
             for candidate in base_bundles:
                 if bundle.name.startswith(candidate.name):
                     bundle.base_id = candidate
                     break
-                elif bundle.name == 'master':
-                    bundle.base_id = candidate
+                elif candidate.name == 'master':
+                    master = candidate
+            else:
+                bundle.base_id = master
 
 
     @api.depends('is_base', 'base_id.version_id')
@@ -208,7 +211,9 @@ class Bundle(models.Model):
         #        self.env['runbot.bundle'].search([('name', '=like', '%s%%' % bundle.name), ('project_id', '=', self.project_id.id)])._compute_base_id()
 
 
-    def _get(self, name, project):
+    def _get(self, branch):
+        name = branch.reference_name
+        project = branch.remote_id.repo_id.project_id
         project.ensure_one()
         bundle = self.search([('name', '=', name), ('project_id', '=', project.id)])
         if not bundle:
@@ -216,6 +221,9 @@ class Bundle(models.Model):
                 'name': name,
                 'project_id': project.id,
             })
+        if bundle.is_base and branch.is_pr:
+            _logger.warning('Trying to add pr to base_project, falling back on dummy bundle')
+            bundle = env.ref('runbot.bundle_dummy')
         return bundle
 
     def _get_preparing_batch(self):
@@ -291,14 +299,26 @@ class Batch(models.Model):
     def _start(self):
         #  For all commit on real branches:
         self.state = 'ready'
-        triggers = self.env['runbot.trigger'].search([('project_id', '=', self.bundle_id.project_id)])
-        pushed_repo = self.batch_commit_ids.mapped('repo_id') # TODO check match_type?
-
+        triggers = self.env['runbot.trigger'].search([('project_id', '=', self.bundle_id.project_id.id)])
+        pushed_repo = self.batch_commit_ids.mapped('commit_id.repo_id') # all should be new for now
         #  save commit state for all trigger dependencies and repo
-        trigger_repos = triggers.mapped('repo_id')
+        trigger_repos = triggers.mapped('repo_ids')
+        all_repos = trigger_repos | triggers.mapped('dependency_ids')
+        missing_repos = pushed_repo-all_repos
+        if missing_repos:
+            for commit in self.bundle_id.branch_ids.mapped('head'):
+                if commit.repo_id in missing_repos:
+                    self.env['runbot.batch.commit'].create({
+                        'commit_id': commit.id,
+                        'batch_id': self.id,
+                        'match_type': 'head',
+                    })
+                    missing_repos -= commit.repo_id
         for missing_repo in pushed_repo-trigger_repos:
+            print(self.bundle_id.branch_ids)
             break
-            # find commit for missing_repo in a corresponding branch: branch head in the same bundle, or fallback on base_repo
+            # find commit for missing_repo in a corresponding branch:
+            # branch head in the same bundle, or fallback on base_id for now
         for trigger in triggers:
             if trigger.repo_ids & pushed_repo:  # there is a new commit in this in this trigger
                 break

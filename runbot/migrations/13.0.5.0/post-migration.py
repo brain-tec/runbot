@@ -115,7 +115,7 @@ def migrate(cr, version):
             trigger = env['runbot.trigger'].create({
                 'name': repo_name,
                 'project_id': project.id,
-                'repos_ids': [(4, id)],
+                'repo_ids': [(4, id)],
                 'dependency_ids': [(4, dependency_id) for dependency_id in dependency_ids],
                 'config_id': repo_config_id if repo_config_id else env.ref('runbot.runbot_build_config_default').id,
             })
@@ -124,7 +124,7 @@ def migrate(cr, version):
 
 
     # no build, config, ...
-
+    dummy_bundle = env.ref('runbot.bundle_dummy')
     ########################
     # Bundles
     ########################
@@ -170,6 +170,9 @@ def migrate(cr, version):
             })
             bundles[key] = bundle
         bundle = bundles[key]
+        if bundle.is_base and branch.is_pr:
+            _lgger.info('Trying to add pr to base bundle')
+        bundle=dummy_bundle
         branch.bundle_id = bundle
         branch_to_bundle[branch.id] = bundle
         branch_to_version[branch.id] = bundle.version_id.id
