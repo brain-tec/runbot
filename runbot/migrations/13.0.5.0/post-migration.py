@@ -38,9 +38,7 @@ def migrate(cr, version):
     triggers = {}
     triggers_by_project = {}
 
-    RD_project = env['runbot.project'].create({
-        'name': 'R&D'
-    })
+    RD_project = env.ref('runbot.main_project')
     security_project = env['runbot.project'].create({
         'name': 'Security'
     })
@@ -134,7 +132,7 @@ def migrate(cr, version):
 
     branches._compute_reference_name()
 
-    bundles = {}
+    bundles = {('master', RD_project.id):env.ref('runbot.bundle_master')}
     versions = {}
     branch_to_bundle = {}
     branch_to_version = {}
@@ -153,14 +151,14 @@ def migrate(cr, version):
             pull_head_remote_id = owner_to_remote.get((owner, repo.id))
             if pull_head_remote_id:
                 branch.pull_head_remote_id = pull_head_remote_id
-        project_id = repo.project_id
+        project_id = repo.project_id.is
         name = branch.reference_name
 
-        key = (name, project_id)
+        key = (name, project_id.id)
         if key not in bundles:
             bundle = env['runbot.bundle'].create({
                 'name': name,
-                'project_id': project_id.id,
+                'project_id': project_id,
                 'sticky': branch.sticky,
                 'is_base': branch.sticky,
                 'version_id': next((version.id for k, version in versions.items() if (
@@ -283,14 +281,14 @@ def migrate(cr, version):
                     sha_repo_commits[key] = commit
                     sha_commits[dependency_hash] = commit
                 build_commit_ids[id][dependecy_repo_id] = commit.id
-                build_commit_ids_create_values.append({'commit_id': commit.id,'repo_id': dependecy_repo_id, 'match_type':match_type})
+                build_commit_ids_create_values.append({'commit_id': commit.id, 'match_type':match_type})
 
             params = param.create({
                 'version_id':  branch_to_version[branch_id],
                 'extra_params': extra_params,
                 'config_id': config_id,
                 'project_id': env['runbot.repo'].browse(repo_id).project_id,
-                #'trigger_id': triggers[repo_id].id, # 
+                'trigger_id': triggers[repo_id].id, # 
                 'config_data': config_data,
                 'build_commit_ids': [(0, 0, values) for values in build_commit_ids_create_values]
             })

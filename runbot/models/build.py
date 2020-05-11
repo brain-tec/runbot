@@ -63,8 +63,8 @@ class BuildParameters(models.Model):
     build_commit_ids = fields.One2many('runbot.build.commit', 'params_id', copy=True)
     version_id = fields.Many2one('runbot.version', required=True, index=True)
     project_id = fields.Many2one('runbot.project', required=True)  # for access rights
+    trigger_id = fields.Many2one('runbot.trigger')  # for access rights
     category = fields.Char('Category', index=True) # normal vs nightly vs weekly, ...
-
     # other informations
     extra_params = fields.Char('Extra cmd args')
     config_id = fields.Many2one('runbot.build.config', 'Run Config', required=True,
@@ -79,12 +79,13 @@ class BuildParameters(models.Model):
 
     fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)
 
-    @api.depends('version_id', 'project_id', 'extra_params', 'config_id', 'config_data', 'modules', 'build_commit_ids', 'builds_reference_ids')
+    #@api.depends('version_id', 'project_id', 'extra_params', 'config_id', 'config_data', 'modules', 'build_commit_ids', 'builds_reference_ids')
     def _compute_fingerprint(self):
         for param in self:
             cleaned_vals = {
                 'version_id': param.version_id.id,
                 'project_id': param.project_id.id,
+                'trigger_id': param.project_id.id,
                 'extra_params': param.extra_params or '',
                 'config_id': param.config_id.id,
                 'config_data': param.config_data.dict,

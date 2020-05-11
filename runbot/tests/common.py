@@ -75,6 +75,21 @@ class RunbotCase(TransactionCase):
             'config_id': self.default_config.id,
         })
 
+        self.trigger_server = self.env['runbot.trigger'].create({
+            'name': 'Server trigger',
+            'repo_ids': [(4, self.repo_server.id)],
+            'config_id': self.default_config.id,
+            'project_id': self.project.id,
+        })
+
+        self.trigger_server = self.env['runbot.trigger'].create({
+            'name': 'Addons trigger',
+            'repo_ids': [(4, self.repo_addons.id)],
+            'dependency_ids': [(4, self.repo_addons.id)],
+            'config_id': self.default_config.id,
+            'project_id': self.project.id,
+        })
+
         self.patchers = {}
         self.patcher_objects = {}
         self.commit_list = {}

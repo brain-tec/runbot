@@ -44,6 +44,9 @@ class TestRepo(RunbotCase):
         are created and new builds are created in pending state
         """
 
+        max_bundle_id = self.env['runbot.bundle'].search([], order ='id desc', limit=1).id or 0
+
+
         branch_name = 'master-test'
         def counter():
             i = 100000
@@ -214,7 +217,7 @@ class TestRepo(RunbotCase):
 
         repos._create_batches()
 
-        bundles = self.env['runbot.bundle'].search([])
+        bundles = self.env['runbot.bundle'].search([('id', '>', max_bundle_id)])
         self.assertEqual(bundles, bundle)
         batches = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
         self.assertEqual(len(batches), 2, 'No preparing instance and new head -> new batch')
@@ -225,16 +228,21 @@ class TestRepo(RunbotCase):
 
         repos._create_batches()
 
-        batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)], order='id desc')
-        self.assertEqual(len(batch), 2, 'No new batch created, updated')
-        self.assertEqual(bundle.last_batch.batch_commit_ids.commit_id.mapped('subject'), ['Server subject'], 'commits should have been updated')
-        self.assertEqual(bundle.last_batch.state, 'preparing')
+        batches = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)], order='id desc')
+        last_batch = bundle.last_batch
+        self.assertEqual(len(batches), 2, 'No new batch created, updated')
+        self.assertEqual(last_batch.batch_commit_ids.commit_id.mapped('subject'), ['Server subject'], 'commits should have been updated')
+        self.assertEqual(last_batch.state, 'preparing')
         self.assertEqual(dev_branch.head_name, 'd0d0caca')
+        self.env.cr.sql_log = True
+        last_batch._start()
+        self.env.cr.sql_log = False
+        self.assertEqual(last_batch.batch_commit_ids.commit_id.mapped('subject'), ['Server subject', 'Addons subject'])
 
-        bundle.last_batch._start()
-        self.assertEqual(bundle.last_batch.batch_commit_ids.commit_id.mapped('subject'), ['Server subject', 'Addons subject'])
-
-
+        self.assertEqual(last_batch.state, 'ready')
+        print(last_batch)
+        print(last_batch.slot_ids)
+        print(last_batch.slot_ids.mapped('build_id'))
         # TODO imp
         # Add another branch in another project
         # Add another bundle
@@ -242,7 +250,7 @@ class TestRepo(RunbotCase):
 
     @skip('This test is for performances. It needs a lot of real branches in DB to mean something')
     def test_repo_perf_find_new_commits(self):
-        mock_root.return_value = '/tmp/static'
+        self.mock_root.return_value = '/tmp/static'
         repo = self.env['runbot.repo'].search([('name', '=', 'blabla')])
 
         self.commit_list[self.repo_server.id] = []

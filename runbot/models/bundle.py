@@ -55,7 +55,7 @@ class Bundle(models.Model):
     _description = "Bundle"
 
     name = fields.Char('Bundle name', required=True, unique=True, help="Name of the base branch")
-    project_id = fields.Many2one('runbot.project')
+    project_id = fields.Many2one('runbot.project', required=True)
     branch_ids = fields.One2many('runbot.branch', 'bundle_id')
 
     # custom behaviour
@@ -95,16 +95,12 @@ class Bundle(models.Model):
             else:
                 base_bundles = self.search([('is_base', '=', True), ('project_id', '=', project_id)])
                 bases_by_project[project_id] = base_bundles
-            master=False
             for candidate in base_bundles:
                 if bundle.name.startswith(candidate.name):
                     bundle.base_id = candidate
                     break
-                elif candidate.name == 'master':
-                    master = candidate
             else:
-                bundle.base_id = master
-
+                bundle.base_id = self.env['ir.model.data'].xmlid_to_res_id('runbot.bundle_master')
 
     @api.depends('is_base', 'base_id.version_id')
     def _compute_version_id(self):
@@ -300,11 +296,10 @@ class Batch(models.Model):
         #  For all commit on real branches:
         self.state = 'ready'
         triggers = self.env['runbot.trigger'].search([('project_id', '=', self.bundle_id.project_id.id)])
-        pushed_repo = self.batch_commit_ids.mapped('commit_id.repo_id') # all should be new for now
-        #  save commit state for all trigger dependencies and repo
-        trigger_repos = triggers.mapped('repo_ids')
-        all_repos = trigger_repos | triggers.mapped('dependency_ids')
-        missing_repos = pushed_repo-all_repos
+        pushed_repo = self.batch_commit_ids.mapped('commit_id.repo_id')
+        all_repos = triggers.mapped('repo_ids') | triggers.mapped('dependency_ids')
+        missing_repos = all_repos - pushed_repo
+        # find missing commits on bundle branches head
         if missing_repos:
             for commit in self.bundle_id.branch_ids.mapped('head'):
                 if commit.repo_id in missing_repos:
@@ -314,15 +309,60 @@ class Batch(models.Model):
                         'match_type': 'head',
                     })
                     missing_repos -= commit.repo_id
-        for missing_repo in pushed_repo-trigger_repos:
-            print(self.bundle_id.branch_ids)
-            break
-            # find commit for missing_repo in a corresponding branch:
-            # branch head in the same bundle, or fallback on base_id for now
+                    # TODO manage multiple branch in same repo
+
+        # find missing commits on base branches head
+        if missing_repos:
+            for commit in self.bundle_id.base_id.branch_ids.mapped('head'):
+                if commit.repo_id in missing_repos:
+                    self.env['runbot.batch.commit'].create({
+                        'commit_id': commit.id,
+                        'batch_id': self.id,
+                        'match_type': 'base',
+                    })
+                    missing_repos -= commit.repo_id
+
+        batch_commit_by_repos = {batch_commit.commit_id.repo_id.id: batch_commit for batch_commit in self.batch_commit_ids}
+        version_id = self.bundle_id.version_id.id
+        project_id = self.bundle_id.project_id.id
         for trigger in triggers:
-            if trigger.repo_ids & pushed_repo:  # there is a new commit in this in this trigger
-                break
-                # todo create build
+            link_type = 'created'
+            build = self.env['runbot.build']
+            trigger_repos = trigger.repo_ids | trigger.dependency_ids
+            # in any case, search for an existing build
+            params = self.env['runbot.build.params'].create({
+                'version_id':  version_id,
+                'extra_params': '',
+                'config_id': trigger.config_id.id,
+                'project_id': project_id,
+                'trigger_id': trigger.id,  # for future reference and access rights
+                'config_data': {},
+                'build_commit_ids': [(0, 0, {
+                    'commit_id': batch_commit_by_repos[repo.id].commit_id.id,
+                    'match_type': batch_commit_by_repos[repo.id].match_type
+                }) for repo in trigger_repos],
+                'builds_reference_ids': []  # TODO
+            })
+            build = self.env['runbot.build'].search([('params_id', '=', params.id), ('parent_id', '=', False)], limit=1, order='id desc')
+            # id desc will take the most recent one if multiple build. Hopefully it is a green build. 
+            # TODO sort on result?
+            if build:
+                link_type = 'matched'
+            elif trigger.repo_ids & pushed_repo: # common repo between triggers and pushed
+                build = self.env['runbot.build'].create({
+                    'params_id': params.id,
+                })
+            # TODO manage other cases
+
+            self.env['runbot.batch.slot'].create({
+                'batch_id': self.id,
+                'trigger_id': trigger.id,
+                'build_id': build.id,
+                'params_id': params.id,
+                'link_type': link_type,
+            })
+            # todo create build
+        self.env['runbot.batch.slot'].flush()
 
 
 class BatchCommit(models.Model):
@@ -331,7 +371,7 @@ class BatchCommit(models.Model):
 
     commit_id = fields.Many2one('runbot.commit', index=True)
     batch_id = fields.Many2one('runbot.batch', index=True)
-    match_type = fields.Selection([('new', 'New head of branch'), ('head', 'Head of branch'), ('default', 'Found on base branch')])  # HEAD, DEFAULT
+    match_type = fields.Selection([('new', 'New head of branch'), ('head', 'Head of branch'), ('base', 'Found on base branch')])  # HEAD, DEFAULT
 
 
 class BatchSlot(models.Model):
@@ -340,11 +380,12 @@ class BatchSlot(models.Model):
 
     _fa_link_type = {'created': 'hashtag', 'matched': 'link', 'rebuild': 'refresh'}
 
-    batch_id = fields.Many2one('runbot.batch')
+    batch_id = fields.Many2one('runbot.batch', index=True)
     trigger_id = fields.Many2one('runbot.trigger', index=True)
     build_id = fields.Many2one('runbot.build', index=True)
+    params_id = fields.Many2one('runbot.build.params', index=True, required=True)
     link_type = fields.Selection([('created', 'Build created'), ('matched', 'Existing build matched'), ('rebuild', 'Rebuild')], required=True) # rebuild type?
-    active = fields.Boolean('Attached')
+    active = fields.Boolean('Attached', default=True)
     result = fields.Selection("Result", related='build_id.global_result')
     # rebuild, what to do: since build ccan be in multiple batch:
     # - replace for all batch?
