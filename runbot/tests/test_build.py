@@ -67,17 +67,27 @@ class TestBuildResult(RunbotCase):
             'name': 'dfdfcfcf0000ffffffffffffffffffffffffffff',
             'repo_id': self.repo_server.id
         })
-        self.build_server_commit = self.BuildCommit.create({
-            'params_id': self.base_params.id,
-            'commit_id': self.server_commit.id,
+
+        self.addons_commit = self.Commit.create({
+            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+            'repo_id': self.repo_addons.id,
         })
+
+        self.server_params = self.base_params.copy({'build_commit_ids': [
+            (0, 0, {'commit_id': self.server_commit.id})
+        ]})
+
+        self.addons_params = self.base_params.copy({'build_commit_ids': [
+            (0, 0, {'commit_id': self.server_commit.id}),
+            (0, 0, {'commit_id': self.addons_commit.id})
+        ]})
 
         self.start_patcher('find_patcher', 'odoo.addons.runbot.common.find', 0)
 
     def test_base_fields(self):
 
         build = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.server_params.id,
             'port': '1234'
         })
 
@@ -102,7 +112,7 @@ class TestBuildResult(RunbotCase):
         self.assertEqual(build.config_data, {"test_info": "dummy"})
 
         other = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.server_params.id,
             'local_result': 'ko'
         })
 
@@ -113,7 +123,7 @@ class TestBuildResult(RunbotCase):
 
     def test_markdown_description(self):
         build = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.server_params.id,
             'description': 'A nice **description**'
         })
         self.assertEqual(build.md_description, 'A nice <strong>description</strong>')
@@ -125,18 +135,8 @@ class TestBuildResult(RunbotCase):
     def test_filter_modules(self, mock_get_available_modules):
         """ test module filtering """
 
-        commit_addons = self.Commit.create({
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-            'repo_id': self.repo_addons.id,
-        })
-
-        self.BuildCommit.create({
-            'params_id': self.base_params.id,
-            'commit_id': commit_addons.id,
-        })
-
         build = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.addons_params.id,
         })
 
         mock_get_available_modules.return_value = {
@@ -164,7 +164,7 @@ class TestBuildResult(RunbotCase):
         self.env['ir.config_parameter'].sudo().set_param("runbot.runbot_logdb_uri", uri)
 
         build = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.server_params.id,
         })
         cmd = build._cmd(py_version=3)
         self.assertIn('log_db = %s' % uri, cmd.get_config())
@@ -172,7 +172,7 @@ class TestBuildResult(RunbotCase):
     def test_build_cmd_server_path_no_dep(self):
         """ test that the server path and addons path """
         build = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.server_params.id,
         })
         cmd = build._cmd(py_version=3)
         self.assertEqual('python3', cmd[0])
@@ -208,20 +208,8 @@ class TestBuildResult(RunbotCase):
         self.patchers['isfile'].side_effect = is_file
         self.patchers['isdir'].side_effect = is_dir
 
-
-        commit_addons = self.Commit.create({
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-            'repo_id': self.repo_addons.id,
-        })
-
-        self.BuildCommit.create({
-            'params_id': self.base_params.id,
-            'commit_id': commit_addons.id,
-        })
-
-
         build = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.addons_params.id,
         })
 
         cmd = build._cmd(py_version=3)
@@ -264,12 +252,12 @@ class TestBuildResult(RunbotCase):
     def test_build_gc_date(self):
         """ test build gc date and gc_delay"""
         build = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.server_params.id,
             'local_state': 'done'
         })
 
         child_build = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.server_params.id,
             'parent_id': build.id,
             'local_state': 'done'
         })
@@ -306,13 +294,13 @@ class TestBuildResult(RunbotCase):
         })
 
         build_other_host = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.server_params.id,
             'local_state': 'testing',
             'host': 'runbot_yyy'
         })
 
         child_build = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.server_params.id,
             'local_state': 'testing',
             'host': 'runbot_xxx',
             'parent_id': build_other_host.id
@@ -324,7 +312,7 @@ class TestBuildResult(RunbotCase):
         self.assertFalse(child_build.requested_action)
 
         build_same_params = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.server_params.id,
             'local_state': 'testing',
             'host': 'runbot_xxx',
         })
@@ -356,7 +344,7 @@ class TestBuildResult(RunbotCase):
     def test_build_skip(self, mock_logger):
         """test build is skipped"""
         build = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.server_params.id,
             'port': '1234',
         })
         build._skip()
@@ -364,7 +352,7 @@ class TestBuildResult(RunbotCase):
         self.assertEqual(build.local_result, 'skipped')
 
         other_build = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.server_params.id,
             'port': '1234',
         })
         other_build._skip(reason='A good reason')
@@ -404,23 +392,23 @@ class TestBuildResult(RunbotCase):
 
     def test_children(self):
         build1 = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.server_params.id,
         })
         build1_1 = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.server_params.id,
             'parent_id': build1.id,
             'hidden': True,
         })
         build1_2 = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.server_params.id,
             'parent_id': build1.id,
         })
         build1_1_1 = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.server_params.id,
             'parent_id': build1_1.id,
         })
         build1_1_2 = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.server_params.id,
             'parent_id': build1_1.id,
         })
 

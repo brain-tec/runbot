@@ -32,7 +32,6 @@ class RunbotCase(TransactionCase):
         self.Version = self.env['runbot.version']
         self.Config = self.env['runbot.build.config']
         self.Commit = self.env['runbot.commit']
-        self.BuildCommit = self.env['runbot.build.commit']
 
         self.project = self.env['runbot.project'].create({'name': 'Tests'})
         self.repo_server = self.env['runbot.repo'].create({
