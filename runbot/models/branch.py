@@ -50,7 +50,7 @@ class Branch(models.Model):
             branch.dname = '%s:%s' % (branch.remote_id.short_name, branch.branch_name)
 
     # todo ass shortcut to create pr in interface as inherited view Create Fast PR
-    @api.depends('target_branch_name', 'pull_head_name', 'pull_head_remote_id')
+    @api.depends('name', 'target_branch_name', 'pull_head_name', 'pull_head_remote_id')
     def _compute_reference_name(self):
         """
         a unique reference for a branch inside a bundle.
@@ -60,13 +60,14 @@ class Branch(models.Model):
         """
         for branch in self:
             if branch.target_branch_name and branch.pull_head_name:  # odoo:master-remove-duplicate-idx, owner:xxx, 
-                _, name = branch.pull_head_name.split(':')  # TODO fix where pullheadname doesnt have : -> old branch, redo get_pull_info
+                _, name = branch.pull_head_name.split(':')
                 if branch.pull_head_remote_id:
                     branch.reference_name = name
                 else:
                     branch.reference_name = branch.pull_head_name  # repo is not known, not in repo list must be an external pr, so use complete label
             else:
-                branch.reference_name = branch.branch_name
+                branch.reference_name = branch.name
+            print('reference_name', branch.reference_name)
         # cases to test:
         # organisation:patch-x (no pull_head_name, should be changed)
         # odoo-dev:master-my-dev
@@ -149,6 +150,7 @@ class Branch(models.Model):
         #    if coverage_config:
         #        vals['config_id'] = coverage_config
         branch = super().create(vals)
+        print('created')
         branch.bundle_id = self.env['runbot.bundle']._get(branch.reference_name, branch.remote_id.repo_id.project_id)
         assert branch.bundle_id
         return branch

@@ -75,7 +75,7 @@ class BuildParameters(models.Model):
     build_ids = fields.One2many('runbot.build', 'params_id')
 
     builds_reference_ids = fields.One2many('runbot.build.reference', 'params_id')
-    modules = fields.Char('Modules') # TODO fill this with combination of triggers repo_group_modules and bundle_id.modules (or trigger?)
+    modules = fields.Char('Modules') # TODO fill this with combination of triggers repo_modules and bundle_id.modules (or trigger?)
 
     fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)
 
@@ -696,6 +696,16 @@ class BuildResult(models.Model):
             build.write(build_values)
             if ending_build:
                 build._github_status()
+                # ->how to fix this.
+                # Solution 1: let batch notify each commit. Link is now pointing to batch with meta info about commit.
+                #    -> needs to change status place, add it to batch sheduler. No failfast? duplicate logic?
+                #    -> only main runbot will notify.
+                # Solution 2: multiple status per commit, one per build/trigger.Each status point to corresponding build.
+                #   -> needs to add trigger on params to have a name and commits to notify.
+                # Solution 3: Add a new ci model.
+                    # build_id, commit_id, type.
+                    # No need for a sheduler, no need for a trigger.
+                    # cla could be in this moel, allowing to resend cla easily too.
                 if not build.local_result:  # Set 'ok' result if no result set (no tests job on build)
                     build.local_result = 'ok'
                     build._logger("No result set, setting ok by default")
@@ -783,9 +793,9 @@ class BuildResult(models.Model):
 
         available_modules = []
         modules_to_install = set()
-        for repo_group, module_list in self._get_available_modules().items():
+        for repo, module_list in self._get_available_modules().items():
             available_modules += module_list
-            modules_to_install |= filter_patterns(repo_group.modules , set(), module_list)
+            modules_to_install |= filter_patterns(repo.modules , set(), module_list)
 
         modules_to_install = filter_patterns(modules_patterns, modules_to_install, available_modules)
 
@@ -955,7 +965,7 @@ class BuildResult(models.Model):
 
     def _next_job_values(self):
         self.ensure_one()
-        step_ids = self.config_id.step_ids()
+        step_ids = self.params_id.config_id.step_ids()
         if not step_ids:  # no job to do, build is done
             return {'active_step': False, 'local_state': 'done'}
 
@@ -1044,6 +1054,74 @@ class BuildResult(models.Model):
             return 'default'
         if self.global_result in ('killed', 'manually_killed'):
             return 'killed'
+
+
+    def _github_status_notify_all(self, status):
+        """Notify each repo with a status"""
+        self.ensure_one()
+        if self.params_id.config_id.update_github_state:
+            # TODO fixme
+            print('FIXME')
+            #remote_ids = {b.repo_id.id for b in self.search([('name', '=', self.name)])}
+            #build_name = self.name # todo adapt: custom ci per trigger
+            #user_id = self.env.user.id
+            #_dbname = self.env.cr.dbname
+            #_context = self.env.context
+            #build_id = self.id
+            #def send_github_status():
+            #    try:
+            #        db_registry = registry(_dbname)
+            #        with api.Environment.manage(), db_registry.cursor() as cr:
+            #            env = api.Environment(cr, user_id, _context)
+            #            remotes = env['runbot.repo'].browse(remote_ids)
+            #            for remote in remotes:
+            #                _logger.debug(
+            #                    "github updating %s status %s to %s in repo %s",
+            #                    status['context'], build_name, status['state'], remote.name)
+            #                repo._github('/repos/:owner/:repo/statuses/%s' % build_name, status, ignore_errors=True)
+            #    except:
+            #        _logger.exception('Something went wrong sending notification for %s', build_id)
+            #self._cr.after('commit', send_github_status)
+
+
+    # TODO should be on bundle: multiple build for the same hash
+    def _github_status(self):
+        """Notify github of failed/successful builds"""
+        for build in self:
+            if build.parent_id:
+                if build.orphan_result:
+                    _logger.debug('Skipping result for orphan build %s', self.id)
+                else:
+                    build.parent_id._github_status()
+            elif build.params_id.config_id.update_github_state:
+                runbot_domain = self.env['runbot.repo']._domain()
+                desc = "runbot build %s" % (build.dest,)
+
+                if build.global_result in ('ko', 'warn'):
+                    state = 'failure'
+                elif build.global_state == 'testing':
+                    state = 'pending'
+                elif build.global_state in ('running', 'done'):
+                    state = 'error'
+                    if build.global_result == 'ok':
+                        state = 'success'
+                else:
+                    _logger.debug("skipping github status for build %s ", build.id)
+                    continue
+                desc += " (runtime %ss)" % (build.job_time,)
+
+                status = {
+                    "state": state,
+                    "target_url": "http://%s/runbot/build/%s" % (runbot_domain, build.id),
+                    "description": desc,
+                    "context": "ci/runbot"
+                }
+                if self.last_github_state != state:
+                    build._github_status_notify_all(status)
+                    self.last_github_state = state
+                else:
+                    _logger.debug('Skipping unchanged status for %s', self.id)
+
 
 
 class BuildReference(models.Model):

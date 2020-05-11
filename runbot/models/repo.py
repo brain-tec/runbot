@@ -303,8 +303,10 @@ class Repo(models.Model):
             self.set_ref_time(get_ref_time)
             fields = ['refname', 'objectname', 'committerdate:iso8601', 'authorname', 'authoremail', 'subject', 'committername', 'committeremail']
             fmt = "%00".join(["%(" + field + ")" for field in fields])
-            git_refs = self._git(['for-each-ref', '--format', fmt, '--sort=-committerdate', 'refs/heads', 'refs/pull'])
+            git_refs = self._git(['for-each-ref', '--format', fmt, '--sort=-committerdate'])
             git_refs = git_refs.strip()
+            if not git_refs:
+                return []
             return [tuple(field for field in line.split('\x00')) for line in git_refs.split('\n')]
         else:
             return []
@@ -322,14 +324,14 @@ class Repo(models.Model):
         branches = self.env['runbot.branch'].search([('name', 'in', names), ('remote_id', '=', self.id)])
         ref_branches = {branch.name: branch for branch in branches}
         for ref_name, sha, date, author, author_email, subject, committer, committer_email in refs:
-            if not ref_branches.get(name):
+            if not ref_branches.get(ref_name):
                 # format example:
                 # refs/ruodoo-dev/heads/12.0-must-fail
                 # refs/ruodoo/pull/1
                 _, remote_name, branch_type, name = ref_name.split('/')
-                repo_id = self.repo_ids.filtered(lambda r: r.remote_name == remote_name).id
+                remote_id = self.remote_ids.filtered(lambda r: r.remote_name == remote_name).id
                 _logger.debug('repo %s found new branch %s', self.name, name)
-                new_branch = self.env['runbot.branch'].create({'repo_id': repo_id, 'name': name, 'is_pr': branch_type == 'pull'})
+                new_branch = self.env['runbot.branch'].create({'remote_id': remote_id, 'name': name, 'is_pr': branch_type == 'pull'})
                 ref_branches[ref_name] = new_branch
         return ref_branches
 

@@ -18,165 +18,211 @@ class TestRepo(RunbotCase):
 
     def setUp(self):
         super(TestRepo, self).setUp()
-        self.commit_list = []
+        self.commit_list = {}
         self.mock_root = self.patchers['repo_root_patcher']
 
     def mock_git_helper(self):
         """Helper that returns a mock for repo._git()"""
         def mock_git(repo, cmd):
-            if cmd[0] == 'for-each-ref' and self.commit_list:
-                return '\n'.join(['\0'.join(commit_fields) for commit_fields in self.commit_list])
+            if cmd[0] == 'for-each-ref':
+                if self.commit_list.get(repo.id):
+                    return '\n'.join(['\0'.join(commit_fields) for commit_fields in self.commit_list[repo.id]])
+                else:
+                    return ''
         return mock_git
 
     def test_base_fields(self):
         self.mock_root.return_value = '/tmp/static'
-        repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
-        self.assertEqual(repo.path, '/tmp/static/repo/bla_example.com_foo_bar')
 
-        self.assertEqual(repo.base, 'example.com/foo/bar')
-        self.assertEqual(repo.short_name, 'foo/bar')
+        remote = self.remote_server
+        self.assertEqual(remote.path, '/tmp/static/repo/bla_example.com_base_server')
+        self.assertEqual(remote.base, 'bla_example.com_base_server')
+        self.assertEqual(remote.short_name, 'base/server')
 
-        https_repo = self.Repo.create({'name': 'https://bla@example.com/user/bar.git', 'repo_group_id': self.repo_group.id})
-        self.assertEqual(https_repo.short_name, 'user/bar')
+        # HTTPS
+        remote.name = 'https://bla@example.com/base/server.git'
+        self.assertEqual(remote.short_name, 'base/server')
 
-        local_repo = self.Repo.create({'name': '/path/somewhere/bar.git', 'repo_group_id': self.repo_group.id})
-        self.assertEqual(local_repo.short_name, 'somewhere/bar')
+        # LOCAL
+        remote.name = '/path/somewhere/bar.git'
+        self.assertEqual(remote.short_name, 'somewhere/bar')
+
 
     @patch('odoo.addons.runbot.models.repo.Repo._get_fetch_head_time')
     def test_repo_create_batches(self, mock_fetch_head_time):
         """ Test that when finding new refs in a repo, the missing branches
         are created and new builds are created in pending state
         """
-        self.mock_root.return_value = '/tmp/static'
-        repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
 
-
-        foo_group = self.env['runbot.repo.group'].create({'name': 'foo', 'project_id': self.project.id})
-        # create another repo and branch to ensure there is no mismatch
-        other_repo = self.Repo.create({'name': 'bla@example.com:foo/foo', 'repo_group_id': foo_group.id})
-
-        first_commit = [('refs/heads/bidon',
-                             'd0d0caca',
-                             datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
-                             'Marc Bidule',
-                             '<marc.bidule@somewhere.com>',
-                             'A nice subject',
-                             'Marc Bidule',
-                             '<marc.bidule@somewhere.com>')]
-        self.commit_list = first_commit
-
+        branch_name = 'master-test'
         def counter():
             i = 100000
             while True:
                 i += 1
                 yield i
 
+
+        def _github(remote, url, ignore_errors):
+            self.assertEqual(ignore_errors, True)
+            self.assertEqual(remote, self.remote_server)
+            self.assertEqual(url, '')
+            return {
+                'base' : {'ref': 'master'},
+                'head' : {'label': 'dev:%s' % branch_name, 'repo': {'full_name': 'dev/server'}},
+            }
+
+
+        repos = self.repo_addons|self.repo_server
+
+        first_commit = [(
+            'refs/%s/heads/%s' % (self.remote_server_dev.remote_name, branch_name),
+            'd0d0caca',
+            datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
+            'Marc Bidule',
+            '<marc.bidule@somewhere.com>',
+            'Server subject',
+            'Marc Bidule',
+            '<marc.bidule@somewhere.com>')]
+
+        self.commit_list[self.repo_server.id] = first_commit
+
+
         mock_fetch_head_time.side_effect = counter()
+        self.patchers['github_patcher'] = _github
+        repos._create_batches()
 
-        with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
-            repo._create_batches()
+        dev_branch = self.env['runbot.branch'].search([('remote_id', '=', self.remote_server_dev.id)])
 
-        branch = self.env['runbot.branch'].search([('repo_id', '=', repo.id)])
-
-        bundle = branch.bundle_id
-        self.assertEqual(branch.name, 'refs/heads/bidon', 'A new branch should have been created')
+        bundle = dev_branch.bundle_id
+        self.assertEqual(dev_branch.name, branch_name, 'A new branch should have been created')
 
         batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
         self.assertEqual(len(batch), 1, 'Batch found')
-        self.assertEqual(batch.batch_commit_ids.commit_id.subject, 'A nice subject')
+        self.assertEqual(batch.batch_commit_ids.commit_id.subject, 'Server subject')
         self.assertEqual(batch.state, 'preparing')
-        self.assertEqual(branch.head_name, 'd0d0caca')
+        self.assertEqual(dev_branch.head_name, 'd0d0caca')
         self.assertEqual(bundle.last_batch, batch)
         last_batch = batch
 
-        self.commit_list = [('refs/heads/bidon',
-                             'deadbeef',
-                             datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
-                             'Marc Bidule',
-                             '<marc.bidule@somewhere.com>',
-                             'Another subject',
-                             'Marc Bidule',
-                             '<marc.bidule@somewhere.com>')]
+        # create a addons branch in the same bundle
+        self.commit_list[self.repo_addons.id] = [('refs/%s/heads/%s' % (self.remote_addons_dev.remote_name, branch_name),
+            'deadbeef',
+            datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
+            'Marc Bidule',
+            '<marc.bidule@somewhere.com>',
+            'Addons subject',
+            'Marc Bidule',
+            '<marc.bidule@somewhere.com>')]
 
-        with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
-            other_repo._create_batches() # updating another repo_group
+        addons_dev_branch = self.env['runbot.branch'].search([('remote_id', '=', self.remote_addons_dev.id)])
+        print(addons_dev_branch.reference_name)
+        self.assertEqual(addons_dev_branch.bundle_id, bundle)
 
-        other_branch = self.env['runbot.branch'].search([('repo_id', '=', other_repo.id)])
+        self.assertEqual(dev_branch.head_name, 'd0d0caca', "Dev branch head name shoudn't have change")
+        self.assertEqual(addons_dev_branch.head_name, 'deadbeef')
 
-        self.assertEqual(other_branch.bundle_id, bundle)
-
-        self.assertEqual(branch.head_name, 'd0d0caca')
-        self.assertEqual(other_branch.head_name, 'deadbeef')
-
-        branch_count = self.env['runbot.branch'].search_count([('repo_id', '=', repo.id)])
+        branch_count = self.env['runbot.branch'].search_count([('remote_id', '=', self.remote_server_dev.id)])
         self.assertEqual(branch_count, 1, 'No new branch should have been created')
 
         batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
         self.assertEqual(last_batch, batch, "No new batch should have been created")
         self.assertEqual(bundle.last_batch, batch)
-        self.assertEqual(batch.batch_commit_ids.commit_id.mapped('subject'), ['A nice subject', 'Another subject'])
+        self.assertEqual(batch.batch_commit_ids.commit_id.mapped('subject'), ['Server subject', 'Addons subject'])
 
-        # A new commit is found in the first repo
-        self.commit_list = [('refs/heads/bidon',
-                             'b00b',
-                             datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
-                             'Marc Bidule',
-                             '<marc.bidule@somewhere.com>',
-                             'A new subject',
-                             'Marc Bidule',
-                             '<marc.bidule@somewhere.com>')]
+        # create a server pr in the same bundle with the same hash
+        self.commit_list[self.repo_server.id] += [
+            ('refs/%s/pull/123' % (self.remote_server.remote_name, branch_name),
+            'deadbeef',
+            datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
+            'Marc Bidule',
+            '<marc.bidule@somewhere.com>',
+            'Another subject',
+            'Marc Bidule',
+            '<marc.bidule@somewhere.com>')]
 
-        with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
-            repo._create_batches()
+        # Create Batches
+        repos._create_batches()
 
-        branch_count = self.env['runbot.branch'].search_count([('repo_id', '=', repo.id)])
-        self.assertEqual(branch_count, 1, 'No new branch should have been created')
+        pull_request = self.env['runbot.branch'].search([('repo_id', '=', self.remote_server.id)])
 
+        self.assertEqual(pull_request.bundle_id, bundle)
+
+        self.assertEqual(dev_branch.head_name, 'd0d0caca')
+        self.assertEqual(pull_request.head_name, 'd0d0caca')
+        self.assertEqual(addons_dev_branch.head_name, 'deadbeef')
+
+        self.assertEqual(dev_branch, self.env['runbot.branch'].search([('remote_id', '=', self.remote_server_dev.id)]))
+        self.assertEqual(pull_request, self.env['runbot.branch'].search([('remote_id', '=', self.remote_server.id)]))
+        self.assertEqual(addons_dev_branch, self.env['runbot.branch'].search([('remote_id', '=', self.remote_addons_dev.id)]))
+
+        batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
+        self.assertEqual(last_batch, batch, "No new batch should have been created")
+        self.assertEqual(bundle.last_batch, batch)
+        self.assertEqual(batch.batch_commit_ids.commit_id.mapped('subject'), ['Server subject', 'Addons subject'])
+
+        # A new commit is found in the server repo
+        self.commit_list[self.repo_server.id] = [
+            (
+                'refs/%s/heads/%s' % (self.remote_server_dev.remote_name, branch_name),
+                'b00b',
+                datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
+                'Marc Bidule',
+                '<marc.bidule@somewhere.com>',
+                'A new subject',
+                'Marc Bidule',
+                '<marc.bidule@somewhere.com>'
+            ),
+            (
+                'refs/%s/pull/123' % (self.remote_server.remote_name, branch_name),
+                'b00b',
+                datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
+                'Marc Bidule',
+                '<marc.bidule@somewhere.com>',
+                'Another subject',
+                'Marc Bidule',
+                '<marc.bidule@somewhere.com>'
+            )]
+
+        # Create Batches
+        repos._create_batches()
+
+        self.assertEqual(dev_branch, self.env['runbot.branch'].search([('remote_id', '=', self.remote_server_dev.id)]))
+        self.assertEqual(pull_request, self.env['runbot.branch'].search([('remote_id', '=', self.remote_server.id)]))
+        self.assertEqual(addons_dev_branch, self.env['runbot.branch'].search([('remote_id', '=', self.remote_addons_dev.id)]))
 
         batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
         self.assertEqual(bundle.last_batch, batch)
         self.assertEqual(len(batch), 1, 'No new batch created, updated')
         self.assertEqual(batch.batch_commit_ids.commit_id.mapped('subject'),  ['A new subject', 'Another subject'], 'commits should have been updated')
         self.assertEqual(batch.state, 'preparing')
-        self.assertEqual(branch.head_name, 'b00b')
+
+        self.assertEqual(dev_branch.head_name, 'b00b')
+        self.assertEqual(pull_request.head_name, 'b00b')
+        self.assertEqual(addons_dev_branch.head_name, 'deadbeef')
 
         # TODO move this
         # previous_build = self.env['runbot.build'].search([('repo_id', '=', repo.id), ('branch_id', '=', branch.id), ('name', '=', 'd0d0caca')])
         # self.assertEqual(previous_build.local_state, 'done', 'Previous pending build should be done')
         # self.assertEqual(previous_build.local_result, 'skipped', 'Previous pending build result should be skipped')
 
-        self.commit_list = first_commit  # branch reseted hard to an old commit
-
-        with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
-            repo._create_batches()
-
-        batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
-        self.assertEqual(bundle.last_batch, batch)
-        self.assertEqual(len(batch), 1, 'No new batch created, updated')
-        self.assertEqual(batch.batch_commit_ids.commit_id.mapped('subject'),  ['A nice subject', 'Another subject'], 'commits should have been updated')
-        self.assertEqual(batch.state, 'preparing')
-        self.assertEqual(branch.head_name, 'd0d0caca')
-
         batch.state = 'done'
 
-        with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
-            repo._create_batches()
+        repos._create_batches()
 
         batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
         self.assertEqual(len(batch), 1, 'No new batch created, no head change')
 
+        self.commit_list = [
+            ('refs/%s/heads/%s' % (self.remote_server_dev.remote_name, branch_name),
+            'dead1234',
+            datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
+            'Marc Bidule',
+            '<marc.bidule@somewhere.com>',
+            'A last subject',
+            'Marc Bidule',
+            '<marc.bidule@somewhere.com>')]
 
-        self.commit_list = [('refs/heads/bidon',
-                            'dead1234',
-                            datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
-                            'Marc Bidule',
-                            '<marc.bidule@somewhere.com>',
-                            'A last subject',
-                            'Marc Bidule',
-                            '<marc.bidule@somewhere.com>')]
-
-        with patch('odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper()):
-            repo._create_batches()
+        repos._create_batches()
 
         bundles = self.env['runbot.bundle'].search([])
         self.assertEqual(bundles, bundle)
@@ -185,8 +231,19 @@ class TestRepo(RunbotCase):
         self.assertEqual(bundle.last_batch.state, 'preparing')
         self.assertEqual(bundle.last_batch.batch_commit_ids.commit_id.subject, 'A last subject')
 
+        self.commit_list = first_commit  # branch reset hard to an old commit (and pr closed)
 
-        # TODO imp : 
+        repos._create_batches()
+
+        batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
+        self.assertEqual(bundle.last_batch, batch)
+        self.assertEqual(len(batch), 1, 'No new batch created, updated')
+        self.assertEqual(batch.batch_commit_ids.commit_id.mapped('subject'), ['A nice subject', 'Another subject'], 'commits should have been updated')
+        self.assertEqual(batch.state, 'preparing')
+        self.assertEqual(dev_branch.head_name, 'd0d0caca')
+
+
+        # TODO imp
         # Add another branch in another project
         # Add another bundle
 
@@ -358,7 +415,7 @@ class TestRepoScheduler(RunbotCase):
         # create 6 builds that are testing on the host to verify that
         # workers are not overfilled
         for build_name in ['a', 'b', 'c', 'd', 'e', 'f']:
-            build = self.create_build({
+            build = self.Build.create({
                 'branch_id': self.foo_branch.id,
                 'name': build_name,
                 'port': '1234',
@@ -368,7 +425,7 @@ class TestRepoScheduler(RunbotCase):
             })
             builds.append(build)
         # now the pending build that should stay unasigned
-        scheduled_build = self.create_build({
+        scheduled_build = self.Build.create({
             'branch_id': self.foo_branch.id,
             'name': 'sched_build',
             'port': '1234',
@@ -377,7 +434,7 @@ class TestRepoScheduler(RunbotCase):
         })
         builds.append(scheduled_build)
         # create the build that should be assigned once a slot is available
-        build = self.create_build({
+        build = self.Build.create({
             'branch_id': self.foo_branch.id,
             'name': 'foobuild',
             'port': '1234',

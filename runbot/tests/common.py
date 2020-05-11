@@ -1,15 +1,23 @@
 # -*- coding: utf-8 -*-
 from odoo.tests.common import TransactionCase
-from unittest.mock import patch
-
-class Dummy():
-    ...
+from unittest.mock import patch, DEFAULT
 
 
 class RunbotCase(TransactionCase):
 
     def setUp(self):
         super(RunbotCase, self).setUp()
+        self.Project = self.env['runbot.project']
+        self.Build = self.env['runbot.build']
+        self.BuildParameters = self.env['runbot.build.params']
+        self.Repo = self.env['runbot.repo']
+        self.Remote = self.env['runbot.remote']
+        self.Branch = self.env['runbot.branch']
+        self.Version = self.env['runbot.version']
+        self.Config = self.env['runbot.build.config']
+        self.Commit = self.env['runbot.commit']
+        self.BuildCommit = self.env['runbot.build.commit']
+
         self.project = self.env['runbot.project'].create({'name': 'Tests'})
         self.repo_server = self.env['runbot.repo'].create({
             'name': 'server',
@@ -42,29 +50,36 @@ class RunbotCase(TransactionCase):
             'token': '123',
         })
 
-        self.Project = self.env['runbot.project']
-        self.Build = self.env['runbot.build']
-        self.BuildParameters = self.env['runbot.build.params']
-        self.Repo = self.env['runbot.repo']
-        self.Branch = self.env['runbot.branch']
-        self.Version = self.env['runbot.version']
-        self.BuildParameters = self.env['runbot.build.params']
-        self.Config = self.env['runbot.build.config']
-        self.Commit = self.env['runbot.commit']
-        self.BuildCommit = self.env['runbot.build.commit']
+        self.version_master = self.Version.create({'name': '13.0'})
+        self.default_config = self.env.ref('runbot.runbot_build_config_default')
+
+        self.base_params = self.BuildParameters.create({
+            'version_id': self.version_master.id,
+            'project_id': self.project.id,
+            'config_id': self.default_config.id,
+        })
 
         self.patchers = {}
         self.patcher_objects = {}
+        self.commit_list = {}
 
-        def git_side_effect(cmd):
-            if cmd[:2] == ['show', '-s'] or cmd[:3] == ['show', '--pretty="%H -- %s"', '-s']:
-                return 'commit message for %s' % cmd[-1]
-            if cmd[:2] == ['cat-file', '-e']:
-                return True
-            else:
-                print('Unsupported mock command %s' % cmd)
+        def mock_git_helper(self):
+            """Helper that returns a mock for repo._git()"""
+            def mock_git(repo, cmd):
+                if cmd[:2] == ['show', '-s'] or cmd[:3] == ['show', '--pretty="%H -- %s"', '-s']:
+                    return 'commit message for %s' % cmd[-1]
+                if cmd[:2] == ['cat-file', '-e']:
+                    return True
+                if cmd[0] == 'for-each-ref':
+                    if self.commit_list.get(repo.id):
+                        return '\n'.join(['\0'.join(commit_fields) for commit_fields in self.commit_list[repo.id]])
+                    else:
+                        return ''
+                else:
+                    print('Unsupported mock command %s' % cmd)
+            return mock_git
 
-        self.start_patcher('git_patcher', 'odoo.addons.runbot.models.repo.Repo._git', side_effect=git_side_effect)
+        self.start_patcher('git_patcher', 'odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper())
         self.start_patcher('fqdn_patcher', 'odoo.addons.runbot.common.socket.getfqdn', 'host.runbot.com')
         self.start_patcher('github_patcher', 'odoo.addons.runbot.models.repo.Remote._github', {})
         self.start_patcher('is_on_remote_patcher', 'odoo.addons.runbot.models.branch.Branch._is_on_remote', True)
@@ -85,26 +100,23 @@ class RunbotCase(TransactionCase):
         self.start_patcher('_local_cleanup_patcher', 'odoo.addons.runbot.models.build.BuildResult._local_cleanup')
         self.start_patcher('_local_pg_dropdb_patcher', 'odoo.addons.runbot.models.build.BuildResult._local_pg_dropdb')
 
-    def start_patcher(self, patcher_name, patcher_path, return_value=Dummy, side_effect=Dummy):
+    def start_patcher(self, patcher_name, patcher_path, return_value=DEFAULT, side_effect=DEFAULT, new=DEFAULT):
 
         def stop_patcher_wrapper():
             self.stop_patcher(patcher_name)
 
-        patcher = patch(patcher_path)
+        patcher = patch(patcher_path, new=new)
         if not hasattr(patcher, 'is_local'):
             res = patcher.start()
             self.addCleanup(stop_patcher_wrapper)
             self.patchers[patcher_name] = res
             self.patcher_objects[patcher_name] = patcher
-            if side_effect != Dummy:
+            if side_effect != DEFAULT:
                 res.side_effect = side_effect
-            elif return_value != Dummy:
+            elif return_value != DEFAULT:
                 res.return_value = return_value
 
     def stop_patcher(self, patcher_name):
         if patcher_name in self.patcher_objects:
             self.patcher_objects[patcher_name].stop()
             del self.patcher_objects[patcher_name]
-
-    def create_build(self, vals):
-        return self.Build.create(vals)

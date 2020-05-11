@@ -28,11 +28,15 @@ def migrate(cr, version):
         cr.execute("""INSERT INTO ir_config_parameter (KEY, value) VALUES ('runbot_nginx', 'True')""")
 
     ########################
-    # Repo groups, triggers and projects
+    # Repo, remotes, triggers and projects
     ########################
 
-    repo_to_group = {}
-    owner_group_to_repo = {}
+    visited = set()
+    owner_to_remote = {}
+    remote_to_repo = {}
+    repos_infos = {}
+    triggers = {}
+    triggers_by_project = {}
 
     RD_project = env['runbot.project'].create({
         'name': 'R&D'
@@ -50,20 +54,51 @@ def migrate(cr, version):
     }
     cr.execute("""
         SELECT 
-        id, name, duplicate_id, modules, modules_auto, server_files, manifest_files, addons_paths
+        id, name, duplicate_id, modules, modules_auto, server_files, manifest_files, addons_paths, mode, token, repo_config_id
         FROM runbot_repo order by id
     """)
-    for id, name, duplicate_id, modules, modules_auto, server_files, manifest_files, addons_paths in cr.fetchall():
+    for id, name, duplicate_id, modules, modules_auto, server_files, manifest_files, addons_paths, mode, token, repo_config_id in cr.fetchall():
         cr.execute(""" SELECT res_groups_id FROM res_groups_runbot_repo_rel WHERE runbot_repo_id = %s""", (id,))
         group_ids = [r[0] for r in cr.fetchall()]
         repo_name = name.split('/')[-1].replace('.git', '')
         owner = name.split(':')[-1].split('/')[0]
-        repo = env['runbot.repo'].browse(id)
-        if duplicate_id in repo_to_group:
-            repo.repo_group_id = repo_to_group[duplicate_id]
-            repo_to_group[id] = repo_to_group[duplicate_id]
-            # todo make some checks ?
+
+        if duplicate_id in visited:
+            repo = env['runbot.repo'].browse(duplicate_id)
         else:
+            repo = env['runbot.repo'].browse(id)
+
+        remote = env['runbot.remote'].create({
+            'id': id, # keep same id as repo for hooks and stuff
+            'name': name,
+            'repo_id': repo.id,
+            'sequence': sequence,
+            'fetch_pull': mode != 'disabled',
+            'fetch_heads': mode != 'disabled',
+            'token': token,
+        })
+        remote_to_repo[remote.id] = repo.id
+
+        owner_to_remote[(owner, repo.id)] = remote.id
+
+        repo_infos = {
+            'name': repo_name,
+            'modules': modules,
+            'group_ids': group_ids
+            'server_files': server_files,
+            'manifest_files': manifest_files,
+            'addons_paths': addons_paths,
+        })
+
+        if duplicate_id in duplicate_to_repo:
+            cr.execute('DELETE FROM runbot_repo WHERE id = %s', id)
+            if repos_infos[duplicate_id] != repo_infos:
+                _logger.warning('deleting duplicate with different values:\nexisting->%s\ndeleted->%s', repos_infos[duplicate_id], repo_infos)
+        else:
+            visited.add(id)
+            repo_infos[id] = repo_infos
+            repo.name = repo_name
+            repo.main_remote = remote
             # if not, we need to give information on how to group repos: odoo+enterprise+upgarde+design-theme/se/runbot
             # this mean that we will need to group build too. Could be nice but maybe a little difficult.
             if repo_name in project_matching:
@@ -72,47 +107,21 @@ def migrate(cr, version):
                 project = env['runbot.project'].create({
                     'name': repo_name,
                 })
-            group = env['runbot.repo.group'].create({
-                'name': repo_name,
-                'project_id': project.id,
-                #'main': id, # older repo should be the main, not sur it is usefull
-                'modules': modules,
-                #'modules_auto': modules_auto,
-                'group_ids': [(4, group_id) for group_id in group_ids],
-                'server_files': server_files,
-                'manifest_files': manifest_files,
-                'addons_paths': addons_paths,
-            })
-            repo.repo_group_id = group
-            repo_to_group[id] = group
-        owner_group_to_repo[(owner, repo_to_group[id].id)] = id
+            repo.project_id = project.id
 
-    _logger.info('Creating triggers')
-    processed = set()
-    cr.execute("""
-        SELECT 
-        id, name, repo_config_id
-        FROM runbot_repo order by id
-    """)
-    triggers = {}
-    triggers_by_project = defaultdict(list)
-    for id, name, repo_config_id in cr.fetchall():
-        repo_name = name.split('/')[-1].replace('.git', '')
-        cr.execute(""" SELECT dependency_id FROM runbot_repo_dep_rel WHERE dependant_id = %s""", (id,))
-        dependency_ids = [r[0] for r in cr.fetchall()]
-        group = repo_to_group[id]
-        if group.id not in processed:
-            processed.add(group.id)
+            cr.execute(""" SELECT dependency_id FROM runbot_repo_dep_rel WHERE dependant_id = %s""", (id,))
+            dependency_ids = [r[0] for r in cr.fetchall()]
+
             trigger = env['runbot.trigger'].create({
                 'name': repo_name,
-                'project_id': group.project_id.id,
-                'repos_group_ids': [(4, group.id)],
-                'dependency_ids': [(4, repo_to_group[dependency_id].id) for dependency_id in dependency_ids],
+                'project_id': project.id,
+                'repos_ids': [(4, id)],
+                'dependency_ids': [(4, dependency_id) for dependency_id in dependency_ids],
                 'config_id': repo_config_id if repo_config_id else env.ref('runbot.runbot_build_config_default').id,
             })
-            triggers[group.id] = trigger
-            triggers_by_project[group.project_id.id].append(trigger)
-        # TODO create trigger using dependency_ids
+            triggers[id] = trigger
+            triggers_by_project[project.id].append(trigger)
+
 
     # no build, config, ...
 
@@ -136,15 +145,15 @@ def migrate(cr, version):
             versions[branch.branch_name] = env['runbot.version'].create({
                 'name': branch.branch_name,
             })
-        group = branch.repo_id.repo_group_id
+        repo = branch.remote_id.repo_id
         if branch.target_branch_name and branch.pull_head_name:
             # 1. update source_repo: do not call github and use a naive approach:
             # pull_head_name contains odoo-dev and a repo in group starts with odoo-dev -> this is a known repo.
             owner = branch.pull_head_name.split(':')[0]
-            pull_head_repo_id = owner_group_to_repo.get((owner, group.id))
-            if pull_head_repo_id:
-                branch.pull_head_repo_id = pull_head_repo_id
-        project_id = group.project_id
+            pull_head_remote_id = owner_to_remote.get((owner, repo.id))
+            if pull_head_remote_id:
+                branch.pull_head_remote_id = pull_head_remote_id
+        project_id = repo.project_id
         name = branch.reference_name
 
         key = (name, project_id)
@@ -196,20 +205,18 @@ def migrate(cr, version):
             if not repo_id:
                 _logger.warning('No repo_id for build %s, skipping', id)
                 continue
-            group = repo_to_group[repo_id]
-            group_id = group.id
-            key = (name, group_id)
+            key = (name, repo_id)
             if key in sha_repo_commits:
                 commit = sha_repo_commits[key]
             else:
-                if duplicate_id and group.project_id.id != RD_project.id:
+                if duplicate_id and env['runbot.repo'].browse(repo_id).project_id.id != RD_project.id:
                     cross_project_duplicate_ids.append(id)
                 elif duplicate_id:
                     _logger.warning('Problem: duplicate: %s,%s', id, duplicate_id)
 
                 commit = env['runbot.commit'].create({
                     'name': name,
-                    'repo_group_id': group_id,
+                    'repo_id': repo_id,
                     'author': author,
                     'author_email': author_email,
                     'committer': committer,
@@ -222,7 +229,7 @@ def migrate(cr, version):
             branch_heads[branch_id] = commit.id
             counter += 1
 
-            build_commit_ids[id][commit.repo_group_id.id] = commit.id
+            build_commit_ids[id][commit.repo_id.id] = commit.id
 
 
     progress.finish()
@@ -257,31 +264,30 @@ def migrate(cr, version):
         for id, branch_id, repo_id, extra_params, config_id, config_data in cr.fetchall():
 
             build_commit_ids_create_values = [
-                {'commit_id': build_commit_ids[id][repo_to_group[repo_id].id],'repo_id': repo_id, 'match_type':'exact'}]
+                {'commit_id': build_commit_ids[id][repo_id], 'repo_id': repo_id, 'match_type':'exact'}]
 
             cr.execute('SELECT dependency_hash, dependecy_repo_id, match_type FROM runbot_build_dependency WHERE build_id=%s', (id,))
             for dependency_hash, dependecy_repo_id, match_type in cr.fetchall():
-                group_id = repo_to_group[dependecy_repo_id].id
-                key = (dependency_hash, group_id)
+                key = (dependency_hash, dependecy_repo_id)
                 commit = sha_repo_commits.get(key) or sha_commits.get(dependency_hash) # TODO check this (changing repo)
                 if not commit:
                     # -> most of the time, commit in exists but with wrong repo. Info can be found on other commit.
                     _logger.warning('Missing commit %s created', dependency_hash)
                     commit = env['runbot.commit'].create({
                         'name': dependency_hash,
-                        'repo_group_id': group_id,
+                        'repo_id': dependecy_repo_id,
                     })
                     sha_repo_commits[key] = commit
                     sha_commits[dependency_hash] = commit
-                build_commit_ids[id][commit.repo_group_id.id] = commit.id
+                build_commit_ids[id][dependecy_repo_id] = commit.id
                 build_commit_ids_create_values.append({'commit_id': commit.id,'repo_id': dependecy_repo_id, 'match_type':match_type})
 
             params = param.create({
                 'version_id':  branch_to_version[branch_id],
                 'extra_params': extra_params,
                 'config_id': config_id,
-                'project_id': repo_to_group[repo_id].project_id,
-                #'trigger_id': triggers[repo_to_group[repo_id].id].id,
+                'project_id': env['runbot.repo'].browse(repo_id).project_id,
+                #'trigger_id': triggers[repo_id].id, # 
                 'config_data': config_data,
                 'build_commit_ids': [(0, 0, values) for values in build_commit_ids_create_values]
             })
@@ -328,7 +334,7 @@ def migrate(cr, version):
             batch = False
             build_id = duplicate_id or id
             build_commits = build_commit_ids[build_id]
-            batch_group_repos_ids = []
+            batch_repos_ids = []
             
             # check if this build can be added to last_batch
             if bundle.last_batch:
@@ -340,18 +346,17 @@ def migrate(cr, version):
                     # possible fix: max create_date diff
                     batch = bundle.last_batch
                     batch_commits = batch.batch_commit_ids.mapped('commit_id')
-                    batch_group_repos_ids = batch_commits.mapped('repo_group_id').ids
+                    batch_repos_ids = batch_commits.mapped('repo_id').ids
                     for commit in batch_commits:
-                        repo_group_id = commit.repo_group_id.id
-                        if repo_group_id in build_commits:
-                            if commit.id != build_commits[repo_group_id]:
+                        repo_id = commit.repo_id.id
+                        if repo_id in build_commits:
+                            if commit.id != build_commits[repo_id]:
                                 batch = False
-                                batch_group_repos_ids = []
+                                batch_repos_ids = []
                                 break
 
-            missing_commits = [commit_id for repo_group_id, commit_id in build_commits.items() if repo_group_id not in batch_group_repos_ids]
-            triggers[repo_to_group[repo_id].id].id
-            #if trigger.config_id != 
+            missing_commits = [commit_id for repo_id, commit_id in build_commits.items() if repo_id not in batch_repos_ids]
+
             if not batch:
                 batch = env['runbot.batch'].create({
                     'create_date': create_date,
@@ -381,7 +386,7 @@ def migrate(cr, version):
             else:
                 batch.last_update = create_date
             env['runbot.batch.slot'].create({
-                'trigger_id': triggers[repo_to_group[repo_id].id].id,
+                'trigger_id': triggers[repo_id].id,
                 'batch_id': batch.id,
                 'build_id': build_id,
                 'link_type': 'rebuild' if build_type == 'rebuild' else 'matched' if duplicate_id else 'created',

@@ -26,7 +26,7 @@ class TestBuildStatRegex(RunbotCase):
 
         self.Build = self.env["runbot.build"]
 
-        self.build = self.create_build(
+        self.build = self.Build.create(
             {
                 "branch_id": self.branch.id,
                 "name": "d0d0caca0000ffffffffffffffffffffffffffff",

@@ -23,19 +23,17 @@ class TestBuildParams(RunbotCase):
         super(TestBuildParams, self).setUp()
 
     def test_params(self):
-        version = self.Version.create({'name': '13.0'})
-        config = self.Config.create({'name': 'Dummy Config'})
 
         params = self.BuildParameters.create({
-            'version_id': version.id,
-            'project_id': self.project_id.id,
-            'config_id': config.id,
+            'version_id': self.version_master.id,
+            'project_id': self.project.id,
+            'config_id': self.config.id,
         })
 
         # test that when the same params does not create a new record
         same_params = self.BuildParameters.create({
-            'version_id': version.id,
-            'project_id': self.project_id.id,
+            'version_id': self.version_master.id,
+            'project_id': self.project.id,
             'config_id': config.id,
         })
 
@@ -64,36 +62,22 @@ class TestBuildResult(RunbotCase):
 
     def setUp(self):
         super(TestBuildResult, self).setUp()
-        version = self.Version.create({'name': '13.0'})
-        config = self.Config.create({'name': 'Dummy Config'})
-
-        self.params = self.BuildParameters.create({
-            'version_id': version.id,
-            'project_id': self.project_id.id,
-            'config_id': config.id,
-        })
 
         commit = self.Commit.create ({
             'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
             'repo_id': self.repo_server.id
         })
         self.build_commit = self.BuildCommit.create({
-            'params_id': self.params.id,
+            'params_id': self.base_params.id,
             'commit_id': commit.id,
         })
 
-        self.repo_ent = self.env['runbot.repo'].create({
-            'name': 'bla@example.com:foo/bar-ent',
-            'repo_group_id': self.repo_group_ent.id,
-        })
-        self.repo_ent.dependency_ids = self.repo
         self.start_patcher('find_patcher', 'odoo.addons.runbot.common.find', 0)
 
     def test_base_fields(self):
 
-        build = self.create_build({
-            'params_id': self.params.id,
-            'port': '1234'
+        build = self.Build.create({
+            'params_id': self.base_params.id,
         })
 
         self.assertEqual(build.dest, '%05d-13-0' % build.id)
@@ -116,9 +100,8 @@ class TestBuildResult(RunbotCase):
         del build.config_data['restore_url']
         self.assertEqual(build.config_data, {"test_info": "dummy"})
 
-        other = self.create_build({
-            'params_id': self.params.id,
-            'port': '5678',
+        other = self.Build.create({
+            'params_id': self.base_params.id,
             'local_result': 'ko'
         })
 
@@ -128,9 +111,8 @@ class TestBuildResult(RunbotCase):
             builds.write({'local_result': 'ok'})
 
     def test_markdown_description(self):
-        build = self.create_build({
-            'params_id': self.params.id,
-            'port': '1234',
+        build = self.Build.create({
+            'params_id': self.base_params.id,
             'description': 'A nice **description**'
         })
         self.assertEqual(build.md_description, 'A nice <strong>description</strong>')
@@ -141,9 +123,8 @@ class TestBuildResult(RunbotCase):
     @patch('odoo.addons.runbot.models.build.BuildResult._get_repo_available_modules')
     def test_filter_modules(self, mock_get_repo_mods):
         """ test module filtering """
-        build = self.create_build({
-            'params_id': self.params.id,
-            'port': '1234',
+        build = self.Build.create({
+            'params_id': self.base_params.id,
         })
 
         repo_mods = ['good_module', 'bad_module', 'other_good', 'l10n_be', 'hw_foo', 'hwgood', 'hw_explicit']
@@ -169,18 +150,16 @@ class TestBuildResult(RunbotCase):
         uri = 'postgres://someone:pass@somewhere.com/db'
         self.env['ir.config_parameter'].sudo().set_param("runbot.runbot_logdb_uri", uri)
 
-        build = self.create_build({
-            'params_id': self.params.id,
-            'port': '1234',
+        build = self.Build.create({
+            'params_id': self.base_params.id,
         })
         cmd = build._cmd(py_version=3)
         self.assertIn('log_db = %s' % uri, cmd.get_config())
 
     def test_build_cmd_server_path_no_dep(self):
         """ test that the server path and addons path """
-        build = self.create_build({
-            'params_id': self.params.id,
-            'port': '1234',
+        build = self.Build.create({
+            'params_id': self.base_params.id,
         })
         cmd = build._cmd(py_version=3)
         self.assertEqual('python3', cmd[0])
@@ -195,10 +174,10 @@ class TestBuildResult(RunbotCase):
 
         def is_file(file):
             self.assertIn(file, [
-                '/tmp/runbot_test/static/sources/bar-ent/d0d0caca0000ffffffffffffffffffffffffffff/requirements.txt',
-                '/tmp/runbot_test/static/sources/bar/dfdfcfcf0000ffffffffffffffffffffffffffff/requirements.txt',
-                '/tmp/runbot_test/static/sources/bar/dfdfcfcf0000ffffffffffffffffffffffffffff/server.py',
-                '/tmp/runbot_test/static/sources/bar/dfdfcfcf0000ffffffffffffffffffffffffffff/openerp/tools/config.py'
+                '/tmp/runbot_test/static/sources/addons/d0d0caca0000ffffffffffffffffffffffffffff/requirements.txt',
+                '/tmp/runbot_test/static/sources/server/dfdfcfcf0000ffffffffffffffffffffffffffff/requirements.txt',
+                '/tmp/runbot_test/static/sources/server/dfdfcfcf0000ffffffffffffffffffffffffffff/server.py',
+                '/tmp/runbot_test/static/sources/server/dfdfcfcf0000ffffffffffffffffffffffffffff/openerp/tools/config.py'
             ])
             if file == '/tmp/runbot_test/static/sources/bar-ent/d0d0caca0000ffffffffffffffffffffffffffff/requirements.txt':
                 return False
@@ -206,9 +185,9 @@ class TestBuildResult(RunbotCase):
 
         def is_dir(file):
             paths = [
-                'sources/bar/dfdfcfcf0000ffffffffffffffffffffffffffff/addons',
-                'sources/bar/dfdfcfcf0000ffffffffffffffffffffffffffff/core/addons',
-                'sources/bar-ent/d0d0caca0000ffffffffffffffffffffffffffff'
+                'sources/server/dfdfcfcf0000ffffffffffffffffffffffffffff/addons',
+                'sources/server/dfdfcfcf0000ffffffffffffffffffffffffffff/core/addons',
+                'sources/addons/d0d0caca0000ffffffffffffffffffffffffffff'
             ]
             self.assertTrue(any([path in file for path in paths]))  # checking that addons path existence check looks ok
             return True
@@ -216,58 +195,22 @@ class TestBuildResult(RunbotCase):
         self.patchers['isfile'].side_effect = is_file
         self.patchers['isdir'].side_effect = is_dir
 
-        enterprise_branch = self.env['runbot.branch'].create({
-            'repo_id': self.repo_addons.id,
-            'name': 'refs/heads/master'
+        commit_server = self.Commit.create({
+            'name': 'dfdfcfcf0000ffffffffffffffffffffffffffff',
+            'repo_id': self.repo_server.id,
         })
-
-        commit = self.Commit.create({
+        commit_addons = self.Commit.create({
             'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-            'repo_group_id': self.repo_ent.repo_group_id.id,
+            'repo_id': self.repo_addons.id,
         })
 
-        self.build_commit = self.BuildCommit.create({
-            'params_id': self.params.id,
-            'commit_id': commit.id,
-            'repo_id': self.repo_ent.id,
+        self.BuildCommit.create({
+            'params_id': self.base_params.id,
+            'commit_id': commit_server.id,
         })
-
-        def rev_parse(repo, branch_name):
-            self.assertEqual(repo, self.repo)
-            self.assertEqual(branch_name, 'refs/heads/master')
-            return 'dfdfcfcf0000ffffffffffffffffffffffffffff'
-
-        with patch('odoo.addons.runbot.models.repo.Repo._git_rev_parse', new=rev_parse):
-            build = self.create_build({
-                'params_id': self.params.id,
-                'port': '1234',
-            })
-        cmd = build._cmd(py_version=3)
-        self.assertIn('--addons-path', cmd)
-        addons_path_pos = cmd.index('--addons-path') + 1
-        self.assertEqual(cmd[addons_path_pos], 'bar-ent,bar/addons,bar/core/addons')
-        self.assertEqual('bar/server.py', cmd[1])
-        self.assertEqual('python3', cmd[0])
-
-    def test_build_cmd_server_path_with_dep_collision(self):
-        """ test that the server path and addons path """
-
-        def is_file(file):
-            self.assertIn(file, [
-                '/tmp/runbot_test/static/sources/bar/dfdfcfcf0000ffffffffffffffffffffffffffff/requirements.txt',
-                '/tmp/runbot_test/static/sources/bar/d0d0caca0000ffffffffffffffffffffffffffff/requirements.txt',
-                '/tmp/runbot_test/static/sources/bar/dfdfcfcf0000ffffffffffffffffffffffffffff/server.py',
-                '/tmp/runbot_test/static/sources/bar/dfdfcfcf0000ffffffffffffffffffffffffffff/openerp/tools/config.py'
-            ])
-            if file == '/tmp/runbot_test/static/sources/bar/dfdfcfcf0000ffffffffffffffffffffffffffff/requirements.txt':
-                return False
-            return True
-
-        self.patchers['isfile'].side_effect = is_file
-
-        enterprise_branch = self.env['runbot.branch'].create({
-            'repo_id': self.repo_ent.id,
-            'name': 'refs/heads/master'
+        self.BuildCommit.create({
+            'params_id': self.base_params.id,
+            'commit_id': commit_addons.id,
         })
 
         def rev_parse(repo, branch_name):
@@ -276,22 +219,20 @@ class TestBuildResult(RunbotCase):
             return 'dfdfcfcf0000ffffffffffffffffffffffffffff'
 
         with patch('odoo.addons.runbot.models.repo.Repo._git_rev_parse', new=rev_parse):
-            build = self.create_build({
-                'params_id': self.params.id,
-                'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-                'port': '1234',
+            build = self.Build.create({
+                'params_id': self.base_params.id,
             })
         cmd = build._cmd(py_version=3)
         self.assertIn('--addons-path', cmd)
         addons_path_pos = cmd.index('--addons-path') + 1
-        self.assertEqual(cmd[addons_path_pos], 'bar-d0d0caca,bar-dfdfcfcf/addons,bar-dfdfcfcf/core/addons')
-        self.assertEqual('bar-dfdfcfcf/server.py', cmd[1])
+        self.assertEqual(cmd[addons_path_pos], 'addons,server/addons,server/core/addons')
+        self.assertEqual('server/server.py', cmd[1])
         self.assertEqual('python3', cmd[0])
 
     # TODO move to TestBuildParams
     # def test_build_config_from_branch_default(self):
     #     """test build config_id is computed from branch default config_id"""
-    #     build = self.create_build({
+    #     build = self.Build.create({
     #         'branch_id': self.branch.id,
     #         'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
     #     })
@@ -301,7 +242,7 @@ class TestBuildResult(RunbotCase):
     # def test_build_config_from_branch_testing(self):
     #     """test build config_id is computed from branch"""
     #     self.branch.config_id = self.env.ref('runbot.runbot_build_config_default_no_run')
-    #     build = self.create_build({
+    #     build = self.Build.create({
     #         'branch_id': self.branch.id,
     #         'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
     #     })
@@ -311,7 +252,7 @@ class TestBuildResult(RunbotCase):
     # def test_build_config_can_be_set(self):
     #     """test build config_id can be set to something different than the one on the branch"""
     #     self.branch.config_id = self.env.ref('runbot.runbot_build_config_default')
-    #     build = self.create_build({
+    #     build = self.Build.create({
     #         'branch_id': self.branch.id,
     #         'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
     #         'config_id': self.env.ref('runbot.runbot_build_config_default_no_run').id
@@ -320,13 +261,13 @@ class TestBuildResult(RunbotCase):
 
     def test_build_gc_date(self):
         """ test build gc date and gc_delay"""
-        build = self.create_build({
-            'params_id': self.params.id,
+        build = self.Build.create({
+            'params_id': self.base_params.id,
             'local_state': 'done'
         })
 
-        child_build = self.create_build({
-            'params_id': self.params.id,
+        child_build = self.Build.create({
+            'params_id': self.base_params.id,
             'parent_id': build.id,
             'local_state': 'done'
         })
@@ -362,14 +303,14 @@ class TestBuildResult(RunbotCase):
             'nb_worker': 2
         })
 
-        build_other_host = self.create_build({
-            'params_id': self.params.id,
+        build_other_host = self.Build.create({
+            'params_id': self.base_params.id,
             'local_state': 'testing',
             'host': 'runbot_yyy'
         })
 
-        child_build = self.create_build({
-            'params_id': self.params.id,
+        child_build = self.Build.create({
+            'params_id': self.base_params.id,
             'local_state': 'testing',
             'host': 'runbot_xxx',
             'parent_id': build_other_host.id
@@ -379,8 +320,8 @@ class TestBuildResult(RunbotCase):
         self.assertFalse(build_other_host.requested_action)
         self.assertFalse(child_build.requested_action)
 
-        build_same_branch = self.create_build({
-            'params_id': self.params.id,
+        build_same_branch = self.Build.create({
+            'params_id': self.base_params.id,
             'local_state': 'testing',
             'host': 'runbot_xxx',
         })
@@ -388,8 +329,8 @@ class TestBuildResult(RunbotCase):
         self.repo._gc_testing(host)
         self.assertFalse(build_same_branch.requested_action)
 
-        build_pending = self.create_build({
-            'params.id': self.params.id,
+        build_pending = self.Build.create({
+            'params.id': self.base_params.id,
             'local_state': 'pending',
         })
 
@@ -402,16 +343,16 @@ class TestBuildResult(RunbotCase):
     @patch('odoo.addons.runbot.models.build._logger')
     def test_build_skip(self, mock_logger):
         """test build is skipped"""
-        build = self.create_build({
-            'params_id': self.params.id,
+        build = self.Build.create({
+            'params_id': self.base_params.id,
             'port': '1234',
         })
         build._skip()
         self.assertEqual(build.local_state, 'done')
         self.assertEqual(build.local_result, 'skipped')
 
-        other_build = self.create_build({
-            'params_id': self.params.id,
+        other_build = self.Build.create({
+            'params_id': self.base_params.id,
             'port': '1234',
         })
         other_build._skip(reason='A good reason')
@@ -434,11 +375,11 @@ class TestBuildResult(RunbotCase):
     #        'pull_head_name': 'odoo:master-test-branch-xxx'
     #    })
 #
-    #    build1 = self.create_build({
+    #    build1 = self.Build.create({
     #        'branch_id': branch.id,
     #        'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
     #    })
-    #    build2 = self.create_build({
+    #    build2 = self.Build.create({
     #        'branch_id': pr.id,
     #        'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
     #    })
@@ -450,24 +391,24 @@ class TestBuildResult(RunbotCase):
     #    self.assertEqual(build1.local_result, 'skipped', 'A killed pending duplicate build should mark the real build as skipped')
 
     def test_children(self):
-        build1 = self.create_build({
-            'params_id': self.params.id,
+        build1 = self.Build.create({
+            'params_id': self.base_params.id,
         })
-        build1_1 = self.create_build({
-            'params_id': self.params.id,
+        build1_1 = self.Build.create({
+            'params_id': self.base_params.id,
             'parent_id': build1.id,
             'hidden': True,
         })
-        build1_2 = self.create_build({
-            'params_id': self.params.id,
+        build1_2 = self.Build.create({
+            'params_id': self.base_params.id,
             'parent_id': build1.id,
         })
-        build1_1_1 = self.create_build({
-            'params_id': self.params.id,
+        build1_1_1 = self.Build.create({
+            'params_id': self.base_params.id,
             'parent_id': build1_1.id,
         })
-        build1_1_2 = self.create_build({
-            'params_id': self.params.id,
+        build1_1_2 = self.Build.create({
+            'params_id': self.base_params.id,
             'parent_id': build1_1.id,
         })
 
@@ -548,7 +489,7 @@ class TestClosestBranch(RunbotCase):
     #    }
     #    for b1, b2 in [(branch1, branch2), (branch2, branch1)]:
     #        hash = '%s%s' % (b1.name, b2.name)
-    #        build1 = self.create_build({
+    #        build1 = self.Build.create({
     #            'branch_id': b1.id,
     #            'name': hash,
     #        })
@@ -556,7 +497,7 @@ class TestClosestBranch(RunbotCase):
     #        if b1_closest:
     #            self.assertClosest(b1, closest[b1])
 
-    #        build2 = self.create_build({
+    #        build2 = self.Build.create({
     #            'branch_id': b2.id,
     #            'name': hash,
     #        })
@@ -900,7 +841,7 @@ class TestClosestBranch(RunbotCase):
     #    # we shouldn't have duplicate since community_dev_branch exists
     #    with patch('odoo.addons.runbot.models.repo.Repo._git_rev_parse', new=rev_parse):
     #        # lets create an old enterprise build
-    #        self.create_build({
+    #        self.Build.create({
     #            'branch_id': enterprise_sticky_branch.id,
     #            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
     #        })
@@ -949,7 +890,7 @@ class TestClosestBranch(RunbotCase):
     #        'name': 'refs/pull/123'
     #    })
     #    with patch('odoo.addons.runbot.models.repo.Repo._git_rev_parse', new=rev_parse):
-    #        build = self.create_build({
+    #        build = self.Build.create({
     #            'branch_id': enterprise_pr.id,
     #            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
     #        })

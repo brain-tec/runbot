@@ -8,19 +8,12 @@ class TestBuildConfigStep(RunbotCase):
 
     def setUp(self):
         super(TestBuildConfigStep, self).setUp()
-        self.repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
-        #self.branch = self.Branch.create({
-        #    'repo_id': self.repo.id,
-        #    'name': 'refs/heads/master'
-        #})
+
         self.Build = self.env['runbot.build']
         self.ConfigStep = self.env['runbot.build.config.step']
         self.Config = self.env['runbot.build.config']
 
         self.parent_build = self.Build.create({
-            #'branch_id': self.branch.id,
-            #'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-            'port': '1234',
         })
         self.start_patcher('_local_pg_createdb', 'odoo.addons.runbot.models.build.BuildResult._local_pg_createdb', True)
         self.start_patcher('_get_py_version', 'odoo.addons.runbot.models.build.BuildResult._get_py_version', 3)
@@ -262,11 +255,6 @@ class TestMakeResult(RunbotCase):
         super(TestMakeResult, self).setUp()
         self.ConfigStep = self.env['runbot.build.config.step']
         self.Config = self.env['runbot.build.config']
-        self.repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'server_files': 'server.py'})
-        self.branch = self.Branch.create({
-            'repo_id': self.repo.id,
-            'name': 'refs/heads/master'
-        })
 
     @patch('odoo.addons.runbot.models.build_config.os.path.getmtime')
     @patch('odoo.addons.runbot.models.build.BuildResult._log')
@@ -291,9 +279,6 @@ Initiating shutdown
             'test_tags': '/module,:class.method',
         })
         build = self.Build.create({
-            'branch_id': self.branch.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-            'port': '1234',
         })
         logs = []
         with patch('builtins.open', mock_open(read_data=file_content)):
@@ -401,8 +386,6 @@ Initiating shutdown
             'python_result_code': """a = 2*5\nreturn_value = {'local_result': 'ok'}"""
         })
         build = self.Build.create({
-            'branch_id': self.branch.id,
-            'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
             'port': '1234',
         })
         build.state = 'testing'

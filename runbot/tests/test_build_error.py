@@ -27,8 +27,7 @@ class TestBuildError(RunbotCase):
             'local_result': 'ok'
         }
         create_vals.update(vals)
-        return self.create_build(create_vals)
-
+        return self.Build.create(create_vals)
 
     def setUp(self):
         super(TestBuildError, self).setUp()

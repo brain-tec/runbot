@@ -268,7 +268,7 @@ class Batch(models.Model):
         )
 
     def _new_commit(self, commit):
-        # if not the same hash for repo_group:
+        # if not the same hash for repo:
         self.last_update = fields.Datetime.now()
         for batch_commit in self.batch_commit_ids:
             # case 1: a commit already exists for the repo (pr+branch, or fast push)
@@ -298,81 +298,11 @@ class Batch(models.Model):
         trigger_repos = triggers.mapped('repo_id')
         for missing_repo in pushed_repo-trigger_repos:
             break
-            # find commit for missing_repo_group in a corresponding branch: branch head in the same bundle, or fallback on base_repo
+            # find commit for missing_repo in a corresponding branch: branch head in the same bundle, or fallback on base_repo
         for trigger in triggers:
             if trigger.repo_ids & pushed_repo:  # there is a new commit in this in this trigger
                 break
                 # todo create build
-
-    def github_status(self):
-        pass
-
-            # todo execute triggers
-
-
-    def _github_status_notify_all(self, status):
-        """Notify each repo with a status"""
-        self.ensure_one()
-        if self.config_id.update_github_state:
-            remote_ids = {b.repo_id.id for b in self.search([('name', '=', self.name)])}
-            build_name = self.name # todo adapt: custom ci per trigger
-            user_id = self.env.user.id
-            _dbname = self.env.cr.dbname
-            _context = self.env.context
-            build_id = self.id
-            def send_github_status():
-                try:
-                    db_registry = registry(_dbname)
-                    with api.Environment.manage(), db_registry.cursor() as cr:
-                        env = api.Environment(cr, user_id, _context)
-                        remotes = env['runbot.repo'].browse(remote_ids)
-                        for remote in remotes:
-                            _logger.debug(
-                                "github updating %s status %s to %s in repo %s",
-                                status['context'], build_name, status['state'], remote.name)
-                            repo._github('/repos/:owner/:repo/statuses/%s' % build_name, status, ignore_errors=True)
-                except:
-                    _logger.exception('Something went wrong sending notification for %s', build_id)
-            self._cr.after('commit', send_github_status)
-
-
-    # TODO should be on bundle: multiple build for the same hash
-    def _github_status(self):
-        """Notify github of failed/successful builds"""
-        for build in self:
-            if build.parent_id:
-                if build.orphan_result:
-                    _logger.debug('Skipping result for orphan build %s', self.id)
-                else:
-                    build.parent_id._github_status()
-            elif build.config_id.update_github_state:
-                runbot_domain = self.env['runbot.repo']._domain()
-                desc = "runbot build %s" % (build.dest,)
-
-                if build.global_result in ('ko', 'warn'):
-                    state = 'failure'
-                elif build.global_state == 'testing':
-                    state = 'pending'
-                elif build.global_state in ('running', 'done'):
-                    state = 'error'
-                    if build.global_result == 'ok':
-                        state = 'success'
-                else:
-                    _logger.debug("skipping github status for build %s ", build.id)
-                    continue
-                desc += " (runtime %ss)" % (build.job_time,)
-
-                status = {
-                    "state": state,
-                    "target_url": "http://%s/runbot/build/%s" % (runbot_domain, build.id),
-                    "description": desc,
-                    "context": "ci/runbot"
-                }
-                if self.last_github_state != state:
-                    build._github_status_notify_all(status)
-                    self.last_github_state = state
-                else:
-                    _logger.debug('Skipping unchanged status for %s', self.id)
 
 
 class BatchCommit(models.Model):
