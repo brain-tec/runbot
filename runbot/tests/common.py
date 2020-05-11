@@ -117,6 +117,8 @@ class RunbotCase(TransactionCase):
         self.start_patcher('_local_cleanup_patcher', 'odoo.addons.runbot.models.build.BuildResult._local_cleanup')
         self.start_patcher('_local_pg_dropdb_patcher', 'odoo.addons.runbot.models.build.BuildResult._local_pg_dropdb')
 
+        self.start_patcher('reload_nginx', 'odoo.addons.runbot.models.repo.Repo._reload_nginx', None)
+
     def start_patcher(self, patcher_name, patcher_path, return_value=DEFAULT, side_effect=DEFAULT, new=DEFAULT):
 
         def stop_patcher_wrapper():

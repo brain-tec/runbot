@@ -45,8 +45,15 @@ class RepoTrigger(models.Model):
     repo_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_triggers', string="Triggers")
     dependency_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_dependencies', string="Dependencies")
     config_id = fields.Many2one('runbot.build.config', 'Config')
+    ci_context = fields.Char("Ci context", default='ci/runbot')
 
     # TODO add repo_module_id to replace modules_auto (many2many or option to only use trigger)
+
+
+def _sanitize(name):
+    for i in '@:/':
+        name = name.replace(i, '_')
+    return name
 
 
 class Remote(models.Model):
@@ -67,12 +74,6 @@ class Remote(models.Model):
     fetch_heads = fields.Boolean('Fetch branches', default=True)
     token = fields.Char("Github token", groups="runbot.group_runbot_admin")
 
-    @api.model
-    def _sanitized_name(self, name):
-        for i in '@:/':
-            name = name.replace(i, '_')
-        return name
-
     @api.depends('name')
     def _get_base_url(self):
         for remote in self:
@@ -89,7 +90,7 @@ class Remote(models.Model):
 
     def _compute_remote_name(self):
         for remote in self:
-            remote.remote_name = self._sanitized_name(remote.short_name)
+            remote.remote_name = _sanitize(remote.short_name)
 
     def _github(self, url, payload=None, ignore_errors=False, nb_tries=2):
         """Return a http request to be sent to github"""
@@ -219,7 +220,7 @@ class Repo(models.Model):
         """compute the server path of repo from the name"""
         root = self._root()
         for repo in self:
-            repo.path = os.path.join(root, 'repo', repo._sanitized_name(repo.name))
+            repo.path = os.path.join(root, 'repo', _sanitize(repo.name))
 
     def _git(self, cmd):
         """Execute a git command 'cmd'"""
@@ -480,6 +481,8 @@ class Repo(models.Model):
             except Exception:
                 _logger.exception('Fail to update repo %s', repo.name)
 
+
+    # after this point, not realy a repo buisness
     def _commit(self):
         self.env.cr.commit()
         self.env.cache.invalidate()
@@ -518,7 +521,7 @@ class Repo(models.Model):
         return self.env['runbot.build'].search(self.build_domain_host(host, [('local_state', 'in', ['testing', 'running'])]))
 
     def _assign_pending_builds(self, host, nb_workers, domain=None):
-        if not self.ids or host.assigned_only or nb_workers <= 0:
+        if host.assigned_only or nb_workers <= 0:
             return
         domain_host = self.build_domain_host(host)
         reserved_slots = self.env['runbot.build'].search_count(domain_host + [('local_state', 'in', ('testing', 'pending'))])
@@ -615,7 +618,7 @@ class Repo(models.Model):
     def _allocate_builds(self, host, nb_slots, domain=None):
         if nb_slots <= 0:
             return []
-        non_allocated_domain = [('repo_id', 'in', self.ids), ('local_state', '=', 'pending'), ('host', '=', False)]
+        non_allocated_domain = [('local_state', '=', 'pending'), ('host', '=', False)]
         if domain:
             non_allocated_domain = expression.AND([non_allocated_domain, domain])
         e = expression.expression(non_allocated_domain, self.env['runbot.build'])
@@ -623,6 +626,8 @@ class Repo(models.Model):
         where_clause, where_params = e.to_sql()
 
         # self-assign to be sure that another runbot batch cannot self assign the same builds
+
+        # TODO check: priority removed. Not a big deal, but maybe for staging. Add a priority on bundle, + transfer priority to build?
         query = """UPDATE
                         runbot_build
                     SET
@@ -631,15 +636,10 @@ class Repo(models.Model):
                         runbot_build.id IN (
                             SELECT runbot_build.id
                             FROM runbot_build
-                            LEFT JOIN runbot_branch
-                            ON runbot_branch.id = runbot_build.branch_id
                             WHERE
                                 %s
                             ORDER BY
-                                array_position(array['normal','rebuild','indirect','scheduled']::varchar[], runbot_build.build_type) ASC,
-                                runbot_branch.sticky DESC,
-                                runbot_branch.priority DESC,
-                                runbot_build.sequence ASC
+                                array_position(array['normal','rebuild','indirect','scheduled']::varchar[], runbot_build.build_type) ASC
                             FOR UPDATE OF runbot_build SKIP LOCKED
                             LIMIT %%s
                         )

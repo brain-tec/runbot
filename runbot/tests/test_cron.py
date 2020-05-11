@@ -45,9 +45,8 @@ class TestCron(RunbotCase):
 
     @patch('odoo.addons.runbot.models.host.RunboHost._docker_build')
     @patch('odoo.addons.runbot.models.host.RunboHost._bootstrap')
-    @patch('odoo.addons.runbot.models.repo.Repo._reload_nginx')
     @patch('odoo.addons.runbot.models.repo.Repo._scheduler')
-    def test_cron_build(self, mock_scheduler, mock_reload, mock_host_bootstrap, mock_host_docker_build):
+    def test_cron_build(self, mock_scheduler, mock_host_bootstrap, mock_host_docker_build):
         """ test that cron_fetch_and_build do its work """
         hostname = 'host.runbot.com'
         self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_update_frequency', 1)

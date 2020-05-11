@@ -24,9 +24,10 @@ class TestRepo(RunbotCase):
     def test_base_fields(self):
         self.mock_root.return_value = '/tmp/static'
 
+        repo = self.repo_server
         remote = self.remote_server
-        self.assertEqual(remote.path, '/tmp/static/repo/bla_example.com_base_server')
-        self.assertEqual(remote.base, 'bla_example.com_base_server')
+        self.assertEqual(repo.path, '/tmp/static/repo/server')
+        self.assertEqual(remote.base, 'example.com/base/server')
         self.assertEqual(remote.short_name, 'base/server')
 
         # HTTPS
@@ -240,9 +241,9 @@ class TestRepo(RunbotCase):
         self.assertEqual(last_batch.batch_commit_ids.commit_id.mapped('subject'), ['Server subject', 'Addons subject'])
 
         self.assertEqual(last_batch.state, 'ready')
-        print(last_batch)
-        print(last_batch.slot_ids)
-        print(last_batch.slot_ids.mapped('build_id'))
+
+        self.assertEqual(2, len(last_batch.slot_ids))
+        self.assertEqual(1, len(last_batch.slot_ids.mapped('build_id')))
         # TODO imp
         # Add another branch in another project
         # Add another bundle
@@ -277,8 +278,9 @@ class TestRepo(RunbotCase):
     @common.warmup
     def test_times(self):
         def _test_times(model, setter, field_name):
-            repo1 = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
-            repo2 = self.Repo.create({'name': 'bla@example.com:foo2/bar', 'repo_group_id': self.repo_group.id})
+            repo1 = self.repo_server
+            repo2 = self.repo_addons
+
             count = self.cr.sql_log_count
             with self.assertQueryCount(1):
                 getattr(repo1, setter)(1.1)
@@ -311,23 +313,27 @@ class TestRepo(RunbotCase):
 class TestGithub(TransactionCase):
     def test_github(self):
         """ Test different github responses or failures"""
-        self.project = self.env['runbot.project'].create({'name': 'Tests'})
-        self.repo_group = self.env['runbot.repo.group'].create({
-            'name': 'bar', 
-            'project_id': self.project.id,
-            'server_files': 'server.py'
+
+        project = self.env['runbot.project'].create({'name': 'Tests'})
+        repo_server = self.env['runbot.repo'].create({
+            'name': 'server',
+            'project_id': project.id,
         })
-        repo = self.env['runbot.repo'].create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
-        self.assertEqual(repo._github('/repos/:owner/:repo/statuses/abcdef', dict(), ignore_errors=True), None, 'A repo without token should return None')
-        repo.token = 'abc'
+        remote_server = self.env['runbot.remote'].create({
+            'name': 'bla@example.com:base/server',
+            'repo_id': repo_server.id,
+        })
+
+        self.assertEqual(remote_server._github('/repos/:owner/:repo/statuses/abcdef', dict(), ignore_errors=True), None, 'A repo without token should return None')
+        remote_server.token = 'abc'
         with patch('odoo.addons.runbot.models.repo.requests.Session') as mock_session:
             with self.assertRaises(Exception, msg='should raise an exception with ignore_errors=False'):
                 mock_session.return_value.post.side_effect = Exception('301: Bad gateway')
-                repo._github('/repos/:owner/:repo/statuses/abcdef', {'foo': 'bar'}, ignore_errors=False)
+                remote_server._github('/repos/:owner/:repo/statuses/abcdef', {'foo': 'bar'}, ignore_errors=False)
 
             mock_session.return_value.post.reset_mock()
             with self.assertLogs(logger='odoo.addons.runbot.models.repo') as assert_log:
-                repo._github('/repos/:owner/:repo/statuses/abcdef', {'foo': 'bar'}, ignore_errors=True)
+                remote_server._github('/repos/:owner/:repo/statuses/abcdef', {'foo': 'bar'}, ignore_errors=True)
                 self.assertIn('Ignored github error', assert_log.output[0])
 
             self.assertEqual(2, mock_session.return_value.post.call_count, "_github method should try two times by default")
@@ -335,7 +341,7 @@ class TestGithub(TransactionCase):
             mock_session.return_value.post.reset_mock()
             mock_session.return_value.post.side_effect = [Exception('301: Bad gateway'), Mock()]
             with self.assertLogs(logger='odoo.addons.runbot.models.repo') as assert_log:
-                repo._github('/repos/:owner/:repo/statuses/abcdef', {'foo': 'bar'}, ignore_errors=True)
+                remote_server._github('/repos/:owner/:repo/statuses/abcdef', {'foo': 'bar'}, ignore_errors=True)
                 self.assertIn('Success after 2 tries', assert_log.output[0])
 
             self.assertEqual(2, mock_session.return_value.post.call_count, "_github method should try two times by default")
@@ -346,41 +352,39 @@ class TestFetch(RunbotCase):
     def setUp(self):
         super(TestFetch, self).setUp()
         self.mock_root = self.patchers['repo_root_patcher']
+        self.fetch_count = 0
+        self.force_failure = False
+
+    def mock_git_helper(self):
+        """Helper that returns a mock for repo._git()"""
+        def mock_git(repo, cmd):
+            self.assertIn('fetch', cmd)
+            self.fetch_count += 1
+            if self.fetch_count < 3 or self.force_failure:
+                raise CalledProcessError(128, cmd, 'Dummy Error'.encode('utf-8'))
+            else:
+                return True
+        return mock_git
 
     def test_update_fetch_cmd(self):
         """ Test that git fetch is tried multiple times before disabling host """
 
-        fetch_count = 0
-        force_failure = False
-
-        def git_side_effect(cmd):
-            nonlocal fetch_count
-            fetch_count += 1
-            if fetch_count < 3 or force_failure:
-                raise CalledProcessError(128, cmd, 'Dummy Error'.encode('utf-8'))
-            else:
-                return True
-
-        git_patcher = self.patchers['git_patcher']
-        git_patcher.side_effect = git_side_effect
-
-        repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
         host = self.env['runbot.host']._get_current()
 
         self.assertFalse(host.assigned_only)
         # Ensure that Host is not disabled if fetch succeeds after 3 tries
         with mute_logger("odoo.addons.runbot.models.repo"):
-            repo._update_fetch_cmd()
+            self.repo_server._update_fetch_cmd()
         self.assertFalse(host.assigned_only, "Host should not be disabled when fetch succeeds")
-        self.assertEqual(fetch_count, 3)
+        self.assertEqual(self.fetch_count, 3)
 
         # Now ensure that host is disabled after 5 unsuccesful tries
-        force_failure = True
-        fetch_count = 0
+        self.force_failure = True
+        self.fetch_count = 0
         with mute_logger("odoo.addons.runbot.models.repo"):
-            repo._update_fetch_cmd()
+            self.repo_server._update_fetch_cmd()
         self.assertTrue(host.assigned_only)
-        self.assertEqual(fetch_count, 5)
+        self.assertEqual(self.fetch_count, 5)
 
 
 class TestRepoScheduler(RunbotCase):
@@ -394,12 +398,6 @@ class TestRepoScheduler(RunbotCase):
         mock_root = self.patchers['repo_root_patcher']
         mock_root.return_value = '/tmp/static'
 
-        self.foo_repo = self.Repo.create({'name': 'bla@example.com:foo/bar', 'repo_group_id': self.repo_group.id})
-
-        self.foo_branch = self.Branch.create({
-            'repo_id': self.foo_repo.id,
-            'name': 'refs/head/foo'
-        })
 
     @patch('odoo.addons.runbot.models.build.BuildResult._kill')
     @patch('odoo.addons.runbot.models.build.BuildResult._schedule')
@@ -410,11 +408,9 @@ class TestRepoScheduler(RunbotCase):
         builds = []
         # create 6 builds that are testing on the host to verify that
         # workers are not overfilled
-        for build_name in ['a', 'b', 'c', 'd', 'e', 'f']:
+        for _ in range(6):
             build = self.Build.create({
-                'branch_id': self.foo_branch.id,
-                'name': build_name,
-                'port': '1234',
+                'params_id': self.base_params.id,
                 'build_type': 'normal',
                 'local_state': 'testing',
                 'host': 'host.runbot.com'
@@ -422,24 +418,20 @@ class TestRepoScheduler(RunbotCase):
             builds.append(build)
         # now the pending build that should stay unasigned
         scheduled_build = self.Build.create({
-            'branch_id': self.foo_branch.id,
-            'name': 'sched_build',
-            'port': '1234',
+            'params_id': self.base_params.id,
             'build_type': 'scheduled',
             'local_state': 'pending',
         })
         builds.append(scheduled_build)
         # create the build that should be assigned once a slot is available
         build = self.Build.create({
-            'branch_id': self.foo_branch.id,
-            'name': 'foobuild',
-            'port': '1234',
+            'params_id': self.base_params.id,
             'build_type': 'normal',
             'local_state': 'pending',
         })
         builds.append(build)
         host = self.env['runbot.host']._get_current()
-        self.foo_repo._scheduler(host)
+        self.repo_server._scheduler(host)
 
         build.invalidate_cache()
         scheduled_build.invalidate_cache()
@@ -447,6 +439,6 @@ class TestRepoScheduler(RunbotCase):
         self.assertFalse(scheduled_build.host)
 
         # give some room for the pending build
-        self.Build.search([('name', '=', 'a')]).write({'local_state': 'done'})
+        builds[0].write({'local_state': 'done'})
 
-        self.foo_repo._scheduler(host)
+        self.repo_server._scheduler(host)
