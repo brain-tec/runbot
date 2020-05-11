@@ -14,6 +14,7 @@ class TestBuildConfigStep(RunbotCase):
         self.Config = self.env['runbot.build.config']
 
         self.parent_build = self.Build.create({
+            'params_id': self.base_params.id,
         })
         self.start_patcher('_local_pg_createdb', 'odoo.addons.runbot.models.build.BuildResult._local_pg_createdb', True)
         self.start_patcher('_get_py_version', 'odoo.addons.runbot.models.build.BuildResult._get_py_version', 3)
