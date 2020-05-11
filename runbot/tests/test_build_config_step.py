@@ -13,8 +13,12 @@ class TestBuildConfigStep(RunbotCase):
         self.ConfigStep = self.env['runbot.build.config.step']
         self.Config = self.env['runbot.build.config']
 
+        server_commit = self.Commit.create ({
+            'name': 'dfdfcfcf0000ffffffffffffffffffffffffffff',
+            'repo_id': self.repo_server.id
+        })
         self.parent_build = self.Build.create({
-            'params_id': self.base_params.id,
+            'params_id': self.base_params.copy({'build_commit_ids': [(0, 0, {'commit_id': server_commit.id})]}).id,
         })
         self.start_patcher('_local_pg_createdb', 'odoo.addons.runbot.models.build.BuildResult._local_pg_createdb', True)
         self.start_patcher('_get_py_version', 'odoo.addons.runbot.models.build.BuildResult._get_py_version', 3)
@@ -139,8 +143,8 @@ class TestBuildConfigStep(RunbotCase):
         })
 
         def docker_run(cmd, log_path, *args, **kwargs):
-            self.assertEqual(cmd.pres, [['sudo', 'pip3', 'install', '-r', 'bar/requirements.txt']])
-            self.assertEqual(cmd.cmd[:10], ['python3', '-m', 'coverage', 'run', '--branch', '--source', '/data/build', '--omit', '*__manifest__.py', 'bar/server.py'])
+            self.assertEqual(cmd.pres, [['sudo', 'pip3', 'install', '-r', 'server/requirements.txt']])
+            self.assertEqual(cmd.cmd[:10], ['python3', '-m', 'coverage', 'run', '--branch', '--source', '/data/build', '--omit', '*__manifest__.py', 'server/server.py'])
             self.assertIn(['python3', '-m', 'coverage', 'html', '-d', '/data/build/coverage', '--ignore-errors'], cmd.posts)
             self.assertIn(['python3', '-m', 'coverage', 'xml', '-o', '/data/build/logs/coverage.xml', '--ignore-errors'], cmd.posts)
             self.assertEqual(log_path, 'dev/null/logpath')
@@ -156,7 +160,7 @@ class TestBuildConfigStep(RunbotCase):
         })
         def docker_run(cmd, log_path, *args, **kwargs):
             dest = self.parent_build.dest
-            self.assertEqual(cmd.cmd[:2], ['python3', 'bar/server.py'])
+            self.assertEqual(cmd.cmd[:2], ['python3', 'server/server.py'])
             self.assertEqual(cmd.finals[0], ['pg_dump', '%s-all' % dest, '>', '/data/build/logs/%s-all//dump.sql' % dest])
             self.assertEqual(cmd.finals[1], ['cp', '-r', '/data/build/datadir/filestore/%s-all' % dest, '/data/build/logs/%s-all//filestore/' % dest])
             self.assertEqual(cmd.finals[2], ['cd', '/data/build/logs/%s-all/' % dest, '&&', 'zip', '-rmq9', '/data/build/logs/%s-all.zip' % dest, '*'])
@@ -183,7 +187,7 @@ class TestBuildConfigStep(RunbotCase):
 
         def docker_run(cmd, *args, **kwargs):
             cmds = cmd.build().split(' && ')
-            self.assertEqual(cmds[1].split(' bar/server.py')[0], 'python3')
+            self.assertEqual(cmds[1].split(' server/server.py')[0], 'python3')
             tags = cmds[1].split('--test-tags ')[1].split(' ')[0]
             self.assertEqual(tags, '/module,:class.method')
 
@@ -194,7 +198,7 @@ class TestBuildConfigStep(RunbotCase):
 
         def docker_run2(cmd, *args, **kwargs):
             cmds = cmd.build().split(' && ')
-            self.assertEqual(cmds[1].split(' bar/server.py')[0], 'python3')
+            self.assertEqual(cmds[1].split(' server/server.py')[0], 'python3')
             tags = cmds[1].split('--test-tags ')[1].split(' ')[0]
             self.assertEqual(tags, '/module,:class.method,-:otherclass.othertest')
 
@@ -240,7 +244,7 @@ class TestBuildConfigStep(RunbotCase):
         call_count = 0
         def docker_run(cmd, log_path, *args, **kwargs):
             nonlocal call_count
-            sub_command = cmd.cmd[cmd.index('bar/server.py')+1]
+            sub_command = cmd.cmd[cmd.index('server/server.py')+1]
             self.assertEqual(sub_command, 'subcommand')
             call_count += 1
 
@@ -280,6 +284,7 @@ Initiating shutdown
             'test_tags': '/module,:class.method',
         })
         build = self.Build.create({
+            'params_id': self.base_params.id,
         })
         logs = []
         with patch('builtins.open', mock_open(read_data=file_content)):
@@ -387,7 +392,7 @@ Initiating shutdown
             'python_result_code': """a = 2*5\nreturn_value = {'local_result': 'ok'}"""
         })
         build = self.Build.create({
-            'port': '1234',
+            'params_id': self.base_params.id,
         })
         build.state = 'testing'
         self.patchers['isfile'].return_value = False

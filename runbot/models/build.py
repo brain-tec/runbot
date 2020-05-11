@@ -74,7 +74,7 @@ class BuildParameters(models.Model):
 
     build_ids = fields.One2many('runbot.build', 'params_id')
 
-    builds_reference_ids = fields.One2many('runbot.build.reference', 'params_id')
+    builds_reference_ids = fields.One2many('runbot.build.reference', 'params_id', copy=True)
     modules = fields.Char('Modules') # TODO fill this with combination of triggers repo_modules and bundle_id.modules (or trigger?)
 
     fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)

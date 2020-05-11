@@ -256,18 +256,9 @@ class ConfigStep(models.Model):
                     build._logger('Too much build created')
                     break
                 children = Build.create({ # TODO create build_result instead using same build params? or
-                    'commit_ids_ids': build._copy_commit_ids(),
-                    'config_id': create_config.id,
+                    'params_id': build.params_id.copy({'config_id': create_config.id}).id,
                     'parent_id': build.id,
-                    'branch_id': build.branch_id.id,
-                    'name': build.name,
                     'build_type': build.build_type,
-                    'date': build.date,
-                    'author': build.author,
-                    'author_email': build.author_email,
-                    'committer': build.committer,
-                    'committer_email': build.committer_email,
-                    'subject': build.subject,
                     'hidden': self.hide_build,
                     'orphan_result': self.make_orphan,
                 })
@@ -378,7 +369,7 @@ class ConfigStep(models.Model):
             build._local_pg_createdb(db_name)
         cmd += ['-d', db_name]
         # list module to install
-        extra_params = build.extra_params or self.extra_params or ''
+        extra_params = build.params_id.extra_params or self.extra_params or ''
         if mods and '-i' not in extra_params:
             cmd += ['-i', mods]
         config_path = build._server("tools/config.py")
@@ -425,7 +416,7 @@ class ConfigStep(models.Model):
         cmd.finals.append(['pg_dump', db_name, '>', sql_dest])
         cmd.finals.append(['cp', '-r', filestore_path, filestore_dest])
         cmd.finals.append(['cd', dump_dir, '&&', 'zip', '-rmq9', zip_path, '*'])
-        infos = '{\n    "db_name": "%s",\n    "build_id": %s,\n    "shas": [%s]\n}' % (db_name, build.id, ', '.join(['"%s"' % commit for commit in build.build_commit_ids]))
+        infos = '{\n    "db_name": "%s",\n    "build_id": %s,\n    "shas": [%s]\n}' % (db_name, build.id, ', '.join(['"%s"' % build_commit.commit_id.dname for build_commit in build.params_id.build_commit_ids]))
         build.write_file('logs/%s/info.json' % db_name, infos)
 
         if self.flamegraph:
@@ -484,11 +475,11 @@ class ConfigStep(models.Model):
 
     def _coverage_params(self, build, modules_to_install):
         pattern_to_omit = set()
-        for commit in build.build_commit_ids:
+        for commit in build.params_id.build_commit_ids.mapped('commit_id'):
             docker_source_folder = build._docker_source_folder(commit)
-            for manifest_file in commit.repo.manifest_files.split(','):
+            for manifest_file in commit.repo_id.manifest_files.split(','):
                 pattern_to_omit.add('*%s' % manifest_file)
-            for (addons_path, module, _) in build._get_available_modules(commit):
+            for (addons_path, module, _) in commit._get_available_modules():
                 if module not in modules_to_install:
                     # we want to omit docker_source_folder/[addons/path/]module/*
                     module_path_in_docker = os.path.join(docker_source_folder, addons_path, module)
