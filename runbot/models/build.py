@@ -915,8 +915,8 @@ class BuildResult(models.Model):
         py_version = py_version if py_version is not None else build._get_py_version()
         pres = []
         for build_commit in self.params_id.build_commit_ids:
-            if os.path.isfile(build_commit._source_path('requirements.txt')): # this is a change I think
-                repo_dir = self._docker_source_folder(build_commit)
+            if os.path.isfile(build_commit.commit_id._source_path('requirements.txt')): # this is a change I think
+                repo_dir = self._docker_source_folder(build_commit.commit_id)
                 requirement_path = os.path.join(repo_dir, 'requirements.txt')
                 pres.append(['sudo', 'pip%s' % py_version, 'install', '-r', '%s' % requirement_path])
 

@@ -41,7 +41,7 @@ class Commit(models.Model):
             return False
 
     def _source_path(self, *path):
-        return self.repo_id._source_path(self.commit_id.name, *path)
+        return self.repo_id._source_path(self.name, *path)
 
     @api.depends('name', 'repo_id.name')
     def _compute_dname(self):
