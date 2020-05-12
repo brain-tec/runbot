@@ -16,7 +16,6 @@ from odoo.exceptions import UserError, ValidationError
 from odoo.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT
 from odoo import models, fields, api, registry
 from odoo.modules.module import get_module_resource
-from odoo.tools import config
 from ..common import os, RunbotException
 from psycopg2.extensions import TransactionRollbackError
 
@@ -421,8 +420,6 @@ class Repo(models.Model):
         """ Update the git repo on FS """
         self.ensure_one()
         repo = self
-        _logger.debug('repo %s updating branches', repo.name)
-
         if not os.path.isdir(os.path.join(repo.path)):
             os.makedirs(repo.path)
         self._clone()
@@ -434,10 +431,9 @@ class Repo(models.Model):
             fetch_time = os.path.getmtime(fname_fetch_head)
             if repo.mode == 'hook' and (not repo.hook_time or repo.hook_time < fetch_time):
                 t0 = time.time()
-                _logger.debug('repo %s skip hook fetch fetch_time: %ss ago hook_time: %ss ago',
-                            repo.name, int(t0 - fetch_time), int(t0 - repo.hook_time) if repo.hook_time else 'never')
                 return
 
+        _logger.debug('Updating repo %s',repo.name)
         self._update_fetch_cmd()
 
     def _update_fetch_cmd(self):

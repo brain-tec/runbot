@@ -7,7 +7,7 @@ from odoo import api, fields, models
 class ResConfigSettings(models.TransientModel):
     _inherit = 'res.config.settings'
 
-    runbot_workers = fields.Integer('Total number of workers')
+    runbot_workers = fields.Integer('Default number of workers')
     runbot_running_max = fields.Integer('Maximum number of running builds')
     runbot_timeout = fields.Integer('Max allowed step timeout (in seconds)')
     runbot_starting_port = fields.Integer('Starting port for running builds')
@@ -17,6 +17,8 @@ class ResConfigSettings(models.TransientModel):
     runbot_update_frequency = fields.Integer('Update frequency (in seconds)')
     runbot_template = fields.Char('Postgresql template', help="Postgresql template to use when creating DB's")
     runbot_message = fields.Text('Frontend warning message')
+    runbot_do_fetch = fields.Boolean('Discover new commits')
+    runbot_do_schedule = fields.Boolean('Schedule builds')
 
     @api.model
     def get_values(self):
@@ -32,6 +34,8 @@ class ResConfigSettings(models.TransientModel):
                    runbot_update_frequency=int(get_param('runbot.runbot_update_frequency', default=10)),
                    runbot_template=get_param('runbot.runbot_db_template'),
                    runbot_message=get_param('runbot.runbot_message', default=''),
+                   runbot_do_fetch=get_param('runbot.runbot_do_fetch', default=False),
+                   runbot_do_schedule=get_param('runbot.runbot_do_schedule', default=False),
                    )
         return res
 
@@ -48,3 +52,5 @@ class ResConfigSettings(models.TransientModel):
         set_param('runbot.runbot_update_frequency', self.runbot_update_frequency)
         set_param('runbot.runbot_db_template', self.runbot_template)
         set_param('runbot.runbot_message', self.runbot_message)
+        set_param('runbot.runbot_do_fetch', self.runbot_do_fetch)
+        set_param('runbot.runbot_do_schedule', self.runbot_do_schedule)

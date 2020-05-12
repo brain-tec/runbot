@@ -1,10 +1,12 @@
 import time
 import logging
 
-from odoo import models, fields
-from odoo.osv import expression
 from ..common import fqdn, dt2time, dest_reg, os
 from ..container import docker_ps, docker_stop
+
+from odoo import models, fields
+from odoo.osv import expression
+from odoo.tools import config
 
 _logger = logging.getLogger(__name__)
 
@@ -234,60 +236,44 @@ class Runbot(models.AbstractModel):
         cron_limit = config.get('limit_time_real_cron')
         req_limit = config.get('limit_time_real')
         cron_timeout = cron_limit if cron_limit > -1 else req_limit
-        return cron_timeout - (min_margin + random.randint(1, 60))
+        return cron_timeout - min_margin
 
-    def _cron_fetch_and_schedule(self, hostname):
-        """This method have to be called from a dedicated cron on a runbot
-        in charge of orchestration.
+    def _cron(self):
         """
-
-        if hostname != fqdn():
-            return 'Not for me'
-
+        This method is the default cron for new commit discovery and build sheduling.
+        The cron runs for a long time to avoid spamming logs
+        """
         start_time = time.time()
         timeout = self._get_cron_period()
-        icp = self.env['ir.config_parameter']
-        update_frequency = int(icp.get_param('runbot.runbot_update_frequency', default=10))
-        while time.time() - start_time < timeout:
-            repos = self.env['runbot.repo'].search([('mode', '!=', 'disabled')])
-            repos._update(force=False)
-            repos._create_batches()
-            self._commit()
-            time.sleep(update_frequency)
-
-    def _cron_fetch_and_build(self, hostname):
-        """ This method have to be called from a dedicated cron
-        created on each runbot batch.
-        """
-
-        if hostname != fqdn():
-            return 'Not for me'
-
+        get_param = self.env['ir.config_parameter'].get_param
+        update_frequency = int(get_param('runbot.runbot_update_frequency', default=10))
+        runbot_do_fetch = get_param('runbot.runbot_do_fetch')
+        runbot_do_schedule = get_param('runbot.runbot_do_schedule')
         host = self.env['runbot.host']._get_current()
         host.set_psql_conn_count()
-        host._bootstrap()
         host.last_start_loop = fields.Datetime.now()
-        
         self._commit()
-        start_time = time.time()
-        # 1. source cleanup
-        # -> Remove sources when no build is using them
-        # (could be usefull to keep them for wakeup but we can checkout them again if not forced push)
-        self._source_cleanup()
-        # 2. db and log cleanup
-        # -> Keep them as long as possible
-        self.env['runbot.build']._local_cleanup()
-        # 3. docker cleanup
-        self._docker_cleanup()
-        host._docker_build()
+        # Bootstrap
+        host._bootstrap()
+        if runbot_do_schedule:
+            host._docker_build()
+            self._source_cleanup()
+            self.env['runbot.build']._local_cleanup()
+            self._docker_cleanup()
 
-        timeout = self._get_cron_period()
-        icp = self.env['ir.config_parameter']
-        update_frequency = int(icp.get_param('runbot.runbot_update_frequency', default=10))
         while time.time() - start_time < timeout:
-            time.sleep(self._scheduler_loop_turn(host, update_frequency))
+            if runbot_do_fetch:
+                repos = self.env['runbot.repo'].search([('mode', '!=', 'disabled')])
+                repos._update(force=False)
+                repos._create_batches()
+            if runbot_do_schedule:
+                while time.time() - start_time < update_frequency:
+                    time.sleep(self._scheduler_loop_turn(host, update_frequency))
+            if runbot_do_fetch != get_param('runbot.runbot_do_fetch') or runbot_do_schedule != get_param('runbot.runbot_do_schedule'):
+                break
 
         host.last_end_loop = fields.Datetime.now()
+
 
     def _scheduler_loop_turn(self, host, default_sleep=1):
         try:

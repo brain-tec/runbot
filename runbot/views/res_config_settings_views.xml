@@ -51,6 +51,14 @@
                                   <field name="runbot_update_frequency" style="width: 30%;"/>
                                 </div>
                                 <div class="mt-16 row">
+                                  <label for="runbot_do_fetch" class="col-xs-3 o_light_label" style="width: 60%;"/>
+                                  <field name="runbot_do_fetch" style="width: 30%;"/>
+                                </div>
+                                <div class="mt-16 row">
+                                  <label for="runbot_do_schedule" class="col-xs-3 o_light_label" style="width: 60%;"/>
+                                  <field name="runbot_do_schedule" style="width: 30%;"/>
+                                </div>
+                                <div class="mt-16 row">
                                   <label for="runbot_template" class="col-xs-3 o_light_label" style="width: 60%;"/>
                                   <field name="runbot_template" style="width: 30%;"/>
                                 </div>
