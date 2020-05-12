@@ -57,14 +57,14 @@ class Remote(models.Model):
     _description = 'Remote'
     _order = 'sequence, id'
 
-    name = fields.Char('Repository', required=True)
+    name = fields.Char('Url', required=True)
     sequence = fields.Integer('Sequence')
     repo_id = fields.Many2one('runbot.repo', required=True)
     short_name = fields.Char('Short name', compute='_compute_short_name')
     remote_name = fields.Char('Remote name', compute='_compute_remote_name')
     base = fields.Char(compute='_get_base_url', string='Base URL', readonly=True)  # Could be renamed to a more explicit name like base_url
-    fetch_pull = fields.Boolean('Fetch PR', default=True)
     fetch_heads = fields.Boolean('Fetch branches', default=True)
+    fetch_pull = fields.Boolean('Fetch PR', default=False)
     token = fields.Char("Github token", groups="runbot.group_runbot_admin")
 
     @api.depends('name')
@@ -119,6 +119,15 @@ class Remote(models.Model):
                             else:
                                 raise
 
+    def create(self, values_list):
+        super().create(values_list)
+        self._cr.after('commit', self.repo_id._update_git_config)
+
+    def write(self, values):
+        super().write(values)
+        self._cr.after('commit', self.repo_id._update_git_config)
+
+
 class Repo(models.Model):
 
     _name = "runbot.repo"
@@ -126,11 +135,12 @@ class Repo(models.Model):
     _order = 'sequence, id'
 
 
-    name = fields.Char("Repo forks descriptions", unique=True)  # odoo/enterprise/upgrade/security/runbot/design_theme
+    name = fields.Char("Name", unique=True)  # odoo/enterprise/upgrade/security/runbot/design_theme
     main_remote = fields.Many2one('runbot.remote', "Main remote")
-    remote_ids = fields.One2many('runbot.remote', 'repo_id', "Repo and forks")
+    remote_ids = fields.One2many('runbot.remote', 'repo_id', "Remotes")
     project_id = fields.Many2one('runbot.project', required=True,
-        help="Default bundle project to use when pushing on this repos")
+        help="Default bundle project to use when pushing on this repos",
+        default=lambda self: self.env.ref('runbot.main_project', raise_if_not_found=False))
     # -> not verry usefull, remove it? (iterate on projects or contraints triggers:
     # all trigger where a repo is used must be in the same project.
     modules = fields.Char("Modules to install", help="Comma-separated list of modules to install and test.")
@@ -396,12 +406,16 @@ class Repo(models.Model):
 
     def _update_git_config(self):
         """ Update repo git config file """
-        self.ensure_one()
-        git_config_path = os.path.join(self.path, '.git', 'config')
-        template_params = {'repo': self}
-        git_config = self.env['ir.ui.view'].render_template("runbot.git_config", template_params)
-        with open(git_config_path, 'w') as config_file:
-            config_file.write(git_config)
+        for repo in self:
+            if os.path.isdir(os.path.join(repo.path, 'refs')):
+                git_config_path = os.path.join(repo.path, '.git', 'config')
+                template_params = {'repo': repo}
+                git_config = self.env['ir.ui.view'].render_template("runbot.git_config", template_params)
+                with open(git_config_path, 'w') as config_file:
+                    config_file.write(git_config)
+                _logger.info('Config updated for repo %s' % repo.name)
+            else:
+                _logger.info('Repo not cloned, skiping config update for %s' % repo.name)
 
     def _clone(self):
         """ Clone the remote repo if needed """
@@ -429,9 +443,12 @@ class Repo(models.Model):
         fname_fetch_head = os.path.join(repo.path, 'FETCH_HEAD')
         if not force and os.path.isfile(fname_fetch_head):
             fetch_time = os.path.getmtime(fname_fetch_head)
-            if repo.mode == 'hook' and (not repo.hook_time or repo.hook_time < fetch_time):
-                t0 = time.time()
-                return
+            if repo.mode == 'hook':
+                if not repo.hook_time or repo.hook_time < fetch_time:
+                    return
+            if repo.mode == 'poll':
+                if (time.time() < fetch_time + 60*5):
+                    return
 
         _logger.debug('Updating repo %s',repo.name)
         self._update_fetch_cmd()

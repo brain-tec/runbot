@@ -33,13 +33,20 @@
                 <field name="sequence"/>
                 <field name="project_id"/>
                 <field name="modules"/>
-                <field name="group_ids"  widget="many2many_tags"/>
                 <field name="server_files"/>
                 <field name="manifest_files"/>
                 <field name="addons_paths"/>
-                <field name="remote_ids"/>
-                <field name="hook_time"/>
+                <field name="hook_time" groups="base.group_no_one"/>
                 <field name="mode"/>
+                <field name="remote_ids">
+                  <tree string="Remotes" editable="bottom">
+                    <field name="name"/>
+                    <field name="sequence"/>
+                    <field name="fetch_heads" string="Branch"/>
+                    <field name="fetch_pull" string="PR"/>
+                    <field name="token"/>
+                  </tree>
+                </field>
               </group>
             </sheet>
           </form>

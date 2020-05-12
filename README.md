@@ -15,7 +15,7 @@ This repository contains the source code of Odoo testing bot [runbot.odoo.com](h
 
 ## HOW TO
 
-This section give the basic steps to follow to configure the runbot v5.0. The configuration may differ from one use to another, this one will describe how to test addons for odoo, needing to fetch odoo core but without testing vanilla odoo.
+This section give the basic steps to follow to configure the runbot v5.0. The configuration may differ from one use to another, this one will describe how to test addons for odoo, needing to fetch odoo core but without testing vanilla odoo. As an exemple, runbot will be used as a tested addons.
 
 ### Setup
 
@@ -66,11 +66,35 @@ ls runbot/runbot/static
 - **repo** contains the bare repositories
 - **source** contains the exported sources needed for each build
 - **source** contains the exported sources needed for each build
-- **build** contains the different workspaces for dockers
-- **docker** contains DockerFile and corresponding logs
+- **build** contains the different workspaces for dockers, containing logs/ filestore, ...
+- **docker** contains DockerFile and docker build logs
 - **nginx** contaings the nginx config used to access running instances
 All of them are emply for now.
 
 A database defined by *runbot.runbot_db_template* icp will be created. By default, runbot use template1. This database will be used as template for testing builds. You can change this database for more customisation.
+
+#### Access to backend
+Access odoo "backend" *127.0.0.1:8069/web*
+
+If not connected yep, connect as admin (default password: admin). You may want to check that.Check odoo documentation for other needed configuration as master password. This is mainly needed for production purpose, a local instance will work as it is.
+If you create another user to manage the runbot, you may add the group *Runbot administrator* to this user
+
+#### Add remotes and repositories
+Access runbot app and go to the Repos->Repositories menu
+
+Create a new repo for odoo
+![Odoo repo configuration](runbot/documentation/images/odoo_repo.png "Odoo repo configuration")
+
+In this example a single remote is added, the base odoo repo. Only branches will be fetch to limit disc usage and branch created in backend.
+
+The repo is in poll mode since github won't hook your runbot instance.
+
+
+
+### Hook mode
+### Access rights
+### Modules filters
+
+
 
 
