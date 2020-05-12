@@ -266,6 +266,9 @@ class Runbot(models.AbstractModel):
                 repos = self.env['runbot.repo'].search([('mode', '!=', 'disabled')])
                 repos._update(force=False)
                 repos._create_batches()
+                self._commit()
+                self.env['runbot.batch']._process()
+                self._commit()
             if runbot_do_schedule:
                 while time.time() - start_time < update_frequency:
                     time.sleep(self._scheduler_loop_turn(host, update_frequency))

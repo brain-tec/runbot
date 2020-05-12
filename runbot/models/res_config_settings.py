@@ -12,7 +12,7 @@ class ResConfigSettings(models.TransientModel):
     runbot_timeout = fields.Integer('Max allowed step timeout (in seconds)')
     runbot_starting_port = fields.Integer('Starting port for running builds')
     runbot_domain = fields.Char('Runbot domain')
-    runbot_max_age = fields.Integer('Max branch age (in days)')
+    runbot_max_age = fields.Integer('Max commit age (in days)')
     runbot_logdb_uri = fields.Char('Runbot URI for build logs')
     runbot_update_frequency = fields.Integer('Update frequency (in seconds)')
     runbot_template = fields.Char('Postgresql template', help="Postgresql template to use when creating DB's")

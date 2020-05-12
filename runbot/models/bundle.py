@@ -250,7 +250,7 @@ class Batch(models.Model):
     bundle_id = fields.Many2one('runbot.bundle', required=True, index=True)
     batch_commit_ids = fields.One2many('runbot.batch.commit', 'batch_id')
     slot_ids = fields.One2many('runbot.batch.slot', 'batch_id')
-    state = fields.Selection([('preparing', 'Preparing'), ('ready', 'Ready'), ('complete', 'Complete'), ('done', 'Done')])
+    state = fields.Selection([('preparing', 'Preparing'), ('ready', 'Ready'), ('done', 'Done')])
     hidden = fields.Boolean('Hidden', default=False)
     age = fields.Integer(compute='_compute_age', string='Build age')
 
@@ -292,7 +292,15 @@ class Batch(models.Model):
         # TODO
         # foreach pending build, if build is not in another batch, skip.
 
-    def _start(self):
+    def _process(self):
+        preparing = self.search([
+            ('state', '=', 'preparing'),
+            ('last_update', '<', fields.Datetime.now() - datetime.timedelta(seconds=60))
+        ])
+        for batch in preparing:
+            batch._prepare()
+
+    def _prepare(self):
         #  For all commit on real branches:
         self.state = 'ready'
         triggers = self.env['runbot.trigger'].search([('project_id', '=', self.bundle_id.project_id.id)])
