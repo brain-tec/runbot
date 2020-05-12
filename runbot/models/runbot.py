@@ -272,6 +272,7 @@ class Runbot(models.AbstractModel):
         while time.time() - start_time < timeout:
             if runbot_do_fetch:
                 repos = self.env['runbot.repo'].search([('mode', '!=', 'disabled')])
+                repos = repos.filtered(lambda rep: rep.remote_ids)
                 repos._update(force=False)
                 repos._create_batches()
                 self._commit()

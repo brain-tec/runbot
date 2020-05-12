@@ -15,7 +15,7 @@ from odoo.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT
 from odoo import models, fields, api, registry
 from ..common import os, RunbotException
 from psycopg2.extensions import TransactionRollbackError
-
+from collections import defaultdict
 _logger = logging.getLogger(__name__)
 
 
@@ -32,7 +32,7 @@ class RepoTrigger(models.Model):
 
     name = fields.Char("Repo trigger descriptions")
     project_id = fields.Many2one('runbot.project', required=True)  # main/security/runbot
-    repo_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_triggers', string="Triggers")
+    repo_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_triggers', string="Triggers", domain="[('project_id', '=', project_id)]")
     dependency_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_dependencies', string="Dependencies")
     config_id = fields.Many2one('runbot.build.config', 'Config')
     ci_context = fields.Char("Ci context", default='ci/runbot')
@@ -54,8 +54,7 @@ class Remote(models.Model):
     _description = 'Remote'
     _order = 'sequence, id'
 
-    name = fields.Char('Url', required=True)  # TODO unique per repo
-    url = fields.Char('Url', required=True)  # TODO validate with rege
+    name = fields.Char('Url', required=True)  # TODO valide with regex
     sequence = fields.Integer('Sequence')
     repo_id = fields.Many2one('runbot.repo', required=True)
     short_name = fields.Char('Short name', compute='_compute_short_name')
@@ -157,6 +156,7 @@ class Repo(models.Model):
                             string="Mode", required=True, help="hook: Wait for webhook on /runbot/hook/<id> i.e. github push event")
     hook_time = fields.Float('Last hook time', compute='_compute_hook_time')
     get_ref_time = fields.Float('Last refs db update', compute='_compute_get_ref_time')
+    trigger_ids = fields.Many2many('runbot.trigger', readonly=True)
 
     def _compute_get_ref_time(self):
         self.env.cr.execute("""
@@ -349,6 +349,8 @@ class Repo(models.Model):
         self.ensure_one()
         max_age = int(self.env['ir.config_parameter'].get_param('runbot.runbot_max_age', default=30))
 
+        has_trigger = bool(self.trigger_ids)
+
         for ref_name, sha, date, author, author_email, subject, committer, committer_email in refs:
             branch = ref_branches[ref_name]
 
@@ -357,7 +359,7 @@ class Repo(models.Model):
             #     continue
             # create build (and mark previous builds as skipped) if not found
             if branch.head_name != sha: # new push on branch
-                _logger.debug('repo %s branch %s new commit found: %s', self.name, branch.name, sha)
+                _logger.info('repo %s branch %s new commit found: %s', self.name, branch.name, sha)
 
                 commit = self.env['runbot.commit'].search([('name', '=', sha), ('repo_id', '=', self.id)])
                 if not commit:
@@ -372,17 +374,17 @@ class Repo(models.Model):
                         'date': dateutil.parser.parse(date[:19]),
                     })
                 branch.head = commit
+                # TODO add reflog -> history on commit found on branch
 
-                bundle = branch.bundle_id # TODO this is not correct, fixme
+                if not has_trigger:
+                    continue
+
+                bundle = branch.bundle_id
                 if bundle.no_build:
                     continue
 
-                # TODO check  if repo group of branch is a trigger
-                # todo move following logic to bundle ? bundle._notify_new_commit()
                 bundle_batch = bundle._get_preparing_batch()
                 bundle_batch._new_commit(commit)
-
-                # TODO add reflog
 
     def _create_batches(self):
         """ Find new commits in physical repos"""
@@ -437,6 +439,8 @@ class Repo(models.Model):
         """ Update the git repo on FS """
         self.ensure_one()
         repo = self
+        if not repo.remote_ids:
+            return
         if not os.path.isdir(os.path.join(repo.path)):
             os.makedirs(repo.path)
         self._git_init()
@@ -453,7 +457,7 @@ class Repo(models.Model):
                 if (time.time() < fetch_time + 60*5):
                     return
 
-        _logger.info('Updating repo %s',repo.name)
+        _logger.info('Updating repo %s', repo.name)
         self._update_fetch_cmd()
 
     def _update_fetch_cmd(self):
@@ -463,8 +467,6 @@ class Repo(models.Model):
         try_count = 0
         failure = True
         delay = 0
-        if not repo.remote_ids:
-            return
         while failure and try_count < 5:
             time.sleep(delay)
             try:

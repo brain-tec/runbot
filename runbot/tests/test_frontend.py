@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from collections import defaultdict
 from itertools import cycle
 from unittest.mock import patch
 from werkzeug.wrappers import Response

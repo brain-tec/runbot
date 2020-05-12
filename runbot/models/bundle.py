@@ -304,13 +304,17 @@ class Batch(models.Model):
     def _prepare(self):
         #  For all commit on real branches:
         self.state = 'ready'
-        triggers = self.env['runbot.trigger'].search([('project_id', '=', self.bundle_id.project_id.id)])
+        project = self.bundle_id.project_id
+        triggers = self.env['runbot.trigger'].search([('project_id', '=', project.id)])
         pushed_repo = self.batch_commit_ids.mapped('commit_id.repo_id')
-        all_repos = triggers.mapped('repo_ids') | triggers.mapped('dependency_ids')
+        dependency_repos = triggers.mapped('dependency_ids')
+        all_repos = triggers.mapped('repo_ids') | dependency_repos
         missing_repos = all_repos - pushed_repo
+
+        foreign_projects = dependency_repos.mapped('project_id') - project
         # find missing commits on bundle branches head
-        if missing_repos:
-            for commit in self.bundle_id.branch_ids.mapped('head'):
+        def fill_missing(branch_ids, match_type):
+            for commit in branch_ids.mapped('head'):
                 if commit.repo_id in missing_repos:
                     self.env['runbot.batch.commit'].create({
                         'commit_id': commit.id,
@@ -320,17 +324,31 @@ class Batch(models.Model):
                     missing_repos -= commit.repo_id
                     # TODO manage multiple branch in same repo
 
-        # find missing commits on base branches head
+        bundle = self.bundle_id
         if missing_repos:
-            for commit in self.bundle_id.base_id.branch_ids.mapped('head'):
-                if commit.repo_id in missing_repos:
-                    self.env['runbot.batch.commit'].create({
-                        'commit_id': commit.id,
-                        'batch_id': self.id,
-                        'match_type': 'base',
-                    })
-                    missing_repos -= commit.repo_id
+            fill_missing(bundle.branch_ids, 'head')
 
+        if missing_repos and foreign_projects:
+            fill_missing(bundle.search([('name', '=', bundle.name), ('project_id', 'in', foreign_projects.ids)]), 'head')
+
+        bundle = self.bundle_id.base_id
+        if missing_repos:
+            fill_missing(bundle.branch_ids, 'base')
+
+        if missing_repos and foreign_projects:
+            fill_missing(bundle.search([('name', '=', bundle.name), ('project_id', 'in', foreign_projects.ids)]), 'head')
+
+
+
+        # since new_commit are notified only for triggers, a dependency may be missing 
+        # -> The branch may not be in the bundle if in another project. This use case only exist for runbot repo on prod.
+        # -> we need to find the branch manually, aka search all branches with this reference name in missing repos.
+        # -> reference_name, or base reference name only? 
+        # A branch is pushed on runbot, is it interresting to search for a corresponding branch in odoo-dev. Maybe
+        # ->
+
+        if missing_repos:
+            _logger.warning('Missing repo %s', missing_repos)
         batch_commit_by_repos = {batch_commit.commit_id.repo_id.id: batch_commit for batch_commit in self.batch_commit_ids}
         version_id = self.bundle_id.version_id.id
         project_id = self.bundle_id.project_id.id

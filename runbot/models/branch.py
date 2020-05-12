@@ -149,6 +149,12 @@ class Branch(models.Model):
         return branch
         #note: bundle is created after branch because we need reference_name. Use new? Compute reference another way? or keep bundle_id not required?
 
+    def write(self, values):
+        head = self.head
+        super().write(values)
+        if head != self.head:
+            self.env['runbot.ref.log'].create({'commit_id': head.id})
+
     def _get_last_coverage_build(self):
         """ Return the last build with a coverage value > 0"""
         self.ensure_one()
@@ -166,3 +172,12 @@ class Branch(models.Model):
 
     # TODO check get_closest_branch corner cases
     # TODO branch alive field
+
+
+class RefLog(models.Model):
+    _name = 'runbot.ref.log'
+    _log_access = False
+
+    commit_id = fields.Many2one('runbot.commit', index=True)
+    branch_id = fields.Many2one('runbot.branch', index=True)
+    date = fields.Datetime(default=fields.Datetime.now)
