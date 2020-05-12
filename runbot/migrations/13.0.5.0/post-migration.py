@@ -397,7 +397,7 @@ def migrate(cr, version):
                 env['runbot.batch.commit'].create({
                     'commit_id': missing_commit,
                     'batch_id': batch.id,
-                    'match_type': 'head', # TODO fixme
+                    'match_type': 'new', # TODO fixme
                     #'has_main' = True, ?
                 })
 

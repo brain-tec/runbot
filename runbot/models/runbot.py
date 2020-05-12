@@ -8,7 +8,6 @@ from ..container import docker_ps, docker_stop
 
 _logger = logging.getLogger(__name__)
 
-
  # after this point, not realy a repo buisness
 class Runbot(models.AbstractModel):
     _name = 'runbot.runbot'

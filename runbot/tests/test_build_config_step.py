@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from unittest.mock import patch, mock_open
 from odoo.exceptions import UserError
-from odoo.addons.runbot.models.repo import RunbotException
+from odoo.addons.runbot.common import RunbotException
 from .common import RunbotCase
 
 class TestBuildConfigStep(RunbotCase):

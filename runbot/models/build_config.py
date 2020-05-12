@@ -4,12 +4,11 @@ import logging
 import re
 import shlex
 import time
-from ..common import now, grep, time2str, rfind, s2human, os
+from ..common import now, grep, time2str, rfind, s2human, os, RunbotException
 from ..container import docker_run, docker_get_gateway_ip, Command
 from odoo import models, fields, api
 from odoo.exceptions import UserError, ValidationError
 from odoo.tools.safe_eval import safe_eval, test_python_expr
-from odoo.addons.runbot.models.repo import RunbotException
 
 _logger = logging.getLogger(__name__)
 

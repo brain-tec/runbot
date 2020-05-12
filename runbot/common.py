@@ -44,6 +44,8 @@ dest_reg = re.compile(r'^\d{5}-.+-.*$')
 #    def __str__(self):
 #        return '%s:%s' % (self.repo.short_name, self.sha)
 
+class RunbotException(Exception):
+    pass
 
 def fqdn():
     return socket.getfqdn()

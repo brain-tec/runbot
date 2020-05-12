@@ -64,7 +64,6 @@ class TestRepo(RunbotCase):
                 'head' : {'label': 'dev:%s' % branch_name, 'repo': {'full_name': 'dev/server'}},
             }
 
-
         repos = self.repo_addons|self.repo_server
 
         first_commit = [(

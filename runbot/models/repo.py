@@ -17,17 +17,13 @@ from odoo.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT
 from odoo import models, fields, api, registry
 from odoo.modules.module import get_module_resource
 from odoo.tools import config
-from ..common import os
+from ..common import os, RunbotException
 from psycopg2.extensions import TransactionRollbackError
 
 _logger = logging.getLogger(__name__)
 
 
 # WHAT IF push 12.0/13.0/13.4 in odoo-dev?
-
-class RunbotException(Exception):
-    pass
-
 
 class RepoTrigger(models.Model):
     """

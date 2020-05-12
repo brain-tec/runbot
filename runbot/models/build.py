@@ -9,11 +9,9 @@ import subprocess
 import time
 import datetime
 import hashlib
-
-from ..common import dt2time, fqdn, now, grep, local_pgadmin_cursor, s2human as OldComit, dest_reg, os, list_local_dbs, pseudo_markdown
+from ..common import dt2time, fqdn, now, grep, local_pgadmin_cursor, s2human, dest_reg, os, list_local_dbs, pseudo_markdown, RunbotException
 from ..container import docker_build, docker_stop, docker_state, Command
 from ..fields import JsonDictField
-from odoo.addons.runbot.models.repo import RunbotException
 from odoo import models, fields, api, registry
 from odoo.exceptions import UserError, ValidationError
 from odoo.http import request
