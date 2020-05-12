@@ -17,6 +17,7 @@ def rev_parse(repo, branch_name):
     head_hash = 'rp_%s_%s_head' % (repo.name.split(':')[1], branch_name.split('/')[-1])
     return head_hash
 
+
 class TestBuildParams(RunbotCase):
 
     def setUp(self):
@@ -24,10 +25,19 @@ class TestBuildParams(RunbotCase):
 
     def test_params(self):
 
+        server_commit = self.Commit.create ({
+            'name': 'dfdfcfcf0000ffffffffffffffffffffffffffff',
+            'repo_id': self.repo_server.id
+        })
+
         params = self.BuildParameters.create({
             'version_id': self.version_master.id,
             'project_id': self.project.id,
             'config_id': self.default_config.id,
+            'build_commit_ids': [
+                (0, 0, {'commit_id': server_commit.id})
+            ],
+            'config_data': {'foo': 'bar'}
         })
 
         # test that when the same params does not create a new record
@@ -35,6 +45,10 @@ class TestBuildParams(RunbotCase):
             'version_id': self.version_master.id,
             'project_id': self.project.id,
             'config_id': self.default_config.id,
+            'build_commit_ids': [
+                (0, 0, {'commit_id': server_commit.id})
+            ],
+            'config_data': {'foo': 'bar'}
         })
 
         self.assertEqual(params.fingerprint, same_params.fingerprint)
@@ -44,18 +58,22 @@ class TestBuildParams(RunbotCase):
         with self.assertRaises(UserError):
             params.write({'modules': 'bar'})
 
-        # TODO
-        # test non initialized json stored _data field and data property
-        # other.config_data['test_info'] = 'foo'
-        # self.assertEqual(other.config_data, {'test_info': 'foo'})
-        # (build|other).write({'config_data': {'test_write': 'written'}})
-        # build.config_data['test_build'] = 'foo'
-        # other.config_data['test_other'] = 'bar'
-        # self.assertEqual(build.config_data, {'test_write': 'written', 'test_build': 'foo'})
-        # self.assertEqual(other.config_data, {'test_write': 'written', 'test_other': 'bar'})
-        # build.flush()
-        # build.env.cr.execute("SELECT config_data, config_data->'test_write' AS written, config_data->'test_build' AS test_build FROM runbot_build WHERE id = %s", [build.id])
-        # self.assertEqual([({'test_write': 'written', 'test_build': 'foo'}, 'written', 'foo')], self.env.cr.fetchall())
+        # Test that a copied param without changes does not create a new record
+        copied_params = params.copy()
+        self.assertEqual(copied_params.id, params.id)
+
+        # Test copy with a parameter change
+        other_commit = self.Commit.create({
+            'name': 'deadbeef0000ffffffffffffffffffffffffffff',
+            'repo_id': self.repo_server.id
+        })
+
+        copied_params = params.copy({
+            'build_commit_ids': [
+                (0, 0, {'commit_id': other_commit.id})
+            ]
+        })
+        self.assertNotEqual(copied_params.id, params.id)
 
 
 class TestBuildResult(RunbotCase):
