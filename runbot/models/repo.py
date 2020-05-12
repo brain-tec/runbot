@@ -156,7 +156,7 @@ class Repo(models.Model):
                             string="Mode", required=True, help="hook: Wait for webhook on /runbot/hook/<id> i.e. github push event")
     hook_time = fields.Float('Last hook time', compute='_compute_hook_time')
     get_ref_time = fields.Float('Last refs db update', compute='_compute_get_ref_time')
-    trigger_ids = fields.Many2many('runbot.trigger', readonly=True)
+    trigger_ids = fields.Many2many('runbot.trigger', relation='runbot_trigger_triggers', readonly=True)
 
     def _compute_get_ref_time(self):
         self.env.cr.execute("""
@@ -405,9 +405,13 @@ class Repo(models.Model):
         # keep _find_or_create_branches separated from build creation to ease
         # closest branch detection
         # todo, maybe this can be simplified now
+        ref = False
         for repo in self:
             if repo in refs:
+                ref = True
                 repo._find_new_commits(refs[repo], ref_branches[repo])
+        if ref:
+            _logger.info('</ new commit>')
 
     def _update_git_config(self):
         """ Update repo git config file """

@@ -268,7 +268,7 @@ class Runbot(models.AbstractModel):
             self._source_cleanup()
             self.env['runbot.build']._local_cleanup()
             self._docker_cleanup()
-
+        _logger.info('Starting loop')
         while time.time() - start_time < timeout:
             if runbot_do_fetch:
                 repos = self.env['runbot.repo'].search([('mode', '!=', 'disabled')])
