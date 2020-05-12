@@ -16,10 +16,8 @@ class TestCron(RunbotCase):
         Assuming a configuration of 10 minutes cron limit
         """
         mock_config_get.return_value = 600
-        period = self.Runbot._get_cron_period(min_margin=200)
-        for i in range(200):
-            self.assertLess(period, 400)
-            # TODO looks useless
+        period = self.Runbot._get_cron_period()
+        self.assertEqual(period, 300)
 
     def test_crons_returns(self):
         """ test that cron_fetch_and_schedule and _cron_fetch_and_build

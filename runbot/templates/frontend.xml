@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <data>
-      <!-- Replace default menu ( Home / Contactus and co...) with 5 first repos) -->
-      <template id="inherits_branch_in_menu" inherit_id="website.layout" name="Inherits Show top 6 repo in menu and dropdown">
+      <template id="runbot.layout" inherit_id="website.layout" name="Custom website layout">
           <xpath expr="//footer" position="replace">
           </xpath>
-          <xpath expr="//nav" position="replace">
+          <xpath expr="//nav[hasclass('navbar')]" position="replace">
             <nav class="navbar navbar-expand-md navbar-light bg-light">
                   <a t-if="project" t-attf-href="/runbot/{{slug(project)}}?search={{request.params.get('search', '')}}">
                     <b style="color:#777;"><t t-esc="project.name"/></b>
@@ -73,7 +72,7 @@
 
       <!-- Frontend repository block -->
       <template id="runbot.repo">
-          <t t-call='website.layout'>
+          <t t-call='web.frontend_layout'>
               <t t-set="head">
                   <t t-if="refresh">
                       <meta http-equiv="refresh" t-att-content="refresh"/>
@@ -192,7 +191,7 @@
 
 
       <template id="runbot.bundles">
-          <t t-call='website.layout'>
+          <t t-call='web.frontend_layout'>
               <t t-set="head">
                   <t t-if="refresh">
                       <meta http-equiv="refresh" t-att-content="refresh"/>

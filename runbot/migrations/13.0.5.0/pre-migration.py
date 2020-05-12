@@ -13,6 +13,9 @@ def migrate(cr, version):
     # Remove builds without a repo
     cr.execute("DELETE FROM runbot_build WHERE repo_id IS NULL")
 
+    cr.execute("DELETE FROM ir_ui_view WHERE id IN (SELECT res_id FROM ir_model_data WHERE name = 'inherits_branch_in_menu' AND module = 'runbot')")
+
+    # TODO delete runbot.inherits_branch_in_menu
 
     # TODO empty runbot_repo_hooktime and reftime
     return

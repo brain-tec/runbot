@@ -1075,10 +1075,13 @@ class BuildResult(models.Model):
             #            env = api.Environment(cr, user_id, _context)
             #            remotes = env['runbot.repo'].browse(remote_ids)
             #            for remote in remotes:
+            #                if not remo.token:
+            #                   _logger.warning('Cannot send status on a remote without token for %s', remote.name)
+            #                   continue
             #                _logger.debug(
             #                    "github updating %s status %s to %s in repo %s",
             #                    status['context'], build_name, status['state'], remote.name)
-            #                repo._github('/repos/:owner/:repo/statuses/%s' % build_name, status, ignore_errors=True)
+            #                remote._github('/repos/:owner/:repo/statuses/%s' % build_name, status, ignore_errors=True)
             #    except:
             #        _logger.exception('Something went wrong sending notification for %s', build_id)
             #self._cr.after('commit', send_github_status)

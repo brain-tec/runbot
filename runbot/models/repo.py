@@ -3,19 +3,16 @@ import datetime
 import dateutil
 import json
 import logging
-import random
 import re
 import requests
 import signal
 import subprocess
-import time
-import glob
 import shutil
+import time
 
 from odoo.exceptions import UserError, ValidationError
 from odoo.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT
 from odoo import models, fields, api, registry
-from odoo.modules.module import get_module_resource
 from ..common import os, RunbotException
 from psycopg2.extensions import TransactionRollbackError
 
@@ -57,7 +54,8 @@ class Remote(models.Model):
     _description = 'Remote'
     _order = 'sequence, id'
 
-    name = fields.Char('Url', required=True)
+    name = fields.Char('Url', required=True)  # TODO unique per repo
+    url = fields.Char('Url', required=True)  # TODO validate with rege
     sequence = fields.Integer('Sequence')
     repo_id = fields.Many2one('runbot.repo', required=True)
     short_name = fields.Char('Short name', compute='_compute_short_name')
@@ -88,15 +86,14 @@ class Remote(models.Model):
     def _github(self, url, payload=None, ignore_errors=False, nb_tries=2):
         """Return a http request to be sent to github"""
         for remote in self:
-            if not remote.token:
-                return
             match_object = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', remote.base)
             if match_object:
                 url = url.replace(':owner', match_object.group(2))
                 url = url.replace(':repo', match_object.group(3))
                 url = 'https://api.%s%s' % (match_object.group(1), url)
                 session = requests.Session()
-                session.auth = (remote.token, 'x-oauth-basic')
+                if remote.token:
+                    session.auth = (remote.token, 'x-oauth-basic')
                 session.headers.update({'Accept': 'application/vnd.github.she-hulk-preview+json'})
                 try_count = 0
                 while try_count < nb_tries:
@@ -115,9 +112,11 @@ class Remote(models.Model):
                             time.sleep(2)
                         else:
                             if ignore_errors:
-                                _logger.exception('Ignored github error %s %r (try %s/%s)' % (url, payload, try_count + 1, nb_tries))
+                                _logger.exception('Ignored github error %s %r (try %s/%s)' % (url, payload, try_count, nb_tries))
                             else:
                                 raise
+            else:
+                _logger.error('Invalid url %s for github_status', remote.base)
 
     def create(self, values_list):
         super().create(values_list)
@@ -223,8 +222,8 @@ class Repo(models.Model):
     def _git(self, cmd):
         """Execute a git command 'cmd'"""
         self.ensure_one()
-        _logger.debug("git command: git (dir %s) %s", self.short_name, ' '.join(cmd))
-        cmd = ['git', '--git-dir=%s' % self.path] + cmd
+        cmd = ['git', '-C', self.path] + cmd
+        _logger.info("git command: %s", ' '.join(cmd))
         return subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode()
 
     def _git_export(self, sha):
@@ -286,6 +285,7 @@ class Repo(models.Model):
         fname_fetch_head = os.path.join(self.path, 'FETCH_HEAD')
         if os.path.exists(fname_fetch_head):
             return os.path.getmtime(fname_fetch_head)
+        return 0
 
     def _get_refs(self):
         """Find new refs
@@ -299,7 +299,7 @@ class Repo(models.Model):
             self.set_ref_time(get_ref_time)
             fields = ['refname', 'objectname', 'committerdate:iso8601', 'authorname', 'authoremail', 'subject', 'committername', 'committeremail']
             fmt = "%00".join(["%(" + field + ")" for field in fields])
-            git_refs = self._git(['for-each-ref', '--format', fmt, '--sort=-committerdate'])
+            git_refs = self._git(['for-each-ref', '--format', fmt, '--sort=-committerdate', 'refs/*/heads/*', 'refs/*/pull/*'])
             git_refs = git_refs.strip()
             if not git_refs:
                 return []
@@ -333,6 +333,8 @@ class Repo(models.Model):
                 # refs/ruodoo/pull/1
                 _, remote_name, branch_type, name = ref_name.split('/')
                 remote_id = self.remote_ids.filtered(lambda r: r.remote_name == remote_name).id
+                if not remote_id:
+                    continue
                 _logger.debug('repo %s found new branch %s', self.name, name)
                 new_branch = self.env['runbot.branch'].create({'remote_id': remote_id, 'name': name, 'is_pr': branch_type == 'pull'})
                 ref_branches[ref_name] = new_branch
@@ -371,7 +373,7 @@ class Repo(models.Model):
                     })
                 branch.head = commit
 
-                bundle = branch.bundle_id
+                bundle = branch.bundle_id # TODO this is not correct, fixme
                 if bundle.no_build:
                     continue
 
@@ -379,6 +381,7 @@ class Repo(models.Model):
                 # todo move following logic to bundle ? bundle._notify_new_commit()
                 bundle_batch = bundle._get_preparing_batch()
                 bundle_batch._new_commit(commit)
+
                 # TODO add reflog
 
     def _create_batches(self):
@@ -408,35 +411,35 @@ class Repo(models.Model):
         """ Update repo git config file """
         for repo in self:
             if os.path.isdir(os.path.join(repo.path, 'refs')):
-                git_config_path = os.path.join(repo.path, '.git', 'config')
+                git_config_path = os.path.join(repo.path, 'config')
                 template_params = {'repo': repo}
                 git_config = self.env['ir.ui.view'].render_template("runbot.git_config", template_params)
-                with open(git_config_path, 'w') as config_file:
+                with open(git_config_path, 'wb') as config_file:
                     config_file.write(git_config)
                 _logger.info('Config updated for repo %s' % repo.name)
             else:
                 _logger.info('Repo not cloned, skiping config update for %s' % repo.name)
 
-    def _clone(self):
+    def _git_init(self):
         """ Clone the remote repo if needed """
         self.ensure_one()
         repo = self
         if not os.path.isdir(os.path.join(repo.path, 'refs')):
-            _logger.info("Cloning repository '%s' in '%s'" % (repo.name, repo.path))
+            _logger.info("Initiating repository '%s' in '%s'" % (repo.name, repo.path))
             git_init = subprocess.run(['git', 'init', '--bare', repo.path], stderr=subprocess.PIPE)
             if git_init.returncode:
                 _logger.warning('Git init failed with code %s and message: "%s"', git_init.returncode, git_init.stderr)
                 return
             self._update_git_config()
-            self._update_git()
+            self._update_git(True)
 
-    def _update_git(self, force):
+    def _update_git(self, force=False):
         """ Update the git repo on FS """
         self.ensure_one()
         repo = self
         if not os.path.isdir(os.path.join(repo.path)):
             os.makedirs(repo.path)
-        self._clone()
+        self._git_init()
         # TODO bare check repo in remotes
 
         # check for mode == hook
@@ -450,7 +453,7 @@ class Repo(models.Model):
                 if (time.time() < fetch_time + 60*5):
                     return
 
-        _logger.debug('Updating repo %s',repo.name)
+        _logger.info('Updating repo %s',repo.name)
         self._update_fetch_cmd()
 
     def _update_fetch_cmd(self):
@@ -460,11 +463,12 @@ class Repo(models.Model):
         try_count = 0
         failure = True
         delay = 0
-
+        if not repo.remote_ids:
+            return
         while failure and try_count < 5:
             time.sleep(delay)
             try:
-                repo._git(['fetch', '-p', 'origin', '+refs/heads/*:refs/heads/*', '+refs/pull/*/head:refs/pull/*'])
+                repo._git(['fetch', '-p', '--all',])
                 failure = False
             except subprocess.CalledProcessError as e:
                 try_count += 1

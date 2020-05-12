@@ -2,6 +2,7 @@ import glob
 import re
 import time
 import logging
+import datetime
 
 from ..common import s2human, dt2time
 from babel.dates import format_timedelta
@@ -260,7 +261,7 @@ class Batch(models.Model):
         """Return the time between job start and now"""
         for batch in self:
             if batch.create_date:
-                batch.age = int(1587461700 - dt2time(batch.create_date)) # TODO remove hack time.time()
+                batch.age = int(time.time() - dt2time(batch.create_date)) # TODO remove hack time.time()
             else:
                 batch.buildage_age = 0
 

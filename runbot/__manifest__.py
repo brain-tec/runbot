@@ -30,6 +30,7 @@
         'templates/assets.xml',
         'templates/dashboard.xml',
         'templates/nginx.xml',
+        'templates/git.xml',
         'templates/badge.xml',
         'templates/bundle.xml',
         'data/runbot.xml',

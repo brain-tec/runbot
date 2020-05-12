@@ -16,7 +16,7 @@
                         <table class="table table-condensed table-responsive table-stripped">
                             <tr><td>Version</td><td t-esc="bundle.version_id.name"/></tr>
                             <tr><td>Branches</td><td>
-                                <div t-foreach="bundle.branch_ids.sorted(key=lambda b: (b.repo_id.sequence,b.id))" t-as="branch"><small>
+                                <div t-foreach="bundle.branch_ids.sorted(key=lambda b: (b.remote_id.repo_id.sequence,b.remote_id.sequence,b.id))" t-as="branch"><small>
                                     <a t-att-href="branch.branch_url" t-esc="branch.dname"/>
                                     <a t-if="more" class="fa fa-cog" t-attf-href="/web/#id={{branch.id}}&amp;view_type=form&amp;model=runbot.branch" target="new"/>
                                 </small></div>

@@ -51,7 +51,7 @@ class Runbot(Controller):
         if project:
             # basic search to start, only bundle name. TODO add batch.commits and bundle pr numbers (all branches names)
 
-            domain = [('last_batch', '!=', False),('project_id', '=', project.id)]
+            domain = [('last_batch', '!=', False),('project_id', '=', project.id), ('no_build', '=', False)]
             if search:
                 search_domain = expression.OR([[('name', 'like', search_elem)] for search_elem in search.split("|")])
                 domain = expression.AND([domain, search_domain])
@@ -62,7 +62,7 @@ class Runbot(Controller):
                 SELECT id FROM runbot_bundle
                 WHERE {where_clause}
                 ORDER BY
-                    sticky desc,
+                    sticky asc,
                     case when sticky then version_number end collate "C" desc,
                     case when not sticky then last_batch end desc
                 LIMIT 100""".format(where_clause=where_clause), where_params)
@@ -75,7 +75,7 @@ class Runbot(Controller):
             })
 
         context.update({'message': request.env['ir.config_parameter'].sudo().get_param('runbot.runbot_message')})
-        return request.render('runbot.bundles%s' % mode, context) # todo remove mode hack
+        return request.render('runbot.bundles', context) # TODO tile view remove or use remove
 
     @route([
         '/runbot/bundle/<model("runbot.bundle"):bundle>',

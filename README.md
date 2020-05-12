@@ -46,8 +46,10 @@ python3 odoo/odoo-bin -d runbot_databse --addons-path odoo/addons,runbot -i runb
 
 Then, launch runbot
 ```
-python3 odoo/odoo-bin -d runbot_databse --addons-path odoo/addons,runbot
+python3 odoo/odoo-bin -d runbot_databse --addons-path odoo/addons,runbot --limit-time-real-cron=1800
 ```
+
+Note: --limit-time-real-cron is important to ensure that cron have enough time to build docker images and clone repos the first time. It may be reduced to a lower value later.
 
 You may want to configure a service or launch odoo in a screen depending on your preferences.
 
@@ -75,7 +77,7 @@ A database defined by *runbot.runbot_db_template* icp will be created. By defaul
 
 Other cron operation are still disabled for now.
 
-#### Access to backend
+#### Access backend
 Access odoo "backend" *127.0.0.1:8069/web*
 
 If not connected yep, connect as admin (default password: admin). You may want to check that.Check odoo documentation for other needed configuration as master password. This is mainly needed for production purpose, a local instance will work as it is.
@@ -99,7 +101,7 @@ Create a new repo for odoo
 
 Create a repo for you custom addons repo
 ![Odoo repo configuration](runbot/documentation/images/repo_runbot.png "Odoo repo configuration")
-
+ **##############TODO update images##########**
 - For your custom repo, it is adviced to configure the repo in hook mode if possible. 
 - No server files should be given since it is an addons repo.
 - No addons_path given to use repo root as default.
@@ -121,10 +123,31 @@ Acces the runbot settings and tweak the default parameters.
 
 - **Schedule builds** is need to process pending/testing. **Check** this option. To use a dedicated host to schedule builds, leave this option unchecked and use the dedicated tool in rinbot/builder.
 
+Save the parameter. The next cron execution should do a lot of setup.
+NOTE: The default limit_time_real-cron should be ideally set to at least 1800 for this operation.
+- If schedule builds is check, the first time consuming operation will be to build the docker image. You can check the current running dockers with `docker ps -a`. One of them should be up for a few minutes. If the build is not finished at the end of the cron timeout, docker build will either resolve his progress and continue the next step, but could also fail on the same step each time and stay stuck. Ensure to have limit-time-real-cron high enough, depending on your brandwidth and power this value could be 600-1800 (or more). Let's wait and make a coffee. You can also check progress by tailing runbot/static/docker/docker_build.txt
 
-### Hook mode
-### Access rights
+- The next git update will init the repositories, a config file with your remotes should be created for each repo. You can check the content in /runbot/static/repo/(runbot|odoo)/config. The repo will be fetched, this operation may take some time too.
+
+Those two operation will be faster on next executions.
+
+Finally, the first new branches/batches should be created. You can list them in Bundle > Bundles.
+
+#### Bundles configuration
+
+Mark 13.0 and master as bases
+no_build to hide/disable a bundle
+
+#### Triggers
+At this point, runbot will discover new branches, new commits, create bundle, but no build will be created.
+
+When a new commit is discovered, the branch is update with a new commit. Then this commit is added in a batch, a container for new builds when they arrive, but only if a trigger corresponding to this repo exists. After one minute without new commit in the batch, the different triggers will create one build each.
+In this example, we want to create a new build when a new commit is pushed on runbot, and this builds needs a commit in odoo as a dependency.
+
+![Odoo repo configuration](runbot/documentation/images/trigger.png "Odoo repo configuration")
+
 ### Modules filters
+
 
 
 

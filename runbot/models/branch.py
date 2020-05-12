@@ -122,8 +122,8 @@ class Branch(models.Model):
     def _get_pull_info(self):
         self.ensure_one()
         remote = self.remote_id
-        if remote.token and self.is_pr:
-            return remote._github('/repos/:owner/:repo/pulls/%s' % self.name, ignore_errors=True) or {}
+        if self.is_pr:
+            return remote._github('/repos/:owner/:repo/pulls/%s' % self.name, ignore_errors=False) or {} # TODO catch and send a managable exception
         return {}
 
     def _is_on_remote(self): # TODO move that to repo branch discovery

@@ -1,5 +1,10 @@
 import time
 import logging
+import glob
+import random
+import re
+import subprocess
+from datetime import timedelta
 
 from ..common import fqdn, dt2time, dest_reg, os
 from ..container import docker_ps, docker_stop
@@ -7,6 +12,7 @@ from ..container import docker_ps, docker_stop
 from odoo import models, fields
 from odoo.osv import expression
 from odoo.tools import config
+from odoo.modules.module import get_module_resource
 
 _logger = logging.getLogger(__name__)
 
@@ -229,14 +235,14 @@ class Runbot(models.AbstractModel):
                         else:
                             _logger.debug('failed to start nginx - failed to kill orphan worker - oh well')
 
-    def _get_cron_period(self, min_margin=120):
+    def _get_cron_period(self):
         """ Compute a randomized cron period with a 2 min margin below
         real cron timeout from config.
         """
         cron_limit = config.get('limit_time_real_cron')
         req_limit = config.get('limit_time_real')
         cron_timeout = cron_limit if cron_limit > -1 else req_limit
-        return cron_timeout - min_margin
+        return cron_timeout / 2
 
     def _cron(self):
         """
@@ -249,6 +255,8 @@ class Runbot(models.AbstractModel):
         update_frequency = int(get_param('runbot.runbot_update_frequency', default=10))
         runbot_do_fetch = get_param('runbot.runbot_do_fetch')
         runbot_do_schedule = get_param('runbot.runbot_do_schedule')
+        if not runbot_do_fetch and not runbot_do_schedule:
+            timeout = min(timeout, 10)
         host = self.env['runbot.host']._get_current()
         host.set_psql_conn_count()
         host.last_start_loop = fields.Datetime.now()
@@ -272,8 +280,7 @@ class Runbot(models.AbstractModel):
             if runbot_do_schedule:
                 while time.time() - start_time < update_frequency:
                     time.sleep(self._scheduler_loop_turn(host, update_frequency))
-            if runbot_do_fetch != get_param('runbot.runbot_do_fetch') or runbot_do_schedule != get_param('runbot.runbot_do_schedule'):
-                break
+            self._commit()
 
         host.last_end_loop = fields.Datetime.now()
 
@@ -338,7 +345,7 @@ class Runbot(models.AbstractModel):
                     shutil.rmtree(source_dir)
                 _logger.info('%s/%s source folder where deleted (%s kept)' % (len(to_delete), len(to_delete+to_keep), len(to_keep)))
         except:
-            _logger.error('An exception occured while cleaning sources')
+            _logger.exception('An exception occured while cleaning sources')
             pass
 
     def _docker_cleanup(self):

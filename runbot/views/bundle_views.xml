@@ -43,9 +43,14 @@
     <record id="view_runbot_bundle_tree" model="ir.ui.view">
         <field name="model">runbot.bundle</field>
         <field name="arch" type="xml">
-            <tree string="Build params">
+            <tree string="Bundle">
+                <field name="project_id"/>
                 <field name="name"/>
+                <field name="is_base"/>
+                <field name="sticky"/>
+                <field name="no_build"/>
                 <field name="branch_ids"/>
+                <field name="version_id"/>
             </tree>
         </field>
     </record>
@@ -53,7 +58,7 @@
     <record id="view_runbot_batch" model="ir.ui.view">
         <field name="model">runbot.batch</field>
         <field name="arch" type="xml">
-            <form string="Bundle batch">
+            <form string="Batch">
                 <group>
                     <field name="last_update"/>
                     <field name="bundle_id"/>
@@ -79,7 +84,7 @@
     <record id="view_runbot_batch_tree" model="ir.ui.view">
         <field name="model">runbot.batch</field>
         <field name="arch" type="xml">
-            <tree string="Build params">
+            <tree string="Batchs">
                 <field name="bundle_id"/>
                 <field name="state"/>
             </tree>
