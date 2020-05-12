@@ -12,7 +12,6 @@ class TestBranch(RunbotCase):
             'is_pr': False,
         })
 
-        self.assertEqual(branch.branch_name, 'master')
         self.assertEqual(branch.branch_url, 'https://example.com/base/server/tree/master')
         #self.assertEqual(branch.config_id, self.env.ref('runbot.runbot_build_config_default'))
 

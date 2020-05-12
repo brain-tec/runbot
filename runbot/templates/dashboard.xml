@@ -56,7 +56,7 @@
           <table>
             <tr t-foreach="last_monitored" t-as="build">
               <td>
-                <t t-esc="build.repo_id.short_name"/>/<t t-esc="build.branch_id.branch_name"/>
+                <t t-esc="build.repo_id.short_name"/>/<t t-esc="build.branch_id.name"/>
               </td>
               <t t-if="build.local_result == 'ko'"><t t-set="klass">danger</t></t>
               <t t-if="build.local_result == 'warn'"><t t-set="klass">warning</t></t>

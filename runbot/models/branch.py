@@ -20,7 +20,6 @@ class Branch(models.Model):
     bundle_id = fields.Many2one('runbot.bundle', 'Bundle', readonly=True, ondelete='cascade')
     remote_id = fields.Many2one('runbot.remote', 'Remote', required=True, ondelete='cascade')
     name = fields.Char('Ref Name', required=True)
-    branch_name = fields.Char(compute='_get_branch_infos', string='Branch', readonly=1, store=True)
     reference_name = fields.Char(compute='_compute_reference_name', store=True)
     branch_url = fields.Char(compute='_get_branch_url', string='Branch url', readonly=1)
     pull_head_name = fields.Char(compute='_get_branch_infos', string='PR HEAD name', readonly=1, store=True)
@@ -44,10 +43,10 @@ class Branch(models.Model):
     dname = fields.Char('Display name', compute='_compute_dname')
     is_pr = fields.Boolean('IS a pr', required=True)
 
-    @api.depends('branch_name', 'remote_id.short_name')
+    @api.depends('name', 'remote_id.short_name')
     def _compute_dname(self):
         for branch in self:
-            branch.dname = '%s:%s' % (branch.remote_id.short_name, branch.branch_name)
+            branch.dname = '%s:%s' % (branch.remote_id.short_name, branch.name)
 
     # todo ass shortcut to create pr in interface as inherited view Create Fast PR
     @api.depends('name', 'target_branch_name', 'pull_head_name', 'pull_head_remote_id')
@@ -85,7 +84,7 @@ class Branch(models.Model):
 
     def _compute_pull_branch_name(self):
         for branch in self:
-            branch.pull_branch_name = branch.pull_head_name.split(':')[-1] if branch.pull_head_name else branch.branch_name
+            branch.pull_branch_name = branch.pull_head_name.split(':')[-1] if branch.pull_head_name else branch.name
 
     @api.depends('sticky')
     def _compute_make_stats(self):
@@ -94,10 +93,9 @@ class Branch(models.Model):
 
     @api.depends('name')
     def _get_branch_infos(self, pull_info=None):
-        """compute branch_name, branch_url, pull_head_name and target_branch_name based on name"""
+        """compute branch_url, pull_head_name and target_branch_name based on name"""
         for branch in self:
             if branch.name:
-                branch.branch_name = branch.name.split('/')[-1]
                 pi = pull_info or branch._get_pull_info()
                 if pi:
                     branch.target_branch_name = pi['base']['ref']
@@ -105,22 +103,19 @@ class Branch(models.Model):
                     pull_head_repo_name = pi['head']['repo']['full_name']
                     branch.pull_head_remote_id = self.env['runbot.remote'].search([('name', 'like', '%%:%s' % pull_head_repo_name)], limit=1)
 
-            else:
-                branch.branch_name = ''
-
     def recompute_infos(self):
         """ public method to recompute infos on demand """
         self._get_branch_infos()
 
-    @api.depends('branch_name')
+    @api.depends('name')
     def _get_branch_url(self):
-        """compute the branch url based on branch_name"""
+        """compute the branch url based on name"""
         for branch in self:
             if branch.name:
                 if branch.is_pr:
-                    branch.branch_url = "https://%s/pull/%s" % (branch.remote_id.base, branch.branch_name)
+                    branch.branch_url = "https://%s/pull/%s" % (branch.remote_id.base, branch.name)
                 else:
-                    branch.branch_url = "https://%s/tree/%s" % (branch.remote_id.base, branch.branch_name)
+                    branch.branch_url = "https://%s/tree/%s" % (branch.remote_id.base, branch.name)
             else:
                 branch.branch_url = ''
 

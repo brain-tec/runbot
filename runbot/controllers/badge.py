@@ -19,7 +19,7 @@ class RunbotBadge(Controller):
         # either change to only use name, and findcorresponding bundle last_instance sum of results.
         # or give a trigger_id and find the result for this trigger (maybe the best solution)
         domain = [('repo_id', '=', repo_id),
-                  ('branch_id.branch_name', '=', branch),
+                  ('branch_id.name', '=', branch),
                   ('branch_id.sticky', '=', True),
                   ('hidden', '=', False),
                   ('parent_id', '=', False),

@@ -109,7 +109,7 @@
                           <tr t-foreach="branches" t-as="br">
                               <td style="width:12%">
                                   <small class="branch_time" ><t t-esc="br['builds'] and br['builds'][0].get_formated_build_time()"/></small>
-                                  <div class="branch_name"><i t-if="br['branch'].sticky" class="fa fa-star" style="color: #f0ad4e" /><a t-attf-href="/runbot/branch/#{br['branch'].id}"><b t-esc="br['branch'].branch_name"/></a></div>
+                                  <div class="branch_name"><i t-if="br['branch'].sticky" class="fa fa-star" style="color: #f0ad4e" /><a t-attf-href="/runbot/branch/#{br['branch'].id}"><b t-esc="br['branch'].name"/></a></div>
                                       <div class="btn-group btn-group-xs">
                                       <a t-attf-href="{{br['branch'].branch_url}}" class="btn btn-default btn-xs"><t t-esc="'Branch ' if not br['branch'].pull_head_name else 'Pull '"/><i class="fa fa-github"/></a>
                                       <a t-attf-href="/runbot/quick_connect/#{br['branch'].id}" class="btn btn-default btn-xs" aria-label="Quick Connect"><i class="fa fa-fast-forward" title="Quick Connect"/></a>
