@@ -585,7 +585,7 @@ class BuildResult(models.Model):
                 build._log('_schedule', 'No job in config, doing nothing')
                 continue
             try:
-                build._log('_schedule', 'Init build environment with config %s ' % build.pramas_id.config_id.name)
+                build._log('_schedule', 'Init build environment with config %s ' % build.params_id.config_id.name)
                 # notify pending build - avoid confusing users by saying nothing
                 build._github_status()
                 os.makedirs(build._path('logs'), exist_ok=True)

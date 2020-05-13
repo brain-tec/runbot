@@ -307,11 +307,13 @@ class Repo(models.Model):
                 if not git_refs:
                     return []
                 refs = [tuple(field for field in line.split('\x00')) for line in git_refs.split('\n')]
-                return [r for r in refs if dateutil.parser.parse(r[2][:19]) + datetime.timedelta(days=max_age) > datetime.datetime.now()]
+                print(len(refs))
+                refs = [r for r in refs if dateutil.parser.parse(r[2][:19]) + datetime.timedelta(days=max_age) > datetime.datetime.now()]
+                print(len(refs))
+                return refs
             except Exception:
                 _logger.exception('Fail to get refs for repo %s', self.name)
                 self.env['runbot.runbot'].warning('Fail to get refs for repo %s', self.name)
-
         return []
 
     def _find_or_create_branches(self, refs):
@@ -390,7 +392,7 @@ class Repo(models.Model):
                     bundle.last_batch._skip()
                     preparing = self.env['runbot.batch'].create({
                         'last_update': fields.Datetime.now(),
-                        'bundle_id': self.id,
+                        'bundle_id': bundle.id,
                         'state': 'preparing',
                     })
                     bundle.last_batch = preparing
@@ -399,15 +401,14 @@ class Repo(models.Model):
 
     def _update_batches(self, force=False):
         """ Find new commits in physical repos"""
-        refs = {}
-        ref_branches = {}
+
         self.ensure_one()
 
         if self.remote_ids and self._update(poll_delay=30 if force else 60*5):
             max_age = int(self.env['ir.config_parameter'].get_param('runbot.runbot_max_age', default=30))
             ref = self._get_refs(max_age)
             ref_branches = self._find_or_create_branches(ref)
-            self._find_new_commits(refs, ref_branches)
+            self._find_new_commits(ref, ref_branches)
             _logger.info('</ new commit>')
             return True
 

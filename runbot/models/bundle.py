@@ -292,6 +292,7 @@ class Batch(models.Model):
     def _prepare(self):
         #  For all commit on real branches:
         self.state = 'ready'
+        _logger.info('Preparing batch %s', self.id)
         project = self.bundle_id.project_id
         triggers = self.env['runbot.trigger'].search([('project_id', '=', project.id)])
         pushed_repo = self.batch_commit_ids.mapped('commit_id.repo_id')
