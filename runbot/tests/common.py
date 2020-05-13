@@ -119,8 +119,6 @@ class RunbotCase(TransactionCase):
 
         self.start_patcher('set_psql_conn_count', 'odoo.addons.runbot.models.host.RunbotHost.set_psql_conn_count', None)
 
-        set_psql_conn_count
-
         self.start_patcher('reload_nginx', 'odoo.addons.runbot.models.runbot.Runbot._reload_nginx', None)
 
     def start_patcher(self, patcher_name, patcher_path, return_value=DEFAULT, side_effect=DEFAULT, new=DEFAULT):
