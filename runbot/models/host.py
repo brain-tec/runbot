@@ -5,7 +5,7 @@ from ..container import docker_build
 _logger = logging.getLogger(__name__)
 
 
-class RunboHost(models.Model):
+class RunbotHost(models.Model):
     _name = "runbot.host"
     _description = "Host"
     _order = 'id'
