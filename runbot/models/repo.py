@@ -395,7 +395,7 @@ class Repo(models.Model):
                     })
                     bundle.last_batch = preparing
 
-                bundle.last_batch._new_commit(commit)
+                bundle.last_batch._new_commit(branch)
 
     def _update_batches(self, force=False):
         """ Find new commits in physical repos"""

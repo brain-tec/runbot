@@ -305,6 +305,7 @@ class BuildResult(models.Model):
         builds = super().create(values_list)
         for build in builds:
             build._github_status()
+        return builds
 
     def copy(self, default=None):
         return super(BuildResult, self.with_context(force_rebuild=True)).copy(default)
@@ -1057,9 +1058,10 @@ class BuildResult(models.Model):
                 target_url = "http://%s/runbot/build/%s" % (runbot_domain, build.id)
 
                 trigger = self.params_id.trigger_id
-                if self.trigger.ci_context:
-                    for commit in self.params_id.build_commit_ids.mapped('commit_id'):
-                        if commit.repo_id in self.trigger.repo_ids:
+                if trigger.ci_context:
+                    for build_commit in self.params_id.build_commit_ids:
+                        commit = build_commit.commit_id
+                        if build_commit.match_type != 'default' and commit.repo_id in trigger.repo_ids:
                             commit._github_status(trigger.ci_context, 'state', target_url)
 
 

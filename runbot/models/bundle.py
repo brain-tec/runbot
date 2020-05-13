@@ -265,8 +265,9 @@ class Batch(models.Model):
         runbot_domain = self.env['runbot.runbot']._domain()
         return "http://%s/runbot/batch/%s" % (runbot_domain, self.id)
 
-    def _new_commit(self, commit):
+    def _new_commit(self, branch):
         # if not the same hash for repo:
+        commit = branch.head
         self.last_update = fields.Datetime.now()
         for batch_commit in self.batch_commit_ids:
             # case 1: a commit already exists for the repo (pr+branch, or fast push)
@@ -278,6 +279,7 @@ class Batch(models.Model):
                 'commit_id': commit.id,
                 'batch_id': self.id,
                 'match_type': 'new',
+                'branch_id': branch.id
             })
 
     def _skip(self):
@@ -387,6 +389,7 @@ class BatchCommit(models.Model):
     commit_id = fields.Many2one('runbot.commit', index=True)
     batch_id = fields.Many2one('runbot.batch', index=True)
     match_type = fields.Selection([('new', 'New head of branch'), ('head', 'Head of branch'), ('base', 'Found on base branch')])  # HEAD, DEFAULT
+    branch_id = fields.Many2one('runbot.branch', string='Found in branch')
 
 
 class BatchSlot(models.Model):

@@ -2,6 +2,9 @@
 from ..common import os
 import glob
 from odoo import models, fields, api
+import logging
+
+_logger = logging.getLogger(__name__)
 
 class Commit(models.Model):
     _name = "runbot.commit"
@@ -51,7 +54,7 @@ class Commit(models.Model):
         for commit in self:
             commit.dname = '%s:%s' % (commit.repo_id.name, commit.name[:8])
 
-    def _github_status(self, context, state, url, description=None):
+    def _github_status(self, context, state, target_url, description=None):
         self.ensure_one()
         Status = self.env['runbot.commit.status']
         last_status = Status.search([('commit_id', '=', self.id), ('context', '=', context)], order='id desc', limit=1)
@@ -70,13 +73,15 @@ class Commit(models.Model):
 
 class CommitStatus(models.Model):
     _name = 'runbot.commit.status'
+    _description = 'Commit status'
+
     commit_id = fields.Many2one('runbot.commit', string='Commit', required=True, index=True)
     context = fields.Char('Context', required=True)
     state = fields.Char('State', required=True)
     target_url = fields.Char('Url')
     description = fields.Char('Description')
 
-    def send():
+    def send(self):
         user_id = self.env.user.id
         _dbname = self.env.cr.dbname
         _context = self.env.context
