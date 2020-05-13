@@ -239,7 +239,7 @@ class Repo(models.Model):
             return export_path
 
         if not self._hash_exists(sha):
-            self._update(force=True)
+            self._update(force=True, no_rune=True)
             if not self._hash_exists(sha):
                 try:
                     result = self._git(['fetch', 'all', sha])
@@ -289,7 +289,7 @@ class Repo(models.Model):
             return os.path.getmtime(fname_fetch_head)
         return 0
 
-    def _get_refs(self):
+    def _get_refs(self, max_age=30):
         """Find new refs
         :return: list of tuples with following refs informations:
         name, sha, date, author, author_email, subject, committer, committer_email
@@ -298,16 +298,21 @@ class Repo(models.Model):
 
         get_ref_time = round(self._get_fetch_head_time(), 4)
         if not self.get_ref_time or get_ref_time > self.get_ref_time:
-            self.set_ref_time(get_ref_time)
-            fields = ['refname', 'objectname', 'committerdate:iso8601', 'authorname', 'authoremail', 'subject', 'committername', 'committeremail']
-            fmt = "%00".join(["%(" + field + ")" for field in fields])
-            git_refs = self._git(['for-each-ref', '--format', fmt, '--sort=-committerdate', 'refs/*/heads/*', 'refs/*/pull/*'])
-            git_refs = git_refs.strip()
-            if not git_refs:
-                return []
-            return [tuple(field for field in line.split('\x00')) for line in git_refs.split('\n')]
-        else:
-            return []
+            try:
+                self.set_ref_time(get_ref_time)
+                fields = ['refname', 'objectname', 'committerdate:iso8601', 'authorname', 'authoremail', 'subject', 'committername', 'committeremail']
+                fmt = "%00".join(["%(" + field + ")" for field in fields])
+                git_refs = self._git(['for-each-ref', '--format', fmt, '--sort=-committerdate', 'refs/*/heads/*', 'refs/*/pull/*'])
+                git_refs = git_refs.strip()
+                if not git_refs:
+                    return []
+                refs = [tuple(field for field in line.split('\x00')) for line in git_refs.split('\n')]
+                return [r for r in refs if dateutil.parser.parse(r[2][:19]) + datetime.timedelta(days=max_age) > datetime.datetime.now()]
+            except Exception:
+                _logger.exception('Fail to get refs for repo %s', self.name)
+                self.env['runbot.runbot'].warning('Fail to get refs for repo %s', self.name)
+
+        return []
 
     def _find_or_create_branches(self, refs):
         """Parse refs and create branches that does not exists yet
@@ -318,6 +323,7 @@ class Repo(models.Model):
         """
 
         # FIXME WIP
+        _logger.info('Cheking branches')
         names = [r[0].split('/')[-1] for r in refs]
         branches = self.env['runbot.branch'].search([('name', 'in', names), ('remote_id', 'in', self.remote_ids.ids)])
         ref_branches = {
@@ -336,9 +342,10 @@ class Repo(models.Model):
                 _, remote_name, branch_type, name = ref_name.split('/')
                 remote_id = self.remote_ids.filtered(lambda r: r.remote_name == remote_name).id
                 if not remote_id:
+                    _logger.warning('Remote %s not found', remote_name)
                     continue
-                _logger.debug('repo %s found new branch %s', self.name, name)
                 new_branch = self.env['runbot.branch'].create({'remote_id': remote_id, 'name': name, 'is_pr': branch_type == 'pull'})
+                _logger.info('new branch %s (%s) found in %s', name, new_branch.id, self.name)
                 ref_branches[ref_name] = new_branch
         return ref_branches
 
@@ -392,28 +399,14 @@ class Repo(models.Model):
         """ Find new commits in physical repos"""
         refs = {}
         ref_branches = {}
-        for repo in self:
-            try:
-                ref = repo._get_refs()
-                max_age = int(self.env['ir.config_parameter'].get_param('runbot.runbot_max_age', default=30))
-                good_refs = [r for r in ref if dateutil.parser.parse(r[2][:19]) + datetime.timedelta(days=max_age) > datetime.datetime.now()]
-                if good_refs:
-                    refs[repo] = good_refs
-            except Exception:
-                _logger.exception('Fail to get refs for repo %s', repo.name)
-            if repo in refs:
-                ref_branches[repo] = repo._find_or_create_branches(refs[repo])
-
-        # keep _find_or_create_branches separated from build creation to ease
-        # closest branch detection
-        # todo, maybe this can be simplified now
-        ref = False
-        for repo in self:
-            if repo in refs:
-                ref = True
-                repo._find_new_commits(refs[repo], ref_branches[repo])
-        if ref:
+        self.ensure_one()
+        if self.remote_ids and self._update():
+            max_age = int(self.env['ir.config_parameter'].get_param('runbot.runbot_max_age', default=30))
+            ref = self._get_refs(max_age)
+            ref_branches = self._find_or_create_branches(ref)
+            self._find_new_commits(refs, ref_branches)
             _logger.info('</ new commit>')
+            return True
 
     def _update_git_config(self):
         """ Update repo git config file """
@@ -446,7 +439,7 @@ class Repo(models.Model):
         self.ensure_one()
         repo = self
         if not repo.remote_ids:
-            return
+            return False
         if not os.path.isdir(os.path.join(repo.path)):
             os.makedirs(repo.path)
         self._git_init()
@@ -458,43 +451,42 @@ class Repo(models.Model):
             fetch_time = os.path.getmtime(fname_fetch_head)
             if repo.mode == 'hook':
                 if not repo.hook_time or repo.hook_time < fetch_time:
-                    return
+                    return False
             if repo.mode == 'poll':
                 if (time.time() < fetch_time + 60*5):
-                    return
+                    return False
 
         _logger.info('Updating repo %s', repo.name)
-        self._update_fetch_cmd()
+        return self._update_fetch_cmd()
 
     def _update_fetch_cmd(self):
         # Extracted from update_git to be easily overriden in external module
         self.ensure_one()
-        repo = self
         try_count = 0
-        failure = True
+        success = False
         delay = 0
-        while failure and try_count < 5:
+        while not success and try_count < 5:
             time.sleep(delay)
             try:
-                repo._git(['fetch', '-p', '--all',])
-                failure = False
+                self._git(['fetch', '-p', '--all',])
+                success = True
             except subprocess.CalledProcessError as e:
                 try_count += 1
                 delay = delay * 1.5 if delay else 0.5
                 if try_count > 4:
-                    message = 'Failed to fetch repo %s: %s' % (repo.name, e.output.decode())
+                    message = 'Failed to fetch repo %s: %s' % (self.name, e.output.decode())
                     _logger.exception(message)
                     host = self.env['runbot.host']._get_current()
                     host.disable()
+        return success
 
-    def _update(self, force=True):
+    def _update(self, force=False):
         """ Update the physical git reposotories on FS"""
-        for repo in reversed(self):
+        for repo in self:
             try:
-                repo._update_git(force) # TODO xdo, check gc log and log warning
+                return repo._update_git(force)  # TODO xdo, check gc log and log warning
             except Exception:
                 _logger.exception('Fail to update repo %s', repo.name)
-
 
 
 class RefTime(models.Model):

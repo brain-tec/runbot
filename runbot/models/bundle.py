@@ -315,6 +315,7 @@ class Batch(models.Model):
         # find missing commits on bundle branches head
         def fill_missing(branch_ids, match_type):
             for commit in branch_ids.mapped('head'):
+                nonlocal missing_repos
                 if commit.repo_id in missing_repos:
                     self.env['runbot.batch.commit'].create({
                         'commit_id': commit.id,

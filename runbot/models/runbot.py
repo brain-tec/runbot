@@ -272,19 +272,19 @@ class Runbot(models.AbstractModel):
         while time.time() - start_time < timeout:
             if runbot_do_fetch:
                 repos = self.env['runbot.repo'].search([('mode', '!=', 'disabled')])
-                repos = repos.filtered(lambda rep: rep.remote_ids)
-                repos._update(force=False)
-                repos._create_batches()
-                self._commit()
+                for repo in repos:
+                    repo._create_batches()
+                    self._commit()
                 self.env['runbot.batch']._process()
                 self._commit()
             if runbot_do_schedule:
-                while time.time() - start_time < update_frequency:
-                    time.sleep(self._scheduler_loop_turn(host, update_frequency))
+                sleep_time = self._scheduler_loop_turn(host, update_frequency)
+                time.sleep(sleep_time)
+            else:
+                time.sleep(timeout)
             self._commit()
 
         host.last_end_loop = fields.Datetime.now()
-
 
     def _scheduler_loop_turn(self, host, default_sleep=1):
         try:
@@ -361,3 +361,6 @@ class Runbot(models.AbstractModel):
         ignored = {dc for dc in docker_ps_result if not dest_reg.match(dc)}
         if ignored:
             _logger.debug('docker (%s) not deleted because not dest format', " ".join(list(ignored)))
+
+    def warning(self):
+        pass  # TODO

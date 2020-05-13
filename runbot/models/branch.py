@@ -176,6 +176,7 @@ class Branch(models.Model):
 
 class RefLog(models.Model):
     _name = 'runbot.ref.log'
+    _description = 'Ref log'
     _log_access = False
 
     commit_id = fields.Many2one('runbot.commit', index=True)
