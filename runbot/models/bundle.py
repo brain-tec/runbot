@@ -223,18 +223,6 @@ class Bundle(models.Model):
             bundle = env.ref('runbot.bundle_dummy')
         return bundle
 
-    def _get_preparing_batch(self):
-        # find last bundle batch or create one
-        if self.last_batch.state != 'preparing':
-            self.last_batch._skip()
-            preparing = self.env['runbot.batch'].create({
-                'last_update': fields.Datetime.now(),
-                'bundle_id': self.id,
-                'state': 'preparing',
-            })
-            self.last_batch = preparing
-        return self.last_batch
-
     def _target_changed(self):
         self.add_warning()
 
@@ -290,6 +278,9 @@ class Batch(models.Model):
     def _skip(self):
         if not self or self.bundle_id.is_base:
             return
+        for slot in self.slot_ids:
+            if slot.build_id.global_state == 'pending':
+                slot.build_id._skip('Newer build found')
         # TODO
         # foreach pending build, if build is not in another batch, skip.
 

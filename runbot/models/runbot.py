@@ -288,6 +288,7 @@ class Runbot(models.AbstractModel):
 
     def _scheduler_loop_turn(self, host, default_sleep=1):
         try:
+            print('Scheduling')
             self._scheduler(host)
             host.last_success = fields.Datetime.now()
             self._commit()

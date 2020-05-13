@@ -392,8 +392,16 @@ class Repo(models.Model):
                 if bundle.no_build:
                     continue
 
-                bundle_batch = bundle._get_preparing_batch()
-                bundle_batch._new_commit(commit)
+                if bundle.last_batch.state != 'preparing':
+                    bundle.last_batch._skip()
+                    preparing = self.env['runbot.batch'].create({
+                        'last_update': fields.Datetime.now(),
+                        'bundle_id': self.id,
+                        'state': 'preparing',
+                    })
+                    bundle.last_batch = preparing
+
+                bundle.last_batch._new_commit(commit)
 
     def _create_batches(self):
         """ Find new commits in physical repos"""
