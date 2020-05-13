@@ -33,7 +33,6 @@ def migrate(cr, version):
 
     visited = set()
     owner_to_remote = {}
-    remote_to_repo = {}
     repos_infos = {}
     triggers = {}
     triggers_by_project = defaultdict(list)
@@ -66,16 +65,21 @@ def migrate(cr, version):
         else:
             repo = env['runbot.repo'].browse(id)
 
+        cr.execute('ALTER SEQUENCE runbot_remote_id_seq RESTART WITH %s', (id, ))
         remote = env['runbot.remote'].create({
-            'id': id, # keep same id as repo for hooks and stuff
             'name': name,
-            'repo_id': repo.id,
-            'sequence': repo.id,
+            'repo_id': repo.id if duplicate_id not in visited else duplicate_id,
+            'sequence': repo.sequence,
             'fetch_pull': mode != 'disabled',
             'fetch_heads': mode != 'disabled',
             'token': token,
         })
-        remote_to_repo[remote.id] = repo.id
+        assert remote.id == id
+
+        # Move repo_id to remote_id
+        # Implies to ensure that remote id's will be the same as the old repo
+        # repo_id is set to null to avoid the cascading delete when the repo will be removed
+        cr.execute('UPDATE runbot_branch SET remote_id=repo_id, repo_id=NULL WHERE repo_id = %s', (id,))
 
         owner_to_remote[(owner, repo.id)] = remote.id
 
@@ -88,13 +92,14 @@ def migrate(cr, version):
             'addons_paths': addons_paths,
         }
 
-        if duplicate_id in remote_to_repo:
+        if duplicate_id in visited:
+            # TODO redirect duplicate -> repo ?
             cr.execute('DELETE FROM runbot_repo WHERE id = %s', (id, ))
             if repos_infos[duplicate_id] != repo_infos:
                 _logger.warning('deleting duplicate with different values:\nexisting->%s\ndeleted->%s', repos_infos[duplicate_id], repo_infos)
         else:
             visited.add(id)
-            repo_infos[id] = repo_infos
+            repos_infos[id] = repo_infos
             repo.name = repo_name
             repo.main_remote = remote
             # if not, we need to give information on how to group repos: odoo+enterprise+upgarde+design-theme/se/runbot
@@ -120,6 +125,11 @@ def migrate(cr, version):
             triggers[id] = trigger
             triggers_by_project[project.id].append(trigger)
 
+    #######################
+    # Branches
+    #######################
+    cr.execute("""DELETE FROM runbot_branch WHERE name SIMILAR TO 'refs/heads/\d+';""")  # Remove old bad branches
+    cr.execute('UPDATE runbot_branch SET name=branch_name')
 
     # no build, config, ...
     dummy_bundle = env.ref('runbot.bundle_dummy')
@@ -139,9 +149,9 @@ def migrate(cr, version):
     progress = _bar(len(branches))
     for i, branch in enumerate(branches):
         progress.update(i)
-        if branch.sticky and branch.branch_name not in versions:
-            versions[branch.branch_name] = env['runbot.version'].create({
-                'name': branch.branch_name,
+        if branch.sticky and branch.name not in versions:
+            versions[branch.name] = env['runbot.version'].create({
+                'name': branch.name,
             })
         repo = branch.remote_id.repo_id
         if branch.target_branch_name and branch.pull_head_name:
@@ -154,7 +164,7 @@ def migrate(cr, version):
         project_id = repo.project_id.id
         name = branch.reference_name
 
-        key = (name, project_id.id)
+        key = (name, project_id)
         if key not in bundles:
             bundle = env['runbot.bundle'].create({
                 'name': name,
@@ -163,7 +173,7 @@ def migrate(cr, version):
                 'is_base': branch.sticky,
                 'version_id': next((version.id for k, version in versions.items() if (
                     k == branch.target_branch_name or \
-                    branch.branch_name.startswith(k)
+                    branch.name.startswith(k)
                 )), next(version.id for k, version in versions.items() if k=='master'))
             })
             bundles[key] = bundle
