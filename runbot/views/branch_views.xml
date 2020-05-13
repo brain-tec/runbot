@@ -19,6 +19,7 @@
                 <field name="sticky"/>
                 <field name="priority"/>
                 <field name="state"/>
+                <field name="head"/>
               </group>
             </sheet>
           </form>

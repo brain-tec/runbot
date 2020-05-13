@@ -356,17 +356,11 @@ class Repo(models.Model):
                              described in _find_or_create_branches
         """
         self.ensure_one()
-        max_age = int(self.env['ir.config_parameter'].get_param('runbot.runbot_max_age', default=30))
-
+        _logger.info('Cheking commits %s', len(refs))
         has_trigger = bool(self.trigger_ids)
 
         for ref_name, sha, date, author, author_email, subject, committer, committer_email in refs:
             branch = ref_branches[ref_name]
-
-            # skip the build for old branches (Could be checked before creating the branch in DB ?)
-            # if dateutil.parser.parse(date[:19]) + datetime.timedelta(days=max_age) < datetime.datetime.now():
-            #     continue
-            # create build (and mark previous builds as skipped) if not found
             if branch.head_name != sha: # new push on branch
                 _logger.info('repo %s branch %s new commit found: %s', self.name, branch.name, sha)
 
