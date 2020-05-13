@@ -13,7 +13,6 @@ class TestBranch(RunbotCase):
         })
 
         self.assertEqual(branch.branch_url, 'https://example.com/base/server/tree/master')
-        #self.assertEqual(branch.config_id, self.env.ref('runbot.runbot_build_config_default'))
 
     def test_pull_request(self):
         mock_github = self.patchers['github_patcher']

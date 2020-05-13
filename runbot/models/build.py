@@ -300,6 +300,12 @@ class BuildResult(models.Model):
         })
         return [values]
 
+
+    def create(self, values_list):
+        builds = super().create(values_list)
+        for build in builds:
+            build._github_status()
+
     def copy(self, default=None):
         return super(BuildResult, self.with_context(force_rebuild=True)).copy(default)
 
@@ -566,8 +572,6 @@ class BuildResult(models.Model):
                 continue
             try:
                 build._log('_schedule', 'Init build environment with config %s ' % build.params_id.config_id.name)
-                # notify pending build - avoid confusing users by saying nothing
-                build._github_status()
                 os.makedirs(build._path('logs'), exist_ok=True)
             except Exception:
                 _logger.exception('Failed initiating build %s', build.dest)
@@ -674,17 +678,7 @@ class BuildResult(models.Model):
 
             build.write(build_values)
             if ending_build:
-                build._github_status()
-                # ->how to fix this.
-                # Solution 1: let batch notify each commit. Link is now pointing to batch with meta info about commit.
-                #    -> needs to change status place, add it to batch sheduler. No failfast? duplicate logic?
-                #    -> only main runbot will notify.
-                # Solution 2: multiple status per commit, one per build/trigger.Each status point to corresponding build.
-                #   -> needs to add trigger on params to have a name and commits to notify.
-                # Solution 3: Add a new ci model.
-                    # build_id, commit_id, type.
-                    # No need for a sheduler, no need for a trigger.
-                    # cla could be in this moel, allowing to resend cla easily too.
+                build._github_status()              
                 if not build.local_result:  # Set 'ok' result if no result set (no tests job on build)
                     build.local_result = 'ok'
                     build._logger("No result set, setting ok by default")
@@ -1036,38 +1030,6 @@ class BuildResult(models.Model):
             return 'killed'
 
 
-    def _github_status_notify_all(self, status):
-        """Notify each repo with a status"""
-        self.ensure_one()
-        if self.params_id.config_id.update_github_state:
-            # TODO fixme
-            print('FIXME')
-            #remote_ids = {b.repo_id.id for b in self.search([('name', '=', self.name)])}
-            #build_name = self.name # todo adapt: custom ci per trigger
-            #user_id = self.env.user.id
-            #_dbname = self.env.cr.dbname
-            #_context = self.env.context
-            #build_id = self.id
-            #def send_github_status():
-            #    try:
-            #        db_registry = registry(_dbname)
-            #        with api.Environment.manage(), db_registry.cursor() as cr:
-            #            env = api.Environment(cr, user_id, _context)
-            #            remotes = env['runbot.repo'].browse(remote_ids)
-            #            for remote in remotes:
-            #                if not remo.token:
-            #                   _logger.warning('Cannot send status on a remote without token for %s', remote.name)
-            #                   continue
-            #                _logger.debug(
-            #                    "github updating %s status %s to %s in repo %s",
-            #                    status['context'], build_name, status['state'], remote.name)
-            #                remote._github('/repos/:owner/:repo/statuses/%s' % build_name, status, ignore_errors=True)
-            #    except:
-            #        _logger.exception('Something went wrong sending notification for %s', build_id)
-            #self._cr.after('commit', send_github_status)
-
-
-    # TODO should be on bundle: multiple build for the same hash
     def _github_status(self):
         """Notify github of failed/successful builds"""
         for build in self:
@@ -1077,9 +1039,6 @@ class BuildResult(models.Model):
                 else:
                     build.parent_id._github_status()
             elif build.params_id.config_id.update_github_state:
-                runbot_domain = self.env['runbot.runbot']._domain()
-                desc = "runbot build %s" % (build.dest,)
-
                 if build.global_result in ('ko', 'warn'):
                     state = 'failure'
                 elif build.global_state == 'testing':
@@ -1091,19 +1050,17 @@ class BuildResult(models.Model):
                 else:
                     _logger.debug("skipping github status for build %s ", build.id)
                     continue
-                desc += " (runtime %ss)" % (build.job_time,)
 
-                status = {
-                    "state": state,
-                    "target_url": "http://%s/runbot/build/%s" % (runbot_domain, build.id),
-                    "description": desc,
-                    "context": "ci/runbot"
-                }
-                if self.last_github_state != state:
-                    build._github_status_notify_all(status)
-                    self.last_github_state = state
-                else:
-                    _logger.debug('Skipping unchanged status for %s', self.id)
+                desc = " (runtime %ss)" % (build.job_time,)
+                context = "ci/runbot"
+                runbot_domain = self.env['runbot.runbot']._domain()
+                target_url = "http://%s/runbot/build/%s" % (runbot_domain, build.id)
+
+                trigger = self.params_id.trigger_id
+                if self.trigger.ci_context:
+                    for commit in self.params_id.build_commit_ids.mapped('commit_id'):
+                        if commit.repo_id in self.trigger.repo_ids:
+                            commit._github_status(trigger.ci_context, 'state', target_url)
 
 
 

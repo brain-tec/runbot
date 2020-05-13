@@ -78,10 +78,6 @@ class Branch(models.Model):
         #
         # a pr pull head name should be in a repo or one of its forks, we need to check that
 
-    def _inverse_config_id(self):
-        for branch in self:
-            branch.branch_config_id = branch.config_id
-
     def _compute_pull_branch_name(self):
         for branch in self:
             branch.pull_branch_name = branch.pull_head_name.split(':')[-1] if branch.pull_head_name else branch.name

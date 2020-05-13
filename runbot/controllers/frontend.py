@@ -152,34 +152,6 @@ class Runbot(Controller):
         }
         return request.render("runbot.build", context)
 
-    @route(['/runbot/quick_connect/<model("runbot.branch"):branch>'], type='http', auth="public", website=True)
-    def fast_launch(self, branch, **post):
-        """Connect to the running Odoo instance"""
-        Build = request.env['runbot.build']
-        domain = [('branch_id', '=', branch.id), ('config_id', '=', branch.config_id.id)]
-
-        # Take the 10 lasts builds to find at least 1 running... Else no luck
-        builds = Build.search(domain, order='sequence desc', limit=10)
-
-        if builds:
-            last_build = False
-            for build in builds:
-                if build.local_state == 'running':
-                    last_build = build
-                    break
-
-            if not last_build:
-                # Find the last build regardless the state to propose a rebuild
-                last_build = builds[0]
-
-            if last_build.local_state != 'running':
-                url = "/runbot/build/%s?ask_rebuild=1" % last_build.id
-            else:
-                url = "http://%s/web/login?db=%s-all&login=admin&redirect=/web?debug=1" % (last_build.domain, last_build.dest)
-        else:
-            return request.not_found()
-        return werkzeug.utils.redirect(url)
-
     def _glances_ctx(self):
         repos = request.env['runbot.repo'].search([])   # respect record rules
         # TODO adapt

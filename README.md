@@ -105,15 +105,15 @@ Create a repo for you custom addons repo
 - For your custom repo, it is adviced to configure the repo in hook mode if possible. 
 - No server files should be given since it is an addons repo.
 - No addons_path given to use repo root as default.
-- we only want to test runbot and runbot_cla on runbot
+- we only want to test runbot and runbot_cla on runbot, `-*,runbot,runbot_cla` will blacklist all except this ones
 - The remote has PR option checked to fetch pull request too. This is optional.
 
 #### Tweak runbot parameters and enable features
 
 Acces the runbot settings and tweak the default parameters.
-- The *number of worker* is the number of parallel testing builds. It is adviced to keep one physical core per worker on a dedicated machine. On a local machine,keep it low, **2** is a good start.
+- The *number of worker* is the ndefault umber of parallel testing builds per machine. It is adviced to keep one physical core per worker on a dedicated machine. On a local machine,keep it low, **2** is a good start (using 8 on runbot.odoo.com).
 
-- The *number of running build* is the number of parallel running builds. Runbot will start to kill running build once this limit is reached. It is also adviced to keep this number low (**2**) to save ressources.
+- The *number of running build* is the number of parallel running builds. Runbot will start to kill running build once this limit is reached. This number can be pumped up on a server (using 60 on runbot.odoo.com).
 - *Runbot domain* will mainly be used for nginx to access running build.
 - Max commit age is the limit after what a branch head will be ignorred in processing. This will reduce the processing of old non deleted branch. Keep in mind that pushing an old commit on a branch will also be ignored by runbot.
 
@@ -146,9 +146,20 @@ In this example, we want to create a new build when a new commit is pushed on ru
 
 ![Odoo repo configuration](runbot/documentation/images/trigger.png "Odoo repo configuration")
 
+When a branch is pushed, a new batch will be created, and after one minute the new build will be created if no other change is detected. The build remains in pending state for now. Check the result on 127.0.0.1:8069/runbot
+
+If a new commit is pushed after that, the previous pending build of the same bundle should be skipped.
+
+#### Hosts
+Runbot is able to share pending builds accross multiple hosts. In this case, there is only one. a new host will nevre assign pending build to himself by default.
+Go in the Build Hosts menu and chose yours. uncheck *Only accept assigned build*. You can also tweek the number of parallel build for this host.
+
+#### Config
+ add test tags to test only filter test
+
 ### Modules filters
 
+### db template
 
 
-
-
+https://developer.github.com/v3/#rate-limiting

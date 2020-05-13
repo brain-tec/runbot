@@ -51,6 +51,61 @@ class Commit(models.Model):
         for commit in self:
             commit.dname = '%s:%s' % (commit.repo_id.name, commit.name[:8])
 
+    def _github_status(self, context, state, url, description=None):
+        self.ensure_one()
+        Status = self.env['runbot.commit.status']
+        last_status = Status.search([('commit_id', '=', self.id), ('context', '=', context)], order='id desc', limit=1)
+        if last_status and last_status.state == state:
+            _logger.info('Skipping already sent status %s:%s for %s', context, state, self.name)
+            return
+        last_status = Status.create({
+            'commit_id': self.id,
+            'context': context,
+            'state': state,
+            'target_url': target_url,
+            'description': description or context,
+        })
+        last_status.send()
+
+
+class CommitStatus(models.Model):
+    _name = 'runbot.commit.status'
+    commit_id = fields.Many2one('runbot.commit', string='Commit', required=True, index=True)
+    context = fields.Char('Context', required=True)
+    state = fields.Char('State', required=True)
+    target_url = fields.Char('Url')
+    description = fields.Char('Description')
+
+    def send():
+        user_id = self.env.user.id
+        _dbname = self.env.cr.dbname
+        _context = self.env.context
+
+        commit = self.commit_id
+        remote_ids = commit.repo_id.remote_ids.filtered(lambda remote: remote.token).ids
+        commit_name = commit.name
+
+        status = {
+            'context': self.context,
+            'state': self.state,
+            'target_url': self.target_url,
+            'description': self.description,
+        }
+        if remote_ids:
+            def send_github_status():
+                try:
+                    db_registry = registry(_dbname)
+                    with api.Environment.manage(), db_registry.cursor() as cr:
+                        env = api.Environment(cr, user_id, _context)
+                        for remote in env['runbot.remote'].browse(remote_ids):
+                            _logger.debug(
+                                "github updating %s status %s to %s in repo %s",
+                                status['context'], commit_name, status['state'], remote.name)
+                            remote._github('/repos/:owner/:repo/statuses/%s' % commit_name, status, ignore_errors=True)
+                except:
+                    _logger.exception('Something went wrong sending notification for %s', commit_name)
+
+            self._cr.after('commit', send_github_status)
 
 class RunbotBuildCommit(models.Model):
     _name = "runbot.build.commit"

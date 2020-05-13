@@ -358,7 +358,6 @@ class Repo(models.Model):
         """
         self.ensure_one()
         _logger.info('Cheking commits %s', len(refs))
-        has_trigger = bool(self.trigger_ids)
 
         for ref_name, sha, date, author, author_email, subject, committer, committer_email in refs:
             branch = ref_branches[ref_name]
@@ -380,7 +379,7 @@ class Repo(models.Model):
                 branch.head = commit
                 # TODO add reflog -> history on commit found on branch
 
-                if not has_trigger:
+                if not self.trigger_ids:
                     continue
 
                 bundle = branch.bundle_id
@@ -395,8 +394,6 @@ class Repo(models.Model):
                         'state': 'preparing',
                     })
                     bundle.last_batch = preparing
-
-                bundle.last_batch._new_commit(commit)
 
     def _update_batches(self, force=False):
         """ Find new commits in physical repos"""

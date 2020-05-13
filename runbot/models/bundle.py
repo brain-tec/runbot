@@ -260,6 +260,11 @@ class Batch(models.Model):
             add_direction=True, locale='en'
         )
 
+    def _url(self):
+        self.ensure_one()
+        runbot_domain = self.env['runbot.runbot']._domain()
+        return "http://%s/runbot/batch/%s" % (runbot_domain, self.id)
+
     def _new_commit(self, commit):
         # if not the same hash for repo:
         self.last_update = fields.Datetime.now()
