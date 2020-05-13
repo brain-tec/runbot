@@ -117,12 +117,11 @@ class Runbot(Controller):
 
     @route([
         '/runbot/build/<int:build_id>/<operation>',
-        '/runbot/build/<int:build_id>/<operation>/<int:exact>',
     ], type='http', auth="public", methods=['POST'], csrf=False)
-    def build_force(self, build_id, operation, exact=0, search=None, **post):
+    def build_operations(self, build_id, operation, exact=0, search=None, **post):
         build = request.env['runbot.build'].sudo().browse(build_id)
-        if operation == 'force':
-            build = build._force(exact=bool(exact))
+        if operation == 'rebuild':
+            build = build._rebuild()
         elif operation == 'kill':
             build._ask_kill()
         elif operation == 'wakeup':
@@ -143,8 +142,6 @@ class Runbot(Controller):
         build = Build.browse([build_id])[0]
         if not build.exists():
             return request.not_found()
-
-        #show_rebuild_button = Build.search([('branch_id', '=', build.branch_id.id), ('parent_id', '=', False)], limit=1) == build
 
         context = {
             'build': build,

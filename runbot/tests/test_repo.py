@@ -40,7 +40,8 @@ class TestRepo(RunbotCase):
 
 
     @patch('odoo.addons.runbot.models.repo.Repo._get_fetch_head_time')
-    def test_repo_update_batches(self, mock_fetch_head_time):
+    @patch('odoo.addons.runbot.models.repo.Repo._update')
+    def test_repo_update_batches(self, mock_update, mock_fetch_head_time):
         """ Test that when finding new refs in a repo, the missing branches
         are created and new builds are created in pending state
         """
@@ -57,7 +58,7 @@ class TestRepo(RunbotCase):
 
 
         def github(url, ignore_errors):
-            self.assertEqual(ignore_errors, True)
+            self.assertEqual(ignore_errors, False)
             self.assertEqual(url, '/repos/:owner/:repo/pulls/123')
             return {
                 'base' : {'ref': 'master'},
@@ -235,7 +236,7 @@ class TestRepo(RunbotCase):
         self.assertEqual(last_batch.state, 'preparing')
         self.assertEqual(dev_branch.head_name, 'd0d0caca')
         self.env.cr.sql_log = True
-        last_batch._start()
+        last_batch._prepare()
         self.env.cr.sql_log = False
         self.assertEqual(last_batch.batch_commit_ids.commit_id.mapped('subject'), ['Server subject', 'Addons subject'])
 
@@ -310,6 +311,7 @@ class TestRepo(RunbotCase):
 
 
 class TestGithub(TransactionCase):
+
     def test_github(self):
         """ Test different github responses or failures"""
 

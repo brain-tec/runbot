@@ -4,6 +4,8 @@ import glob
 import random
 import re
 import subprocess
+import shutil
+
 from datetime import timedelta
 
 from ..common import fqdn, dt2time, dest_reg, os
@@ -281,7 +283,7 @@ class Runbot(models.AbstractModel):
                 sleep_time = self._scheduler_loop_turn(host, update_frequency)
                 time.sleep(sleep_time)
             else:
-                time.sleep(timeout)
+                time.sleep(update_frequency)
             self._commit()
 
         host.last_end_loop = fields.Datetime.now()
@@ -318,8 +320,8 @@ class Runbot(models.AbstractModel):
             cannot_be_deleted_builds = self.env['runbot.build'].search([('host', '=', fqdn()), ('local_state', 'not in', ('done', 'duplicate'))])
             cannot_be_deleted_path = set()
             for build in cannot_be_deleted_builds:
-                for commit in build.build_commit_ids:
-                    cannot_be_deleted_path.add(commit._source_path())
+                for build_commit in build.params_id.build_commit_ids:
+                    cannot_be_deleted_path.add(build_commit.commit_id._source_path())
 
             to_delete = set()
             to_keep = set()

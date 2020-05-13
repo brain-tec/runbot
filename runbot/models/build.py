@@ -206,10 +206,9 @@ class BuildResult(models.Model):
 
     @api.depends('params_id.config_id')
     def _compute_log_list(self):  # storing this field because it will be access trhoug repo viewn and keep track of the list at create
-        #for build in self:
-        #    build.log_list = ','.join({step.name for step in build.config_id.step_ids() if step._has_log()})
+        for build in self:
+            build.log_list = ','.join({step.name for step in build.params_id.config_id.step_ids() if step._has_log()})
         # should be moved
-        pass
 
     @api.depends('children_ids.global_state', 'local_state')
     def _compute_global_state(self):
@@ -407,51 +406,32 @@ class BuildResult(models.Model):
             'dependecy_repo_id': dep.dependecy_repo_id.id,
         }) for dep in self.dependency_ids]
 
-    def _force(self, message=None, exact=False):
-        """Force a rebuild and return a recordset of forced builds"""
-        forced_builds = self.env['runbot.build']
+    def _rebuild(self, message=None):
+        """Force a rebuild and return a recordset of builds"""
+        rebuilds = self.env['runbot.build']
         for build in self:
-            pending_ids = self.search([('local_state', '=', 'pending')], order='id', limit=1)
-            if pending_ids:
-                sequence = pending_ids[0].id
-            else:
-                sequence = self.search([], order='id desc', limit=1)[0].id
-            # Force it now
             if build.local_state in ['running', 'done', 'duplicate']:
+                # TODO kill other build if not correct local_state?
+                # dont rebuild if there is a more recent build for this params? 
                 values = {
-                    'sequence': sequence,
-                    'branch_id': build.branch_id.id,
-                    'name': build.name,
-                    'date': build.date,
-                    'author': build.author,
-                    'author_email': build.author_email,
-                    'committer': build.committer,
-                    'committer_email': build.committer_email,
-                    'subject': build.subject,
+                    'params_id': build.params_id.id,
                     'build_type': 'rebuild',
+                    'hidden': build.hidden,
                 }
-                if exact:
+                if build.parent_id:
                     values.update({
-                        'config_id': build.config_id.id,
-                        'extra_params': build.extra_params,
-                        'config_data': build.config_data,
-                        'orphan_result': build.orphan_result,
-                        'dependency_ids': build._copy_dependency_ids(),
-                        'description': build.description,
+                        'parent_id': build.parent_id.id,
                     })
-                    #  if replace: ?
-                    if build.parent_id:
-                        values.update({
-                            'parent_id': build.parent_id.id,  # attach it to parent
-                            'hidden': build.hidden,
-                        })
-                        build.orphan_result = True  # set result of build as orphan
+                    build.orphan_result = True
+                else:
+                    pass
+                    # replace build in slots? create new slots and marks olds has inactive? 
 
-                new_build = build.with_context(force_rebuild=True).create(values)
-                forced_builds |= new_build
+                new_build = build.create(values)
+                rebuilds |= new_build
                 user = request.env.user if request else self.env.user
-                new_build._log('rebuild', 'Rebuild initiated by %s (%s)%s' % (user.name, 'exact' if exact else 'default', (' :%s' % message) if message else ''))
-        return forced_builds
+                new_build._log('rebuild', 'Rebuild initiated by %s%s' % (user.name, (' :%s' % message) if message else ''))
+        return rebuilds
 
     def _skip(self, reason=None):
         """Mark builds ids as skipped"""
@@ -468,7 +448,7 @@ class BuildResult(models.Model):
         dest_by_builds_ids = defaultdict(list)
         ignored = set()
         icp = self.env['ir.config_parameter']
-        hide_in_logs = icp.get_param('runbot.runbot_db_template', default='template1')
+        hide_in_logs = icp.get_param('runbot.runbot_db_template', default='template0')
 
         for dest in dest_list:
             build = self._build_from_dest(dest)
@@ -753,7 +733,7 @@ class BuildResult(models.Model):
         self.ensure_one()  # will raise exception if hash not found, we don't want to fail for all build.
         # checkout branch
         exports = {}
-        for commit in commits or self.build_commit_ids.mapped('commit_ids'):
+        for commit in commits or self.params_id.build_commit_ids.mapped('commit_id'):
             build_export_path = self._docker_source_folder(commit)
             if build_export_path in exports:
                 self._log('_checkout', 'Multiple repo have same export path in build, some source may be missing for %s' % build_export_path, level='ERROR')
@@ -816,7 +796,7 @@ class BuildResult(models.Model):
 
     def _local_pg_createdb(self, dbname):
         icp = self.env['ir.config_parameter']
-        db_template = icp.get_param('runbot.runbot_db_template', default='template1')
+        db_template = icp.get_param('runbot.runbot_db_template', default='template0')
         self._local_pg_dropdb(dbname)
         _logger.debug("createdb %s", dbname)
         with local_pgadmin_cursor() as local_cr:

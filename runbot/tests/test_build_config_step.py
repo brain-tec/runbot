@@ -32,7 +32,6 @@ class TestBuildConfigStep(RunbotCase):
             'job_type': 'create_build',
             'number_builds': 2,
             'make_orphan': False,
-            'force_build': True,
         })
 
         config = self.Config.create({'name': 'test_config'})
@@ -57,7 +56,6 @@ class TestBuildConfigStep(RunbotCase):
             'job_type': 'create_build',
             'number_builds': 2,
             'make_orphan': True,
-            'force_build': True,
         })
 
         config = self.Config.create({'name': 'test_config'})

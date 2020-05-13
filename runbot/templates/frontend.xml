@@ -134,7 +134,6 @@
                                   <td t-attf-class="bg-{{bu.get_color_class()}}-light" style="width:22%">
                                      <t t-call="runbot.build_button">
                                       <t t-set="klass">btn-group-sm</t>
-                                      <t t-set="show_rebuild_button" t-value="bu==br['builds'][0]"></t>
                                       <t t-set="show_commit_button" t-value="False"/>
                                      </t>
                                      <t t-if="bu['build_type']=='scheduled'"><i class="fa fa-moon-o" t-att-title="bu.build_type_label()" t-att-aria-label="bu.build_type_label()"/></t>

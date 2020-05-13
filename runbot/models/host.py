@@ -51,13 +51,13 @@ class RunboHost(models.Model):
     def _bootstrap_db_template(self):
         """ boostrap template database if needed """
         icp = self.env['ir.config_parameter']
-        db_template = icp.get_param('runbot.runbot_db_template', default='template1')
-        if db_template and db_template != 'template1':
+        db_template = icp.get_param('runbot.runbot_db_template', default='template0')
+        if db_template and db_template != 'template0':
             with local_pgadmin_cursor() as local_cr:
                 local_cr.execute("""SELECT datname FROM pg_catalog.pg_database WHERE datname = '%s';""" % db_template)
                 res = local_cr.fetchone()
                 if not res:
-                    local_cr.execute("""CREATE DATABASE "%s" TEMPLATE template1 LC_COLLATE 'C' ENCODING 'unicode'""" % db_template)
+                    local_cr.execute("""CREATE DATABASE "%s" TEMPLATE template0 LC_COLLATE 'C' ENCODING 'unicode'""" % db_template)
                     # TODO UPDATE pg_database set datallowconn = false, datistemplate = true (but not enough privileges)
 
     def _bootstrap(self):

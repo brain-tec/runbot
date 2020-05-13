@@ -146,7 +146,7 @@ class ConfigStep(models.Model):
     create_config_ids = fields.Many2many('runbot.build.config', 'runbot_build_config_step_ids_create_config_ids_rel', string='New Build Configs', track_visibility='onchange', index=True)
     number_builds = fields.Integer('Number of build to create', default=1, track_visibility='onchange')
     hide_build = fields.Boolean('Hide created build in frontend', default=True, track_visibility='onchange')
-    force_build = fields.Boolean("As a forced rebuild, don't use duplicate detection", default=False, track_visibility='onchange')
+
     force_host = fields.Boolean('Use same host as parent for children', default=False, track_visibility='onchange')  # future
     make_orphan = fields.Boolean('No effect on the parent result', help='Created build result will not affect parent build result', default=False, track_visibility='onchange')
 
@@ -165,13 +165,6 @@ class ConfigStep(models.Model):
             msg = test_python_expr(expr=step[field_name].strip(), mode="exec")
             if msg:
                 raise ValidationError(msg)
-
-    @api.onchange('number_builds')
-    def _onchange_number_builds(self):
-        if self.number_builds > 1:
-            self.force_build = True
-        else:
-            self.force_build = False
 
     @api.onchange('sub_command')
     def _onchange_number_builds(self):
@@ -228,7 +221,7 @@ class ConfigStep(models.Model):
     def _run(self, build):
         log_path = build._path('logs', '%s.txt' % self.name)
         build.write({'job_start': now(), 'job_end': False})  # state, ...
-        build._log('run', 'Starting step **%s** from config **%s**' % (self.name, build.config_id.name), log_type='markdown', level='SEPARATOR')
+        build._log('run', 'Starting step **%s** from config **%s**' % (self.name, build.params_id.config_id.name), log_type='markdown', level='SEPARATOR')
         return self._run_step(build, log_path)
 
     def _run_step(self, build, log_path):
@@ -244,9 +237,6 @@ class ConfigStep(models.Model):
 
     def _create_build(self, build, log_path):
         Build = self.env['runbot.build']
-        if self.force_build:
-            Build = Build.with_context(force_rebuild=True)
-
         count = 0
         for create_config in self.create_config_ids:
             for _ in range(self.number_builds):

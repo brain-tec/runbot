@@ -82,7 +82,6 @@
                         <field name="create_config_ids" widget="many2many_tags" options="{'no_create': True}" />
                         <field name="number_builds"/>
                         <field name="hide_build" groups="base.group_no_one"/>
-                        <field name="force_build"/>
                         <field name="make_orphan"/>
                     </group>
                 </sheet>

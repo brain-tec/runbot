@@ -7,7 +7,6 @@ import re
 import requests
 import signal
 import subprocess
-import shutil
 import time
 
 from odoo.exceptions import UserError, ValidationError
@@ -401,16 +400,16 @@ class Repo(models.Model):
 
     def _update_batches(self, force=False):
         """ Find new commits in physical repos"""
-
-        self.ensure_one()
-
-        if self.remote_ids and self._update(poll_delay=30 if force else 60*5):
-            max_age = int(self.env['ir.config_parameter'].get_param('runbot.runbot_max_age', default=30))
-            ref = self._get_refs(max_age)
-            ref_branches = self._find_or_create_branches(ref)
-            self._find_new_commits(ref, ref_branches)
-            _logger.info('</ new commit>')
-            return True
+        updated = False
+        for repo in self:
+            if repo.remote_ids and self._update(poll_delay=30 if force else 60*5):
+                max_age = int(self.env['ir.config_parameter'].get_param('runbot.runbot_max_age', default=30))
+                ref = repo._get_refs(max_age)
+                ref_branches = repo._find_or_create_branches(ref)
+                repo._find_new_commits(ref, ref_branches)
+                _logger.info('</ new commit>')
+                updated = True
+        return updated
 
     def _update_git_config(self):
         """ Update repo git config file """
