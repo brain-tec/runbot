@@ -36,7 +36,7 @@ def migrate(cr, version):
     remote_to_repo = {}
     repos_infos = {}
     triggers = {}
-    triggers_by_project = {}
+    triggers_by_project = defaultdict(list)
 
     RD_project = env.ref('runbot.main_project')
     security_project = env['runbot.project'].create({
@@ -70,7 +70,7 @@ def migrate(cr, version):
             'id': id, # keep same id as repo for hooks and stuff
             'name': name,
             'repo_id': repo.id,
-            'sequence': sequence,
+            'sequence': repo.id,
             'fetch_pull': mode != 'disabled',
             'fetch_heads': mode != 'disabled',
             'token': token,
@@ -82,14 +82,14 @@ def migrate(cr, version):
         repo_infos = {
             'name': repo_name,
             'modules': modules,
-            'group_ids': group_ids
+            'group_ids': group_ids,
             'server_files': server_files,
             'manifest_files': manifest_files,
             'addons_paths': addons_paths,
-        })
+        }
 
-        if duplicate_id in duplicate_to_repo:
-            cr.execute('DELETE FROM runbot_repo WHERE id = %s', id)
+        if duplicate_id in remote_to_repo:
+            cr.execute('DELETE FROM runbot_repo WHERE id = %s', (id, ))
             if repos_infos[duplicate_id] != repo_infos:
                 _logger.warning('deleting duplicate with different values:\nexisting->%s\ndeleted->%s', repos_infos[duplicate_id], repo_infos)
         else:
@@ -151,7 +151,7 @@ def migrate(cr, version):
             pull_head_remote_id = owner_to_remote.get((owner, repo.id))
             if pull_head_remote_id:
                 branch.pull_head_remote_id = pull_head_remote_id
-        project_id = repo.project_id.is
+        project_id = repo.project_id.id
         name = branch.reference_name
 
         key = (name, project_id.id)
@@ -169,7 +169,7 @@ def migrate(cr, version):
             bundles[key] = bundle
         bundle = bundles[key]
         if bundle.is_base and branch.is_pr:
-            _lgger.info('Trying to add pr to base bundle')
+            _logger.info('Trying to add pr to base bundle')
         bundle=dummy_bundle
         branch.bundle_id = bundle
         branch_to_bundle[branch.id] = bundle

@@ -118,12 +118,14 @@ class Remote(models.Model):
                 _logger.error('Invalid url %s for github_status', remote.base)
 
     def create(self, values_list):
-        super().create(values_list)
+        remote = super().create(values_list)
         self._cr.after('commit', self.repo_id._update_git_config)
+        return remote
 
     def write(self, values):
-        super().write(values)
+        res = super().write(values)
         self._cr.after('commit', self.repo_id._update_git_config)
+        return res
 
 
 class Repo(models.Model):
