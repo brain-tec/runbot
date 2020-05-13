@@ -21,13 +21,6 @@
       <field name="implied_ids" eval="[(4, ref('runbot.group_user'))]"/>
     </record>
 
-    <record id="group_runbot_admin" model="res.groups">
-      <field name="name">Runbot administrator</field>
-      <field name="category_id" ref="module_project"/>
-      <field name="users" eval="[(4, ref('base.user_root')), (4, ref('base.user_admin'))]"/>
-      <field name="implied_ids" eval="[(4, ref('runbot.group_user')), (4, ref('runbot.group_build_config_administrator')), (4, ref('runbot.group_user'))]"/>
-    </record>
-
     <record model="ir.module.category" id="build_config_project">
       <field name="name">Build Config</field>
     </record>
@@ -48,6 +41,13 @@
         <field name="category_id" ref="build_config_project"/>
         <field name="implied_ids" eval="[(4, ref('runbot.group_build_config_manager'))]"/>
         <field name="users" eval="[(4, ref('base.user_root'))]"/>
+    </record>
+
+    <record id="group_runbot_admin" model="res.groups">
+      <field name="name">Runbot administrator</field>
+      <field name="category_id" ref="module_project"/>
+      <field name="users" eval="[(4, ref('base.user_root')), (4, ref('base.user_admin'))]"/>
+      <field name="implied_ids" eval="[(4, ref('runbot.group_user')), (4, ref('runbot.group_build_config_administrator'))]"/>
     </record>
 
     <!-- config access rules-->
