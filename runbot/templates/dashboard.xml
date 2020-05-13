@@ -120,9 +120,9 @@
                   <span t-esc="host.name.split('.')[0]"/>
                   <t t-if="host.nb_testing == 0"><t t-set="klass">success</t></t>
                   <t t-if="host.nb_testing > 0"><t t-set="klass">info</t></t>
-                  <t t-if="host.nb_testing == host.sudo().get_nb_worker()"><t t-set="klass">warning</t></t>
-                  <t t-if="host.nb_testing > host.sudo().get_nb_worker()"><t t-set="klass">danger</t></t>
-                  <span t-attf-class="label label-{{klass}}"><span t-esc="host.nb_testing"/>/<span t-esc="host.sudo().get_nb_worker()"/></span>
+                  <t t-if="host.nb_testing == host.nb_worker"><t t-set="klass">warning</t></t>
+                  <t t-if="host.nb_testing > host.nb_worker"><t t-set="klass">danger</t></t>
+                  <span t-attf-class="label label-{{klass}}"><span t-esc="host.nb_testing"/>/<span t-esc="host.nb_worker"/></span>
                   <t t-esc="host.nb_running"/>
                   <t t-set="succes_time" t-value="int(datetime.datetime.now().timestamp() - host.last_success.timestamp())"/>
                   <t t-set="start_time" t-value="int(datetime.datetime.now().timestamp() - host.last_start_loop.timestamp())"/>

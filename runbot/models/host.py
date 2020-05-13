@@ -18,7 +18,10 @@ class RunboHost(models.Model):
     last_end_loop = fields.Datetime('Last end')
     last_success = fields.Datetime('Last success')
     assigned_only = fields.Boolean('Only accept assigned build', default=False)
-    nb_worker = fields.Integer('Number of max paralel build', help="0 to use icp value", default=0)
+    nb_worker = fields.Integer(
+        'Number of max paralel build',
+        default=lambda self: self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_workers', default=2)
+    )
     nb_testing = fields.Integer(compute='_compute_nb')
     nb_running = fields.Integer(compute='_compute_nb')
     last_exception = fields.Char('Last exception')
@@ -80,13 +83,9 @@ class RunboHost(models.Model):
         name = fqdn()
         return self.search([('name', '=', name)]) or self.create({'name': name})
 
-    def get_nb_worker(self):
-        icp = self.env['ir.config_parameter']
-        return self.nb_worker or int(icp.sudo().get_param('runbot.runbot_workers', default=6))
-
     def get_running_max(self):
         icp = self.env['ir.config_parameter']
-        return int(icp.get_param('runbot.runbot_running_max', default=75))
+        return int(icp.get_param('runbot.runbot_running_max', default=5))
 
     def set_psql_conn_count(self):
         _logger.debug('Updating psql connection count...')
@@ -100,7 +99,7 @@ class RunboHost(models.Model):
         return sum(host.nb_testing for host in self)
 
     def _total_workers(self):
-        return sum(host.get_nb_worker() for host in self)
+        return sum(host.nb_worker for host in self)
 
     def disable(self):
         """ Reserve host if possible """

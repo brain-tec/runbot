@@ -24,8 +24,8 @@ class ResConfigSettings(models.TransientModel):
     def get_values(self):
         res = super(ResConfigSettings, self).get_values()
         get_param = self.env['ir.config_parameter'].sudo().get_param
-        res.update(runbot_workers=int(get_param('runbot.runbot_workers', default=6)),
-                   runbot_running_max=int(get_param('runbot.runbot_running_max', default=75)),
+        res.update(runbot_workers=int(get_param('runbot.runbot_workers', default=2)),
+                   runbot_running_max=int(get_param('runbot.runbot_running_max', default=5)),
                    runbot_timeout=int(get_param('runbot.runbot_timeout', default=10000)),
                    runbot_starting_port=int(get_param('runbot.runbot_starting_port', default=2000)),
                    runbot_domain=get_param('runbot.runbot_domain', default=common.fqdn()),

@@ -32,7 +32,6 @@ class Runbot(models.AbstractModel):
         return os.path.abspath(default)
 
     def _scheduler(self, host):
-        nb_workers = host.get_nb_worker()
 
         self._gc_testing(host)
         self._commit()
@@ -42,9 +41,9 @@ class Runbot(models.AbstractModel):
         for build in self._get_builds_to_schedule(host):
             build._schedule()
             self._commit()
-        self._assign_pending_builds(host, nb_workers, [('build_type', '!=', 'scheduled')])
+        self._assign_pending_builds(host, host.nb_worker, [('build_type', '!=', 'scheduled')])
         self._commit()
-        self._assign_pending_builds(host, nb_workers-1 or nb_workers)
+        self._assign_pending_builds(host, host.nb_worker-1 or host.nb_worker)
         self._commit()
         for build in self._get_builds_to_init(host):
             build._init_pendings(host)
@@ -63,12 +62,12 @@ class Runbot(models.AbstractModel):
     def _get_builds_to_schedule(self, host):
         return self.env['runbot.build'].search(self.build_domain_host(host, [('local_state', 'in', ['testing', 'running'])]))
 
-    def _assign_pending_builds(self, host, nb_workers, domain=None):
-        if host.assigned_only or nb_workers <= 0:
+    def _assign_pending_builds(self, host, nb_worker, domain=None):
+        if host.assigned_only or nb_worker <= 0:
             return
         domain_host = self.build_domain_host(host)
         reserved_slots = self.env['runbot.build'].search_count(domain_host + [('local_state', 'in', ('testing', 'pending'))])
-        assignable_slots = (nb_workers - reserved_slots)
+        assignable_slots = (nb_worker - reserved_slots)
         if assignable_slots > 0:
             allocated = self._allocate_builds(host, assignable_slots, domain)
             if allocated:
@@ -77,7 +76,7 @@ class Runbot(models.AbstractModel):
     def _get_builds_to_init(self, host):
         domain_host = self.build_domain_host(host)
         used_slots = self.env['runbot.build'].search_count(domain_host + [('local_state', '=', 'testing')])
-        available_slots = host.get_nb_worker() - used_slots
+        available_slots = host.nb_worker - used_slots
         if available_slots <= 0:
             return self.env['runbot.build']
         return self.env['runbot.build'].search(domain_host + [('local_state', '=', 'pending')], limit=available_slots)
@@ -124,7 +123,7 @@ class Runbot(models.AbstractModel):
         domain_host = self.build_domain_host(host)
         testing_builds = Build.search(domain_host + [('local_state', 'in', ['testing', 'pending']), ('requested_action', '!=', 'deathrow')])
         used_slots = len(testing_builds)
-        available_slots = host.get_nb_worker() - used_slots
+        available_slots = host.nb_worker - used_slots
         nb_pending = Build.search_count([('local_state', '=', 'pending'), ('host', '=', False)])
         if available_slots > 0 or nb_pending == 0:
             return
