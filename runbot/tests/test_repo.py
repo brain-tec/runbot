@@ -40,7 +40,7 @@ class TestRepo(RunbotCase):
 
 
     @patch('odoo.addons.runbot.models.repo.Repo._get_fetch_head_time')
-    def test_repo_create_batches(self, mock_fetch_head_time):
+    def test_repo_update_batches(self, mock_fetch_head_time):
         """ Test that when finding new refs in a repo, the missing branches
         are created and new builds are created in pending state
         """
@@ -81,7 +81,7 @@ class TestRepo(RunbotCase):
 
         mock_fetch_head_time.side_effect = counter()
         self.patchers['github_patcher'].side_effect = github
-        repos._create_batches()
+        repos._update_batches()
 
         dev_branch = self.env['runbot.branch'].search([('remote_id', '=', self.remote_server_dev.id)])
 
@@ -106,7 +106,7 @@ class TestRepo(RunbotCase):
             'Marc Bidule',
             '<marc.bidule@somewhere.com>')]
 
-        repos._create_batches()
+        repos._update_batches()
 
         addons_dev_branch = self.env['runbot.branch'].search([('remote_id', '=', self.remote_addons_dev.id)])
 
@@ -135,7 +135,7 @@ class TestRepo(RunbotCase):
             '<marc.bidule@somewhere.com>')]
 
         # Create Batches
-        repos._create_batches()
+        repos._update_batches()
 
         pull_request = self.env['runbot.branch'].search([('remote_id', '=', self.remote_server.id)])
         self.assertEqual(pull_request.bundle_id, bundle)
@@ -177,7 +177,7 @@ class TestRepo(RunbotCase):
             )]
 
         # Create Batches
-        repos._create_batches()
+        repos._update_batches()
 
         self.assertEqual(dev_branch, self.env['runbot.branch'].search([('remote_id', '=', self.remote_server_dev.id)]))
         self.assertEqual(pull_request, self.env['runbot.branch'].search([('remote_id', '=', self.remote_server.id)]))
@@ -200,7 +200,7 @@ class TestRepo(RunbotCase):
 
         batch.state = 'done'
 
-        repos._create_batches()
+        repos._update_batches()
 
         batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
         self.assertEqual(len(batch), 1, 'No new batch created, no head change')
@@ -215,7 +215,7 @@ class TestRepo(RunbotCase):
             'Marc Bidule',
             '<marc.bidule@somewhere.com>')]
 
-        repos._create_batches()
+        repos._update_batches()
 
         bundles = self.env['runbot.bundle'].search([('id', '>', max_bundle_id)])
         self.assertEqual(bundles, bundle)
@@ -226,7 +226,7 @@ class TestRepo(RunbotCase):
 
         self.commit_list[self.repo_server.id] = first_commit  # branch reset hard to an old commit (and pr closed)
 
-        repos._create_batches()
+        repos._update_batches()
 
         batches = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)], order='id desc')
         last_batch = bundle.last_batch
@@ -270,7 +270,7 @@ class TestRepo(RunbotCase):
                                      '<marc.bidule@somewhere.com>'])
         inserted_time = time.time()
         _logger.info('Insert took: %ssec', (inserted_time - start_time))
-        repo._create_batches()
+        repo._update_batches()
 
         _logger.info('Create pending builds took: %ssec', (time.time() - inserted_time))
 

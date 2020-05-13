@@ -30,7 +30,7 @@ class TestCron(RunbotCase):
         ret = self.Runbot._cron_fetch_and_build('runbotx.foo.com')
         self.assertEqual(ret, 'Not for me')
 
-    @patch('odoo.addons.runbot.models.repo.Repo._create_batches')
+    @patch('odoo.addons.runbot.models.repo.Repo._update_batches')
     @patch('odoo.addons.runbot.models.repo.Repo._update')
     def test_cron_schedule(self, mock_update, mock_create):
         """ test that cron_fetch_and_schedule do its work """

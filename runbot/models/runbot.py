@@ -272,10 +272,11 @@ class Runbot(models.AbstractModel):
         while time.time() - start_time < timeout:
             if runbot_do_fetch:
                 repos = self.env['runbot.repo'].search([('mode', '!=', 'disabled')])
+                preparing_batch = self.env['runbot.batch'].search([('state', '=', 'preparing')])
                 for repo in repos:
-                    repo._create_batches()
+                    repo._update_batches(bool(preparing_batch))
                     self._commit()
-                self.env['runbot.batch']._process()
+                preparing_batch._process()
                 self._commit()
             if runbot_do_schedule:
                 sleep_time = self._scheduler_loop_turn(host, update_frequency)

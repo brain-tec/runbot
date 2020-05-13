@@ -285,12 +285,9 @@ class Batch(models.Model):
         # foreach pending build, if build is not in another batch, skip.
 
     def _process(self):
-        preparing = self.search([
-            ('state', '=', 'preparing'),
-            ('last_update', '<', fields.Datetime.now() - datetime.timedelta(seconds=60))
-        ])
-        for batch in preparing:
-            batch._prepare()
+        for batch in self:
+            if batch.state == 'preparing' and batch.last_update < fields.Datetime.now() - datetime.timedelta(seconds=60):
+                batch._prepare()
 
     def _prepare(self):
         #  For all commit on real branches:

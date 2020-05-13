@@ -239,7 +239,7 @@ class Repo(models.Model):
             return export_path
 
         if not self._hash_exists(sha):
-            self._update(force=True, no_rune=True)
+            self._update(force=True)
             if not self._hash_exists(sha):
                 try:
                     result = self._git(['fetch', 'all', sha])
@@ -403,12 +403,13 @@ class Repo(models.Model):
 
                 bundle.last_batch._new_commit(commit)
 
-    def _create_batches(self):
+    def _update_batches(self, force=False):
         """ Find new commits in physical repos"""
         refs = {}
         ref_branches = {}
         self.ensure_one()
-        if self.remote_ids and self._update():
+
+        if self.remote_ids and self._update(poll_delay=30 if force else 60*5):
             max_age = int(self.env['ir.config_parameter'].get_param('runbot.runbot_max_age', default=30))
             ref = self._get_refs(max_age)
             ref_branches = self._find_or_create_branches(ref)
@@ -442,7 +443,7 @@ class Repo(models.Model):
             self._update_git_config()
             self._update_git(True)
 
-    def _update_git(self, force=False):
+    def _update_git(self, force=False, poll_delay=5*60):
         """ Update the git repo on FS """
         self.ensure_one()
         repo = self
@@ -461,7 +462,7 @@ class Repo(models.Model):
                 if not repo.hook_time or repo.hook_time < fetch_time:
                     return False
             if repo.mode == 'poll':
-                if (time.time() < fetch_time + 60*5):
+                if (time.time() < fetch_time + poll_delay):
                     return False
 
         _logger.info('Updating repo %s', repo.name)
@@ -488,11 +489,11 @@ class Repo(models.Model):
                     host.disable()
         return success
 
-    def _update(self, force=False):
+    def _update(self, force=False, poll_delay=5*60):
         """ Update the physical git reposotories on FS"""
         for repo in self:
             try:
-                return repo._update_git(force)  # TODO xdo, check gc log and log warning
+                return repo._update_git(force, poll_delay)
             except Exception:
                 _logger.exception('Fail to update repo %s', repo.name)
 
