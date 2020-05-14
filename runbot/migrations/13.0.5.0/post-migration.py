@@ -128,7 +128,6 @@ def migrate(cr, version):
     #######################
     # Branches
     #######################
-    cr.execute("""DELETE FROM runbot_branch WHERE name SIMILAR TO 'refs/heads/\d+';""")  # Remove old bad branches
     cr.execute('UPDATE runbot_branch SET name=branch_name')
 
     # no build, config, ...
