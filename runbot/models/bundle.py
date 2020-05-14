@@ -97,6 +97,7 @@ class Bundle(models.Model):
                 base_bundles = self.search([('is_base', '=', True), ('project_id', '=', project_id)])
                 bases_by_project[project_id] = base_bundles
             for candidate in base_bundles:
+                # TODO better that that, external pr wont work, we need to use target for pr, ... + check consistency
                 if bundle.name.startswith(candidate.name):
                     bundle.base_id = candidate
                     break
@@ -188,7 +189,7 @@ class Bundle(models.Model):
                 branch.rebuild_requested = False
 
     def create(self, values_list):
-        self.flush()
+        self.flush() # TODO check that
         return super().create(values_list)
         #if any(values.get('is_base') for values in values_list):
         #    (self.search([
@@ -198,7 +199,7 @@ class Bundle(models.Model):
 
     def write(self, values):
         super().write(values)
-        self.flush()
+        self.flush() # TODO check that
         #if 'is_base' in values:
         #    (self.search([
         #        ('project_id', 'in', self.mapped('project_id').ids),

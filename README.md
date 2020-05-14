@@ -13,6 +13,17 @@ This repository contains the source code of Odoo testing bot [runbot.odoo.com](h
 
 **Runbot changes some default odoo behaviours** Runbot database may work with other modules, but without any garantee. Avoid to use runbot on an existing database/install other modules than runbot.
 
+## Glossary/models
+
+Runbot v5 use a set of concept in order to cover all the use cases we need
+- **Project**: regroups a set of repositories that workds togeter. Ususally one project is enought and default R&D project exists.
+- **Repository**: A repository name regrouping repo and forks Ex: odoo, enterprise
+- **Remote**: A remote for a repository. Example: odoo/odoo, odoo-dev/odoo
+- **Build**: A test instance, using a set of commit and parameter to run some code and produce a result.
+- **Trigger**: Indicates that a build should be created when a new commit is pushed on a repo. A trigger has bot trigger repos, and dependency repo. Ex: new commit on runbot-> build with runbot and a dependency with odoo.
+- **Bundle**: A set or branches that work together: all the branches with the same name and all linked pr in the same project.
+- **Batch**: A containter for builds and commit of a bundle. When new commit is pushed on a branch, if a trigger exists for the repo of that branch, a new batch is created with this commit. After 60 seconds, if no other commit is added to the batch, a build is created by trigger having a new commit in this batch.
+
 ## HOW TO
 
 This section give the basic steps to follow to configure the runbot v5.0. The configuration may differ from one use to another, this one will describe how to test addons for odoo, needing to fetch odoo core but without testing vanilla odoo. As an exemple, runbot will be used as a tested addons.
@@ -135,8 +146,9 @@ Finally, the first new branches/batches should be created. You can list them in 
 
 #### Bundles configuration
 
-Mark 13.0 and master as bases
-no_build to hide/disable a bundle
+We need to define which bundle are base versions (master should already be marked as a base). In runbot case we only need 13.0 but all saas- and numerical branches should be marked as base in a general way. A base will be used to fill missing commits in a batch if a bundle doesn't have a branch in each repo, and will trigger the creation of a version. Versions may be use for upgrade test.
+
+Bundles can also be marked as no_build, wo that new commit won't create batch creation and bundle won't be displayed on main page.
 
 #### Triggers
 At this point, runbot will discover new branches, new commits, create bundle, but no build will be created.
