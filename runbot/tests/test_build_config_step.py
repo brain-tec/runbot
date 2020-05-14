@@ -392,7 +392,7 @@ Initiating shutdown
         build = self.Build.create({
             'params_id': self.base_params.id,
         })
-        build.state = 'testing'
+        build.state = 'testing'  # what ??
         self.patchers['isfile'].return_value = False
         result = config_step._make_results(build)
         self.assertEqual(result, {'local_result': 'ok'})

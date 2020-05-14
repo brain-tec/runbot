@@ -60,7 +60,6 @@ class Bundle(models.Model):
     branch_ids = fields.One2many('runbot.branch', 'bundle_id')
 
     # custom behaviour
-    rebuild_requested = fields.Boolean("Request a rebuild", help="Rebuild the latest commit even when no_auto_build is set.", default=False)
     no_build = fields.Boolean('No build')
     modules = fields.Char("Modules to install", help="Comma-separated list of modules to install and test.")
 
@@ -78,6 +77,13 @@ class Bundle(models.Model):
 
     previous_version_base_id = fields.Many2one('runbot.bundle', 'Previous base bundle', compute='_compute_previous_version_base_id')
     intermediate_version_base_ids = fields.Many2many('runbot.bundle', 'Intermediate base bundles', compute='_compute_previous_version_base_id')
+
+    priority = fields.Boolean('Build priority', default=False)
+
+    @api.depends('sticky')
+    def _compute_make_stats(self):
+        for bundle in self:
+            bundle.make_stats = bundle.sticky
 
 
     @api.depends('name', 'is_base', 'defined_base_id', 'base_id.is_base', 'project_id')
@@ -179,14 +185,6 @@ class Bundle(models.Model):
 
             for bundle in self:
                 bundle.last_batchs = [(6, 0, batch_ids[bundle.id])]
-
-    def toggle_request_bundle_rebuild(self): # TODO check
-        for branch in self:
-            if not branch.rebuild_requested:
-                branch.rebuild_requested = True
-                branch.repo_id.sudo().set_hook_time(time.time())
-            else:
-                branch.rebuild_requested = False
 
     def create(self, values_list):
         self.flush() # TODO check that

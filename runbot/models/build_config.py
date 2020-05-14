@@ -580,7 +580,7 @@ class ConfigStep(models.Model):
         return build_values
 
     def _make_stats(self, build):
-        if not (build.params_id.config_data.get('make_stats') and self.make_stats):
+        if not self.make_stats:  # TODO maybe add a make_stat on build inherited from bundle creator. (not in params)
             return
         build._log('make_stats', 'Getting stats from log file')
         log_path = build._path('logs', '%s.txt' % self.name)

@@ -1,7 +1,6 @@
+# Odoo Runbot Repository
 
 [![Build Status](http://runbot.odoo.com/runbot/badge/flat/13/13.0.svg)](http://runbot.odoo.com/runbot)
-
-# Odoo Runbot Repository
 
 This repository contains the source code of Odoo testing bot [runbot.odoo.com](http://runbot.odoo.com/runbot) and related addons.
 
@@ -16,6 +15,7 @@ This repository contains the source code of Odoo testing bot [runbot.odoo.com](h
 ## Glossary/models
 
 Runbot v5 use a set of concept in order to cover all the use cases we need
+
 - **Project**: regroups a set of repositories that workds togeter. Ususally one project is enought and default R&D project exists.
 - **Repository**: A repository name regrouping repo and forks Ex: odoo, enterprise
 - **Remote**: A remote for a repository. Example: odoo/odoo, odoo-dev/odoo
@@ -33,6 +33,7 @@ This section give the basic steps to follow to configure the runbot v5.0. The co
 Runbot is an addond for odoo, meaning that both odoo and runbot code are needed to run. Some tips to configure odoo are available in [odoo setup documentation](https://www.odoo.com/documentation/13.0/setup/install.html#setup-install-source) (requirements, postgres, ...) This page will mainly focus on runbot specificities.
 
 Chose a workspace and clone both repository.
+
 ```
 git clone https://github.com/odoo/odoo.git
 git clone https://github.com/odoo/runbot.git

@@ -5,14 +5,6 @@
         <field name="arch" type="xml">
             <form string="Bundles">
                 <div class="oe_button_box" name="button_box">
-                    <button name="toggle_request_branch_rebuild" type="object" class="oe_stat_button" icon="fa-play">
-                    <field name="rebuild_requested" widget="boolean_button" options='{"terminology": {
-                        "string_true": "Rebuild Asked",
-                        "hover_true": "Cancel the branch rebuild",
-                        "string_false": "No Rebuild Asked",
-                        "hover_false": "Request a branch rebuild"
-                    }}'/>
-                    </button>
                 </div>
                 <group>
                     <field name="name"/>

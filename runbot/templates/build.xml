@@ -152,11 +152,6 @@
                                       </t>
                                   </t>
                                 </t>
-                                <!--<b>Branch:</b>  <span id="branchclp"><a title="Go to branch build list" t-attf-href="/runbot/branch/{{build.branch_id.id}}" t-esc="build.branch_id.branch_name"/></span>
-
-                                <t t-if="build.branch_id.pull_head_name" t-esc="'(%s)' % build.branch_id.pull_branch_name"/>
-                                                                -->
-                                <!--<a href="#" class="clipbtn octicon octicon-clippy" data-clipboard-target="#branchclp" title="Copy branch name to clipboard"/>--><br/>
                                 <b>Host:</b>  <t t-esc="build.host"/><br/>
                                 <b>Total time:</b>  <t t-esc="build.get_formated_build_time()"/><br/>
 

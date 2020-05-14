@@ -74,7 +74,6 @@ class BuildParameters(models.Model):
 
     builds_reference_ids = fields.One2many('runbot.build.reference', 'params_id', copy=True)
     modules = fields.Char('Modules') # TODO fill this with combination of triggers repo_modules and bundle_id.modules (or trigger?)
-
     fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)
 
     #@api.depends('version_id', 'project_id', 'extra_params', 'config_id', 'config_data', 'modules', 'build_commit_ids', 'builds_reference_ids')
@@ -132,7 +131,6 @@ class BuildResult(models.Model):
     # -> display all?
 
     params_id = fields.Many2one('runbot.build.params', required=True, index=True)
-    config_data = JsonDictField('Config Data', related='params_id.config_data')
     # could be a default value, but possible to change it to allow duplicate accros branches
 
 

@@ -37,7 +37,7 @@ class RunbotHook(http.Controller):
             # handle PR that have been re-targeted
             pr_number = payload.get('pull_request', {}).get('number', '')
             branch = request.env['runbot.branch'].sudo().search([('remote_id', '=', remote.id), ('name', '=', 'refs/pull/%s' % pr_number)])
-            branch._get_branch_infos(payload.get('pull_request', {}))
+            branch._compute_branch_infos(payload.get('pull_request', {}))
         else:
             _logger.debug('Ignoring unsupported hook %s %s', event, payload.get('action', ''))
         return ""
