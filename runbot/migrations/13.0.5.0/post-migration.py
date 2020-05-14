@@ -15,8 +15,20 @@ def _bar(total):
 
 _logger = logging.getLogger(__name__)
 
+
+class RunbotMigrationException(Exception):
+    pass
+
+
 def migrate(cr, version):
     env = Environment(cr, SUPERUSER_ID, {})
+
+    # monkey patch github to raise an exception during migration to avoid problems
+    def _github():
+        raise RunbotMigrationException('_github call')
+
+    env['runbot.remote']._github = _github
+
     # some checks:
     for keyword in ('real_build', 'duplicate_id', '_get_all_commit', '_get_repo', '_copy_dependency_ids', 'Commit'):
         matches = env['runbot.build.config.step'].search([('python_code', 'like', keyword)])
@@ -36,6 +48,7 @@ def migrate(cr, version):
     repos_infos = {}
     triggers = {}
     triggers_by_project = defaultdict(list)
+    deleted_repos_ids = set()
 
     RD_project = env.ref('runbot.main_project')
     security_project = env['runbot.project'].create({
@@ -49,6 +62,11 @@ def migrate(cr, version):
         'odoo-security': security_project,
         'enterprise-security': security_project,
     }
+
+    # remove the SET NULL on runbot_build.repo_id when the repo is deleted.
+    # Otherwise we will not be able to create commits later
+    cr.execute('ALTER TABLE runbot_build DROP CONSTRAINT IF EXISTS runbot_build_repo_id_fkey1;')
+
     cr.execute("""
         SELECT 
         id, name, duplicate_id, modules, modules_auto, server_files, manifest_files, addons_paths, mode, token, repo_config_id
@@ -95,6 +113,7 @@ def migrate(cr, version):
         if duplicate_id in visited:
             # TODO redirect duplicate -> repo ?
             cr.execute('DELETE FROM runbot_repo WHERE id = %s', (id, ))
+            deleted_repos_ids.add(id)
             if repos_infos[duplicate_id] != repo_infos:
                 _logger.warning('deleting duplicate with different values:\nexisting->%s\ndeleted->%s', repos_infos[duplicate_id], repo_infos)
         else:
@@ -142,16 +161,12 @@ def migrate(cr, version):
     branches._compute_reference_name()
 
     bundles = {('master', RD_project.id):env.ref('runbot.bundle_master')}
-    versions = {}
     branch_to_bundle = {}
     branch_to_version = {}
     progress = _bar(len(branches))
+
     for i, branch in enumerate(branches):
         progress.update(i)
-        if branch.sticky and branch.name not in versions:
-            versions[branch.name] = env['runbot.version'].create({
-                'name': branch.name,
-            })
         repo = branch.remote_id.repo_id
         if branch.target_branch_name and branch.pull_head_name:
             # 1. update source_repo: do not call github and use a naive approach:
@@ -170,10 +185,6 @@ def migrate(cr, version):
                 'project_id': project_id,
                 'sticky': branch.sticky,
                 'is_base': branch.sticky,
-                'version_id': next((version.id for k, version in versions.items() if (
-                    k == branch.target_branch_name or \
-                    branch.name.startswith(k)
-                )), next(version.id for k, version in versions.items() if k=='master'))
             })
             bundles[key] = bundle
         bundle = bundles[key]
@@ -210,8 +221,10 @@ def migrate(cr, version):
             repo_id, name, author, author_email, committer, committer_email, subject, date, duplicate_id, branch_id
             FROM runbot_build ORDER BY id asc LIMIT %s OFFSET %s""", (batch_size, offset))
 
-        for id ,repo_id, name, author, author_email, committer, committer_email, subject, date, duplicate_id, branch_id in cr.fetchall():
+        for id, repo_id, name, author, author_email, committer, committer_email, subject, date, duplicate_id, branch_id in cr.fetchall():
             progress.update(counter)
+            remote_id = env['runbot.remote'].browse(repo_id)
+            assert remote_id.exists()
             if not repo_id:
                 _logger.warning('No repo_id for build %s, skipping', id)
                 continue
@@ -219,14 +232,14 @@ def migrate(cr, version):
             if key in sha_repo_commits:
                 commit = sha_repo_commits[key]
             else:
-                if duplicate_id and env['runbot.repo'].browse(repo_id).project_id.id != RD_project.id:
+                if duplicate_id and remote_id.repo_id.project_id.id != RD_project.id:
                     cross_project_duplicate_ids.append(id)
                 elif duplicate_id:
                     _logger.warning('Problem: duplicate: %s,%s', id, duplicate_id)
 
                 commit = env['runbot.commit'].create({
                     'name': name,
-                    'repo_id': repo_id,
+                    'repo_id': remote_id.repo_id.id,  # now that the repo_id on the build correspond to a remote_id
                     'author': author,
                     'author_email': author_email,
                     'committer': committer,
@@ -244,8 +257,9 @@ def migrate(cr, version):
 
     progress.finish()
 
-    _logger.info('Cleaning cross project duplicates')
-    cr.execute("UPDATE runbot_build SET local_state='done', duplicate_id=NULL WHERE id IN %s", (tuple(cross_project_duplicate_ids), ))
+    if cross_project_duplicate_ids:
+        _logger.info('Cleaning cross project duplicates')
+        cr.execute("UPDATE runbot_build SET local_state='done', duplicate_id=NULL WHERE id IN %s", (tuple(cross_project_duplicate_ids), ))
 
     _logger.info('Creating params')
     counter = 0
@@ -273,23 +287,25 @@ def migrate(cr, version):
 
         for id, branch_id, repo_id, extra_params, config_id, config_data in cr.fetchall():
 
+            remote_id = env['runbot.remote'].browse(repo_id)
             build_commit_ids_create_values = [
-                {'commit_id': build_commit_ids[id][repo_id], 'repo_id': repo_id, 'match_type':'exact'}]
+                {'commit_id': build_commit_ids[id][remote_id.repo_id.id], 'repo_id': remote_id.repo_id.id, 'match_type':'exact'}]
 
             cr.execute('SELECT dependency_hash, dependecy_repo_id, match_type FROM runbot_build_dependency WHERE build_id=%s', (id,))
             for dependency_hash, dependecy_repo_id, match_type in cr.fetchall():
-                key = (dependency_hash, dependecy_repo_id)
+                dependency_remote_id = env['runbot.remote'].browse(dependecy_repo_id)
+                key = (dependency_hash, dependency_remote_id.id)
                 commit = sha_repo_commits.get(key) or sha_commits.get(dependency_hash) # TODO check this (changing repo)
                 if not commit:
                     # -> most of the time, commit in exists but with wrong repo. Info can be found on other commit.
                     _logger.warning('Missing commit %s created', dependency_hash)
                     commit = env['runbot.commit'].create({
                         'name': dependency_hash,
-                        'repo_id': dependecy_repo_id,
+                        'repo_id': dependency_remote_id.repo_id.id,
                     })
                     sha_repo_commits[key] = commit
                     sha_commits[dependency_hash] = commit
-                build_commit_ids[id][dependecy_repo_id] = commit.id
+                build_commit_ids[id][dependency_remote_id.id] = commit.id
                 build_commit_ids_create_values.append({'commit_id': commit.id, 'match_type':match_type})
 
             params = param.create({
