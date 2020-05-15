@@ -10,6 +10,8 @@ class Commit(models.Model):
     _name = "runbot.commit"
     _description = "Commit"
 
+    #  TODO access rights
+
     _sql_constraints = [
         (
             "commit_unique",

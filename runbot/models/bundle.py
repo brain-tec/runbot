@@ -56,6 +56,7 @@ class Bundle(models.Model):
 
     # custom behaviour
     no_build = fields.Boolean('No build')
+    build_all = fields.Boolean('Force all triggers')
     modules = fields.Char("Modules to install", help="Comma-separated list of modules to install and test.")
 
     batch_ids = fields.One2many('runbot.batch', 'bundle_id')
@@ -192,6 +193,18 @@ class Bundle(models.Model):
         #    for bundle in self:
         #        self.env['runbot.bundle'].search([('name', '=like', '%s%%' % bundle.name), ('project_id', '=', self.project_id.id)])._compute_base_id()
 
+    def _force(self):
+        self.ensure_one()
+        if self.last_batch.state == 'preparing':
+            return 
+        new = self.env['runbot.batch'].create({
+            'last_update': fields.Datetime.now(),
+            'bundle_id': self.id,
+            'state': 'preparing',
+        })
+        self.last_batch = new
+        new.sudo()._prepare(force=True)
+        return new
 
     def _get(self, branch):
         name = branch.reference_name
@@ -304,12 +317,13 @@ class Batch(models.Model):
             if batch.state == 'preparing' and batch.last_update < fields.Datetime.now() - datetime.timedelta(seconds=60):
                 batch._prepare()
 
-    def _prepare(self):
+    def _prepare(self, force=False, category=None):
         #  For all commit on real branches:
+        category = category or self.env.ref('runbot.default_category')
         self.state = 'ready'
         _logger.info('Preparing batch %s', self.id)
         project = self.bundle_id.project_id
-        triggers = self.env['runbot.trigger'].search([('project_id', '=', project.id), ('category_id', '=', self.env.ref('runbot.default_category').id)])
+        triggers = self.env['runbot.trigger'].search([('project_id', '=', project.id), ('category_id', '=', category.id)])
         pushed_repo = self.batch_commit_ids.mapped('commit_id.repo_id')
         dependency_repos = triggers.mapped('dependency_ids')
         all_repos = triggers.mapped('repo_ids') | dependency_repos
@@ -352,17 +366,18 @@ class Batch(models.Model):
         project_id = self.bundle_id.project_id.id
         config_by_trigger = {}
         for trigger_custom in self.bundle_id.trigger_custom_ids:
-            config_by_trigger[trigger_custom.trigger_id] = trigger_custom.config_id
+            config_by_trigger[trigger_custom.trigger_id.id] = trigger_custom.config_id
+        print(config_by_trigger)
         for trigger in triggers:
             link_type = 'created'
             build = self.env['runbot.build']
             trigger_repos = trigger.repo_ids | trigger.dependency_ids
             # in any case, search for an existing build
-            config_id = config_by_trigger.get(trigger, trigger.config_id.id)
+            config = config_by_trigger.get(trigger.id, trigger.config_id)
             params = self.env['runbot.build.params'].create({
                 'version_id':  version_id,
                 'extra_params': '',
-                'config_id': trigger.config_id.id,
+                'config_id': config.id,
                 'project_id': project_id,
                 'trigger_id': trigger.id,  # for future reference and access rights
                 'config_data': {},
@@ -377,7 +392,7 @@ class Batch(models.Model):
             # TODO sort on result?
             if build:
                 link_type = 'matched'
-            elif trigger.repo_ids & pushed_repo: # common repo between triggers and pushed
+            elif trigger.repo_ids & pushed_repo or force or bundle.build_all: # common repo between triggers and pushed
                 build = self.env['runbot.build'].create({
                     'params_id': params.id,
                 })

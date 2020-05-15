@@ -104,6 +104,12 @@ class Runbot(Controller):
 
         return request.render('runbot.bundle', context)
 
+    @route([
+        '/runbot/bundle/<model("runbot.bundle"):bundle>/force',
+    ], type='http', auth="public", methods=['GET', 'POST'], csrf=False)
+    def force_bundle(self, bundle, **post):
+        batch = bundle._force()
+        return werkzeug.utils.redirect('/runbot/batch/%s' % batch.id)
 
     @route(['/runbot/batch/<model("runbot.batch"):batch>'], website=True, auth='public', type='http')
     def batch(self, batch=None, more=False, **kwargs):

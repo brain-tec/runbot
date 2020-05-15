@@ -49,7 +49,7 @@ access_runbot_trigger_runbot_admin,access_runbot_trigger_runbot_admin,runbot.mod
 access_runbot_repo_user,access_runbot_repo_user,runbot.model_runbot_repo,runbot.group_user,1,0,0,0
 access_runbot_repo_runbot_admin,access_runbot_repo_runbot_admin,runbot.model_runbot_repo,runbot.group_runbot_admin,1,1,1,1
 
-access_runbot_commit_user,access_runbot_commit_user,runbot.model_runbot_commit,runbot.group_user,0,0,0,0
+access_runbot_commit_user,access_runbot_commit_user,runbot.model_runbot_commit,runbot.group_user,1,0,0,0
 
 access_runbot_build_params_user,access_runbot_build_params_user,runbot.model_runbot_build_params,runbot.group_user,1,0,0,0
 access_runbot_build_params_runbot_admin,access_runbot_build_params_runbot_admin,runbot.model_runbot_build_params,runbot.group_runbot_admin,1,1,1,1
