@@ -73,7 +73,7 @@ class Runbot(models.AbstractModel):
         if assignable_slots > 0:
             allocated = self._allocate_builds(host, assignable_slots, domain)
             if allocated:
-                _logger.debug('Builds %s where allocated to runbot' % allocated)
+                _logger.debug('Builds %s where allocated to runbot', allocated)
 
     def _get_builds_to_init(self, host):
         domain_host = self.build_domain_host(host)
@@ -85,36 +85,15 @@ class Runbot(models.AbstractModel):
 
     def _gc_running(self, host):
         running_max = host.get_running_max()
-        # terminate and reap doomed build
         domain_host = self.build_domain_host(host)
         Build = self.env['runbot.build']
-        # some builds are marked as keep running
         cannot_be_killed_ids = Build.search(domain_host + [('keep_running', '!=', True)]).ids
-        # we want to keep one build running per sticky, no mather which host
-        sticky_branches_ids = self.env['runbot.branch'].search([('sticky', '=', True)]).ids
-        # search builds on host on sticky branches, order by position in branch history
-        if sticky_branches_ids:
-            self.env.cr.execute("""
-                SELECT
-                    id
-                FROM (
-                    SELECT
-                        bu.id AS id,
-                        bu.host as host,
-                        row_number() OVER (PARTITION BY branch_id order by bu.id desc) AS row
-                    FROM
-                        runbot_branch br INNER JOIN runbot_build bu ON br.id=bu.branch_id
-                    WHERE
-                        br.id in %s AND (bu.hidden = 'f' OR bu.hidden IS NULL)
-                    ) AS br_bu
-                WHERE
-                    row <= 4 AND host = %s
-                ORDER BY row, id desc
-                """, [tuple(sticky_branches_ids), host.name]
-            )
-            cannot_be_killed_ids += self.env.cr.fetchall() #looks wrong?
-        cannot_be_killed_ids = cannot_be_killed_ids[:running_max]  # ensure that we don't try to keep more than we can handle
-
+        sticky_bundles = self.env['runbot.bundle'].search([('sticky', '=', True)])
+        cannot_be_killed_ids = [
+            build.id
+            for build in sticky_bundles.mapped('last_batchs.slot_ids.build_id')
+            if build.host == host.name
+        ][:running_max]
         build_ids = Build.search(domain_host + [('local_state', '=', 'running'), ('id', 'not in', cannot_be_killed_ids)], order='job_start desc').ids
         Build.browse(build_ids)[running_max:]._kill()
 

@@ -1,24 +1,25 @@
 # -*- coding: utf-8 -*-
 import datetime
-import dateutil
 import json
 import logging
 import re
-import requests
-import signal
 import subprocess
 import time
 
-from odoo.exceptions import UserError, ValidationError
-from odoo.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT
-from odoo import models, fields, api, registry
+import dateutil
+import requests
+
+from odoo import models, fields, api
 from ..common import os, RunbotException
-from psycopg2.extensions import TransactionRollbackError
-from collections import defaultdict
+
 _logger = logging.getLogger(__name__)
 
 
-# WHAT IF push 12.0/13.0/13.4 in odoo-dev?
+def _sanitize(name):
+    for i in '@:/':
+        name = name.replace(i, '_')
+    return name
+
 
 class RepoTrigger(models.Model):
     """
@@ -30,19 +31,21 @@ class RepoTrigger(models.Model):
     _description = 'Triggers'
 
     name = fields.Char("Repo trigger descriptions")
-    project_id = fields.Many2one('runbot.project', required=True)  # main/security/runbot
+    project_id = fields.Many2one('runbot.project', string="Project id", required=True)  # main/security/runbot
     repo_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_triggers', string="Triggers", domain="[('project_id', '=', project_id)]")
     dependency_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_dependencies', string="Dependencies")
-    config_id = fields.Many2one('runbot.build.config', 'Config')
+    config_id = fields.Many2one('runbot.build.config', string="Config")
     ci_context = fields.Char("Ci context", default='ci/runbot')
+    category_id = fields.Many2one('runbot.trigger.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
 
-    # TODO add repo_module_id to replace modules_auto (many2many or option to only use trigger)
 
+class Category(models.Model):
+    _name = 'runbot.trigger.category'
+    _description = 'Trigger category'
 
-def _sanitize(name):
-    for i in '@:/':
-        name = name.replace(i, '_')
-    return name
+    name = fields.Char("Name")
+    icon = fields.Char("Font awesome icon")
+    # TODO add a view?
 
 
 class Remote(models.Model):
@@ -54,38 +57,52 @@ class Remote(models.Model):
     _order = 'sequence, id'
 
     name = fields.Char('Url', required=True)  # TODO valide with regex
-    sequence = fields.Integer('Sequence')
     repo_id = fields.Many2one('runbot.repo', required=True)
+
+    base_url = fields.Char(compute='_compute_base_url', string='Base URL', readonly=True)
     short_name = fields.Char('Short name', compute='_compute_short_name')
     remote_name = fields.Char('Remote name', compute='_compute_remote_name')
-    base = fields.Char(compute='_get_base_url', string='Base URL', readonly=True)  # Could be renamed to a more explicit name like base_url
+
+    sequence = fields.Integer('Sequence')
     fetch_heads = fields.Boolean('Fetch branches', default=True)
     fetch_pull = fields.Boolean('Fetch PR', default=False)
+
     token = fields.Char("Github token", groups="runbot.group_runbot_admin")
 
     @api.depends('name')
-    def _get_base_url(self):
+    def _compute_base_url(self):
         for remote in self:
             name = re.sub('.+@', '', remote.name)
             name = re.sub('^https://', '', name)  # support https repo style
             name = re.sub('.git$', '', name)
             name = name.replace(':', '/')
-            remote.base = name
+            remote.base_url = name
 
-    @api.depends('name', 'base')
+    @api.depends('name', 'base_url')
     def _compute_short_name(self):
         for remote in self:
-            remote.short_name = '/'.join(remote.base.split('/')[-2:])
+            remote.short_name = '/'.join(remote.base_url.split('/')[-2:])
 
     def _compute_remote_name(self):
         for remote in self:
             remote.remote_name = _sanitize(remote.short_name)
 
+    def create(self, values_list):
+        remote = super().create(values_list)
+        self._cr.after('commit', self.repo_id._update_git_config)
+        return remote
+
+    def write(self, values):
+        res = super().write(values)
+        self._cr.after('commit', self.repo_id._update_git_config)
+        return res
+
     def _github(self, url, payload=None, ignore_errors=False, nb_tries=2):
         """Return a http request to be sent to github"""
         for remote in self:
-            match_object = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', remote.base)
+            match_object = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', remote.base_url)
             if match_object:
+
                 url = url.replace(':owner', match_object.group(2))
                 url = url.replace(':repo', match_object.group(3))
                 url = 'https://api.%s%s' % (match_object.group(1), url)
@@ -102,29 +119,19 @@ class Remote(models.Model):
                             response = session.get(url)
                         response.raise_for_status()
                         if try_count > 0:
-                            _logger.info('Success after %s tries' % (try_count + 1))
+                            _logger.info('Success after %s tries', (try_count + 1))
                         return response.json()
-                    except Exception as e:
+                    except requests.HTTPError:
                         try_count += 1
                         if try_count < nb_tries:
                             time.sleep(2)
                         else:
                             if ignore_errors:
-                                _logger.exception('Ignored github error %s %r (try %s/%s)' % (url, payload, try_count, nb_tries))
+                                _logger.exception('Ignored github error %s %r (try %s/%s)', url, payload, try_count, nb_tries)
                             else:
                                 raise
             else:
-                _logger.error('Invalid url %s for github_status', remote.base)
-
-    def create(self, values_list):
-        remote = super().create(values_list)
-        self._cr.after('commit', self.repo_id._update_git_config)
-        return remote
-
-    def write(self, values):
-        res = super().write(values)
-        self._cr.after('commit', self.repo_id._update_git_config)
-        return res
+                _logger.error('Invalid url %s for github_status', remote.base_url)
 
 
 class Repo(models.Model):
@@ -229,33 +236,37 @@ class Repo(models.Model):
 
     def _git_export(self, sha):
         """Export a git repo into a sources"""
-        # TODO add automated tests
+        #  TODO add automated tests
         self.ensure_one()
         export_path = self._source_path(sha)
 
         if os.path.isdir(export_path):
-            _logger.info('git export: checkouting to %s (already exists)' % export_path)
+            _logger.info('git export: exporting to %s (already exists)', export_path)
             return export_path
 
         if not self._hash_exists(sha):
             self._update(force=True)
             if not self._hash_exists(sha):
-                try:
-                    result = self._git(['fetch', 'all', sha])
-                except:
-                    pass
+                for remote in self.remote_ids:
+                    try:
+                        self._git(['fetch', remote.remote_name, sha])  # TODO test me
+                        _logger.info('Success fetching specific head %s on %s', sha, remote)
+                        break
+                    except subprocess.CalledProcessError:
+                        pass
                 if not self._hash_exists(sha):
-                    raise RunbotException("Commit %s is unreachable. Did you force push the branch since build creation?" % sha)
+                    raise RunbotException("Commit %s is unreachable. Did you force push the branch?" % sha)
 
-        _logger.info('git export: checkouting to %s (new)' % export_path)
+        _logger.info('git export: exporting to %s (new)', export_path)
         os.makedirs(export_path)
 
         p1 = subprocess.Popen(['git', '--git-dir=%s' % self.path, 'archive', sha], stdout=subprocess.PIPE)
         p2 = subprocess.Popen(['tar', '-xmC', export_path], stdin=p1.stdout, stdout=subprocess.PIPE)
         p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
-        (out, err) = p2.communicate()
+        (_, err) = p2.communicate()
         if err:
-            raise RunbotException("Archive %s failed. Did you force push the branch since build creation? (%s)" % (sha, err))
+            # TODO FIXME this error is not catched, redirected to syslog.
+            raise RunbotException("Export for %s failed. (%s)" % (sha, err))
 
         # migration scripts link if necessary
         icp = self.env['ir.config_parameter']
@@ -306,9 +317,7 @@ class Repo(models.Model):
                 if not git_refs:
                     return []
                 refs = [tuple(field for field in line.split('\x00')) for line in git_refs.split('\n')]
-                print(len(refs))
                 refs = [r for r in refs if dateutil.parser.parse(r[2][:19]) + datetime.timedelta(days=max_age) > datetime.datetime.now()]
-                print(len(refs))
                 return refs
             except Exception:
                 _logger.exception('Fail to get refs for repo %s', self.name)
@@ -387,7 +396,6 @@ class Repo(models.Model):
                     continue
 
                 if bundle.last_batch.state != 'preparing':
-                    bundle.last_batch._skip()
                     preparing = self.env['runbot.batch'].create({
                         'last_update': fields.Datetime.now(),
                         'bundle_id': bundle.id,

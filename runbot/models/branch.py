@@ -69,15 +69,15 @@ class Branch(models.Model):
                         name_to_remote[pull_head_repo_name] = self.env['runbot.remote'].search([('name', 'like', '%%:%s' % pull_head_repo_name)], limit=1)
                     branch.pull_head_remote_id = name_to_remote[pull_head_repo_name]
 
-    @api.depends('name', 'remote_id.base', 'is_pr')
+    @api.depends('name', 'remote_id.base_url', 'is_pr')
     def _compute_branch_url(self):
         """compute the branch url based on name"""
         for branch in self:
             if branch.name:
                 if branch.is_pr:
-                    branch.branch_url = "https://%s/pull/%s" % (branch.remote_id.base, branch.name)
+                    branch.branch_url = "https://%s/pull/%s" % (branch.remote_id.base_url, branch.name)
                 else:
-                    branch.branch_url = "https://%s/tree/%s" % (branch.remote_id.base, branch.name)
+                    branch.branch_url = "https://%s/tree/%s" % (branch.remote_id.base_url, branch.name)
             else:
                 branch.branch_url = ''
 

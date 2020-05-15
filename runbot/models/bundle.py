@@ -1,18 +1,13 @@
-import glob
 import re
 import time
 import logging
 import datetime
 
-from ..common import s2human, dt2time
-from babel.dates import format_timedelta
-from datetime import timedelta
-
 from collections import defaultdict
-
+from babel.dates import format_timedelta
 from odoo import models, fields, api
+from ..common import dt2time
 
-#Todo test: create will invalid branch name, pull request
 
 _logger = logging.getLogger(__name__)
 
@@ -79,6 +74,8 @@ class Bundle(models.Model):
     intermediate_version_base_ids = fields.Many2many('runbot.bundle', 'Intermediate base bundles', compute='_compute_previous_version_base_id')
 
     priority = fields.Boolean('Build priority', default=False)
+
+    trigger_custom_ids = fields.One2many('runbot.trigger.custom', 'bundle_id')
 
     @api.depends('sticky')
     def _compute_make_stats(self):
@@ -148,17 +145,6 @@ class Bundle(models.Model):
                     bundle.previous_version_base_id = False
                     bundle.intermediate_version_base_ids = False
 
-    #def _init_column(self, column_name):
-    #    if column_name not in ('version_number',):
-    #        return super()._init_column(column_name)
-#
-    #    if column_name == 'version_number':
-    #        import traceback
-    #        traceback.print_stack()
-    #        for version in self.env['runbot.version'].search([]):
-    #            self.search([('version_id', '=', version.id)]).write({'version_number':version.number})
-
-
     def _compute_last_batchs(self):
         if self:
             batch_ids = defaultdict(list)
@@ -219,16 +205,38 @@ class Bundle(models.Model):
             })
         if bundle.is_base and branch.is_pr:
             _logger.warning('Trying to add pr to base_project, falling back on dummy bundle')
-            bundle = env.ref('runbot.bundle_dummy')
+            bundle = self.env.ref('runbot.bundle_dummy')
         return bundle
 
-    def _target_changed(self):
-        self.add_warning()
+    def consistency_warning(self):
+        if self.defined_base_id:
+            return [('info', 'This bundle has a manualy defined base: %s' % self.defined_base_id.name)]
+        warnings = []
+        for branch in self.branch_ids:
+            if branch.is_pr and branch.target_branch_name != self.base_id.name:
+                if branch.target_branch_name.startswith(self.base_id.name):
+                    warnings.append(('info', 'PR %s targeting a non base branch: %s'), (branch.dname, branch.target_branch_name))
+                else:
+                    warnings.append(('warning', 'PR %s targeting wrong version: %s (expecting %s)'), (branch.dname, branch.target_branch_name, self.base_id.name))
+            elif not branch.is_pr and not branch.name.startswith(self.base_id.name):
+                warnings.append(('warning', 'Branch %s not strating with version name (%s)'), (branch.dname, self.base_id.name))
 
-    def _last_succes(self):
-        # search last bundle where all linked builds are success
-        return None
 
+class TriggerCustomisation(models.Model):
+    _name = 'runbot.trigger.custom'
+    _description = 'Custom trigger'
+
+    trigger_id = fields.Many2one('runbot.trigger', domain="[('project_id', '=', bundle_id.project_id)]")
+    bundle_id = fields.Many2one('runbot.bundle')
+    config_id = fields.Many2one('runbot.build.config')
+
+    _sql_constraints = [
+        (
+            "bundle_custom_trigger_unique",
+            "unique (bundle_id, trigger_id)",
+            "Only one custom trigger per trigger per bundle is allowed",
+        )
+    ]
 
 class Batch(models.Model):
     _name = "runbot.batch"
@@ -241,6 +249,7 @@ class Batch(models.Model):
     state = fields.Selection([('preparing', 'Preparing'), ('ready', 'Ready'), ('done', 'Done')])
     hidden = fields.Boolean('Hidden', default=False)
     age = fields.Integer(compute='_compute_age', string='Build age')
+    category_id = fields.Many2one('runbot.trigger.category')
 
 
     @api.depends('create_date')
@@ -254,7 +263,7 @@ class Batch(models.Model):
 
     def get_formated_age(self):
         return format_timedelta(
-            timedelta(seconds=-self.age),
+            datetime.timedelta(seconds=-self.age),
             threshold=2.1,
             add_direction=True, locale='en'
         )
@@ -264,7 +273,7 @@ class Batch(models.Model):
         runbot_domain = self.env['runbot.runbot']._domain()
         return "http://%s/runbot/batch/%s" % (runbot_domain, self.id)
 
-    def _new_commit(self, branch):
+    def _new_commit(self, branch, match_type='new'):
         # if not the same hash for repo:
         commit = branch.head
         self.last_update = fields.Datetime.now()
@@ -277,18 +286,18 @@ class Batch(models.Model):
             self.env['runbot.batch.commit'].create({
                 'commit_id': commit.id,
                 'batch_id': self.id,
-                'match_type': 'new',
+                'match_type': match_type,
                 'branch_id': branch.id
             })
 
     def _skip(self):
         if not self or self.bundle_id.is_base:
             return
-        for slot in self.slot_ids:
-            if slot.build_id.global_state == 'pending':
-                slot.build_id._skip('Newer build found')
-        # TODO
-        # foreach pending build, if build is not in another batch, skip.
+        #for slot in self.slot_ids:
+        #    if slot.build_id.global_state == 'pending' and len(build.slot_ids) == 1:
+        #        slot.build_id._skip('Newer build found')  # TODO check no other slot points to build?
+        # Don't skip if:
+        # - build is attached to another batch which is last_batch of the bundle 
 
     def _process(self):
         for batch in self:
@@ -300,7 +309,7 @@ class Batch(models.Model):
         self.state = 'ready'
         _logger.info('Preparing batch %s', self.id)
         project = self.bundle_id.project_id
-        triggers = self.env['runbot.trigger'].search([('project_id', '=', project.id)])
+        triggers = self.env['runbot.trigger'].search([('project_id', '=', project.id), ('category_id', '=', self.env.ref('runbot.default_category').id)])
         pushed_repo = self.batch_commit_ids.mapped('commit_id.repo_id')
         dependency_repos = triggers.mapped('dependency_ids')
         all_repos = triggers.mapped('repo_ids') | dependency_repos
@@ -309,7 +318,7 @@ class Batch(models.Model):
         foreign_projects = dependency_repos.mapped('project_id') - project
         # find missing commits on bundle branches head
         def fill_missing(branch_ids, match_type):
-            for branch in branch_ids:
+            for branch in branch_ids.sorted('is_pr'): # branch first in case pr is closed. 
                 commit = branch.head
                 nonlocal missing_repos
                 if commit.repo_id in missing_repos:
@@ -341,11 +350,15 @@ class Batch(models.Model):
         batch_commit_by_repos = {batch_commit.commit_id.repo_id.id: batch_commit for batch_commit in self.batch_commit_ids}
         version_id = self.bundle_id.version_id.id
         project_id = self.bundle_id.project_id.id
+        config_by_trigger = {}
+        for trigger_custom in self.bundle_id.trigger_custom_ids:
+            custo_by_trigger[trigger_custom.trigger_id] = trigger_custom.config_id
         for trigger in triggers:
             link_type = 'created'
             build = self.env['runbot.build']
             trigger_repos = trigger.repo_ids | trigger.dependency_ids
             # in any case, search for an existing build
+            config_id = config_by_trigger.get(trigger, trigger.config_id.id)
             params = self.env['runbot.build.params'].create({
                 'version_id':  version_id,
                 'extra_params': '',
@@ -378,7 +391,7 @@ class Batch(models.Model):
                 'link_type': link_type,
             })
             # todo create build
-        self.env['runbot.batch.slot'].flush()
+        self.env['runbot.batch.slot'].flush() # TODO check is usefull
 
 
 class BatchCommit(models.Model):

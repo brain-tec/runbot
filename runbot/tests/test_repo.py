@@ -27,7 +27,7 @@ class TestRepo(RunbotCase):
         repo = self.repo_server
         remote = self.remote_server
         self.assertEqual(repo.path, '/tmp/static/repo/server')
-        self.assertEqual(remote.base, 'example.com/base/server')
+        self.assertEqual(remote.base_url, 'example.com/base/server')
         self.assertEqual(remote.short_name, 'base/server')
 
         # HTTPS

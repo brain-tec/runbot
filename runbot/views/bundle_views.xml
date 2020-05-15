@@ -13,21 +13,29 @@
                     <field name="is_base"/>
                     <field name="version_id"/>
                     <field name="no_build"/>
+                    <field name="priority"/>
                     <field name="branch_ids">
                         <tree>
-                            <field name="name"/>
+                            <field name="dname"/>
                             <field name="remote_id"/>
                             <field name="pull_head_name"/>
                             <field name="target_branch_name"/>
                         </tree>
                     </field>
-                    <field name="batch_ids">
+                    <field string="Trigger customisations" name="trigger_custom_ids">
+                        <tree editable="bottom">
+                            <field name="trigger_id" domain="[('project_id', '=', parent.project_id)]"/>
+                            <field name="config_id"/>
+                        </tree>
+                    </field>
+                    <field string="Last batches" name="last_batchs">
                         <tree>
                             <field name="state"/>
                             <field name="batch_commit_ids"/>
                             <field name="slot_ids"/>
                         </tree>
                     </field>
+
                 </group>
             </form>
         </field>

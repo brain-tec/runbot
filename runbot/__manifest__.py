@@ -33,12 +33,11 @@
         'templates/git.xml',
         'templates/badge.xml',
         'templates/bundle.xml',
-        'data/runbot.xml',
+        'data/runbot_data.xml',
         'data/runbot_build_config_data.xml',
         'data/build_parse.xml',
         'data/runbot_error_regex_data.xml',
         'data/error_link.xml',
         'data/website_data.xml',
-        'data/bundle.xml',
     ],
 }
