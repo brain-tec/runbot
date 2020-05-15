@@ -121,13 +121,13 @@ class TestBuildResult(RunbotCase):
         self.assertEqual(build.domain, 'runbot99.example.org:1234')
 
         # test json stored _data field and data property
-        self.assertEqual(build.config_data, {})
-        build.config_data = {'restore_url': 'foobar'}
-        self.assertEqual(build.config_data, {'restore_url': 'foobar'})
-        build.config_data['test_info'] = 'dummy'
-        self.assertEqual(build.config_data, {"restore_url": "foobar", "test_info": "dummy"})
-        del build.config_data['restore_url']
-        self.assertEqual(build.config_data, {"test_info": "dummy"})
+        self.assertEqual(build.params_id.config_data, {})
+        build.params_id.config_data = {'restore_url': 'foobar'}
+        self.assertEqual(build.params_id.config_data, {'restore_url': 'foobar'})
+        build.params_id.config_data['test_info'] = 'dummy'
+        self.assertEqual(build.params_id.config_data, {"restore_url": "foobar", "test_info": "dummy"})
+        del build.params_id.config_data['restore_url']
+        self.assertEqual(build.params_id.config_data, {"test_info": "dummy"})
 
         other = self.Build.create({
             'params_id': self.server_params.id,

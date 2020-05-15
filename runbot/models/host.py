@@ -13,14 +13,15 @@ class RunbotHost(models.Model):
 
     name = fields.Char('Host name', required=True, unique=True)
     disp_name = fields.Char('Display name')
-    active = fields.Boolean('Active', default=True)
+    active = fields.Boolean('Active', default=True, tracking=True)
     last_start_loop = fields.Datetime('Last start')
     last_end_loop = fields.Datetime('Last end')
     last_success = fields.Datetime('Last success')
-    assigned_only = fields.Boolean('Only accept assigned build', default=False)
+    assigned_only = fields.Boolean('Only accept assigned build', default=False, tracking=True)
     nb_worker = fields.Integer(
         'Number of max paralel build',
-        default=lambda self: self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_workers', default=2)
+        default=lambda self: self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_workers', default=2),
+        tracking=True
     )
     nb_testing = fields.Integer(compute='_compute_nb')
     nb_running = fields.Integer(compute='_compute_nb')

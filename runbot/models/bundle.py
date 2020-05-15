@@ -367,7 +367,6 @@ class Batch(models.Model):
         config_by_trigger = {}
         for trigger_custom in self.bundle_id.trigger_custom_ids:
             config_by_trigger[trigger_custom.trigger_id.id] = trigger_custom.config_id
-        print(config_by_trigger)
         for trigger in triggers:
             link_type = 'created'
             build = self.env['runbot.build']

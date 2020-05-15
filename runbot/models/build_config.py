@@ -308,7 +308,7 @@ class ConfigStep(models.Model):
             # not sure, to avoid old server to check other dbs
             cmd += ["--max-cron-threads", "0"]
 
-        db_name = build.config_data.get('db_name') or [step.db_name for step in build.params_id.config_id.step_ids() if step.job_type == 'install_odoo'][-1]
+        db_name = build.params_id.config_data.get('db_name') or [step.db_name for step in build.params_id.config_id.step_ids() if step.job_type == 'install_odoo'][-1]
         # we need to have at least one job of type install_odoo to run odoo, take the last one for db_name.
         cmd += ['-d', '%s-%s' % (build.dest, db_name)]
 
@@ -352,7 +352,7 @@ class ConfigStep(models.Model):
             python_params = ['-m', 'flamegraph', '-o', self._perfs_data_path()]
         cmd = build._cmd(python_params, py_version, sub_command=self.sub_command)
         # create db if needed
-        db_suffix = build.config_data.get('db_name') or self.db_name
+        db_suffix = build.params_id.config_data.get('db_name') or self.db_name
         db_name = "%s-%s" % (build.dest, db_suffix)
         if self.create_db:
             build._local_pg_createdb(db_name)
@@ -424,7 +424,7 @@ class ConfigStep(models.Model):
         kwargs = dict(message='Step %s finished in %s' % (self.name, s2human(build.job_time)))
         if self.job_type == 'install_odoo':
             kwargs['message'] += ' $$fa-download$$'
-            db_suffix = build.config_data.get('db_name') or self.db_name
+            db_suffix = build.params_id.config_data.get('db_name') or self.db_name
             kwargs['path'] = '%s%s-%s.zip' % (build.http_log_url(), build.dest, db_suffix)
             kwargs['log_type'] = 'link'
         build._log('', **kwargs)

@@ -71,7 +71,7 @@
                 <t t-if="child.global_result == 'warn'"><t t-set="klass">warning</t></t>
                 <t t-if="child.global_result == 'ok'"><t t-set="klass">success</t></t>
                 <t t-if="child.global_result == 'killed'"><t t-set="klass">killed</t></t>
-                <a t-attf-href='/runbot/build/{{child.id}}'><span t-attf-class="label label-{{klass}}"><t t-esc="child.config_data.get('db_name') or child.config_id.name"/></span></a>
+                <a t-attf-href='/runbot/build/{{child.id}}'><span t-attf-class="label label-{{klass}}"><t t-esc="child.params_id.config_data.get('db_name') or child.config_id.name"/></span></a>
               </span>
               </td>
             </tr>

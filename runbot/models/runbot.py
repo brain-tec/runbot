@@ -73,7 +73,8 @@ class Runbot(models.AbstractModel):
         if assignable_slots > 0:
             allocated = self._allocate_builds(host, assignable_slots, domain)
             if allocated:
-                _logger.debug('Builds %s where allocated to runbot', allocated)
+
+                _logger.info('Builds %s where allocated to runbot', allocated)
 
     def _get_builds_to_init(self, host):
         domain_host = self.build_domain_host(host)
