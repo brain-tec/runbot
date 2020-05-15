@@ -22,8 +22,8 @@
           </form>
         </field>
     </record>
-          
-    
+
+
     <record id="branch_view_tree" model="ir.ui.view">
         <field name="name">runbot.branch.tree</field>
         <field name="model">runbot.branch</field>
@@ -31,20 +31,18 @@
             <tree string="Branches">
                 <field name="remote_id"/>
                 <field name="name"/>
-                <field name="priority"/>
-                <field name="state"/>
             </tree>
         </field>
     </record>
-    
+
     <record id="open_view_branch_tree" model="ir.actions.act_window">
         <field name="name">Branches</field>
         <field name="res_model">runbot.branch</field>
         <field name="view_mode">tree,form</field>
     </record>
-    
+
     <menuitem
-        name="Branches" 
+        name="Branches"
         id="runbot_menu_branch_tree"
         parent="runbot_menu_root"
         sequence="20"

@@ -149,6 +149,8 @@ def migrate(cr, version):
     #######################
     cr.execute('UPDATE runbot_branch SET name=branch_name')
 
+    #TODO si master en odoo-dev pas dans le bundle master du repo (faire ça malin)
+
     # no build, config, ...
     dummy_bundle = env.ref('runbot.bundle_dummy')
     ########################
@@ -164,6 +166,8 @@ def migrate(cr, version):
     branch_to_bundle = {}
     branch_to_version = {}
     progress = _bar(len(branches))
+    env.cr.execute("""SELECT id FROM runbot_branch WHERE sticky='t'""")
+    sticky_ids = [rec[0] for rec in env.cr.fetchall()]
 
     for i, branch in enumerate(branches):
         progress.update(i)
@@ -183,14 +187,14 @@ def migrate(cr, version):
             bundle = env['runbot.bundle'].create({
                 'name': name,
                 'project_id': project_id,
-                'sticky': branch.sticky,
-                'is_base': branch.sticky,
+                'sticky': branch.id in sticky_ids,
+                'is_base': branch.id in sticky_ids,
             })
             bundles[key] = bundle
         bundle = bundles[key]
         if bundle.is_base and branch.is_pr:
-            _logger.info('Trying to add pr to base bundle')
-        bundle=dummy_bundle
+            _logger.warning('Trying to add pr to base bundle')
+        bundle = dummy_bundle
         branch.bundle_id = bundle
         branch_to_bundle[branch.id] = bundle
         branch_to_version[branch.id] = bundle.version_id.id
@@ -228,7 +232,7 @@ def migrate(cr, version):
             if not repo_id:
                 _logger.warning('No repo_id for build %s, skipping', id)
                 continue
-            key = (name, repo_id)
+            key = (name, remote_id.repo_id.id)
             if key in sha_repo_commits:
                 commit = sha_repo_commits[key]
             else:
@@ -289,7 +293,7 @@ def migrate(cr, version):
 
             remote_id = env['runbot.remote'].browse(repo_id)
             build_commit_ids_create_values = [
-                {'commit_id': build_commit_ids[id][remote_id.repo_id.id], 'repo_id': remote_id.repo_id.id, 'match_type':'exact'}]
+                {'commit_id': build_commit_ids[id][remote_id.repo_id.id], 'match_type':'exact'}]
 
             cr.execute('SELECT dependency_hash, dependecy_repo_id, match_type FROM runbot_build_dependency WHERE build_id=%s', (id,))
             for dependency_hash, dependecy_repo_id, match_type in cr.fetchall():
@@ -312,8 +316,8 @@ def migrate(cr, version):
                 'version_id':  branch_to_version[branch_id],
                 'extra_params': extra_params,
                 'config_id': config_id,
-                'project_id': env['runbot.repo'].browse(repo_id).project_id,
-                'trigger_id': triggers[repo_id].id, # 
+                'project_id': env['runbot.repo'].browse(remote_id.repo_id.id).project_id,
+                'trigger_id': triggers[remote_id.repo_id.id].id,
                 'config_data': config_data,
                 'build_commit_ids': [(0, 0, values) for values in build_commit_ids_create_values]
             })
@@ -361,7 +365,7 @@ def migrate(cr, version):
             build_id = duplicate_id or id
             build_commits = build_commit_ids[build_id]
             batch_repos_ids = []
-            
+
             # check if this build can be added to last_batch
             if bundle.last_batch:
                 if create_date - bundle.last_batch.last_update < datetime.timedelta(minutes=5):
@@ -412,6 +416,7 @@ def migrate(cr, version):
             else:
                 batch.last_update = create_date
             env['runbot.batch.slot'].create({
+                # TODO need params_id here !
                 'trigger_id': triggers[repo_id].id,
                 'batch_id': batch.id,
                 'build_id': build_id,
