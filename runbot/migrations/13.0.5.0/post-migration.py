@@ -147,6 +147,7 @@ def migrate(cr, version):
     #######################
     # Branches
     #######################
+    cr.execute("""UPDATE runbot_branch SET is_pr = CASE WHEN name like 'refs/pull/%' THEN true ELSE false END;""")
     cr.execute('UPDATE runbot_branch SET name=branch_name')
 
     #TODO si master en odoo-dev pas dans le bundle master du repo (faire ça malin)
@@ -349,10 +350,10 @@ def migrate(cr, version):
     for offset in range(0, nb_root_build, batch_size):
         cr.execute("""
             SELECT
-            id, duplicate_id, repo_id, branch_id, create_date, build_type, config_id
+            id, duplicate_id, repo_id, branch_id, create_date, build_type, config_id, params_id
             FROM runbot_build WHERE parent_id IS NULL order by id asc
             LIMIT %s OFFSET %s""", (batch_size, offset))
-        for id, duplicate_id, repo_id, branch_id, create_date, build_type, config_id in cr.fetchall():
+        for id, duplicate_id, repo_id, branch_id, create_date, build_type, config_id, params_id in cr.fetchall():
             progress.update(counter)
             counter += 1
             if repo_id is None:
@@ -415,9 +416,11 @@ def migrate(cr, version):
                 bundle.last_batch = batch
             else:
                 batch.last_update = create_date
+
+            real_repo_id = env['runbot.remote'].browse(repo_id).repo_id.id
             env['runbot.batch.slot'].create({
-                # TODO need params_id here !
-                'trigger_id': triggers[repo_id].id,
+                'params_id': params_id,
+                'trigger_id': triggers[real_repo_id].id,
                 'batch_id': batch.id,
                 'build_id': build_id,
                 'link_type': 'rebuild' if build_type == 'rebuild' else 'matched' if duplicate_id else 'created',
