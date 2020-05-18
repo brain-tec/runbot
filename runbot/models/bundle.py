@@ -199,21 +199,6 @@ class Bundle(models.Model):
         new.sudo()._prepare(force=True)
         return new
 
-    def _get(self, branch):
-        name = branch.reference_name
-        project = branch.remote_id.repo_id.project_id
-        project.ensure_one()
-        bundle = self.search([('name', '=', name), ('project_id', '=', project.id)])
-        if not bundle:
-            bundle = self.create({
-                'name': name,
-                'project_id': project.id,
-            })
-        if bundle.is_base and branch.is_pr:
-            _logger.warning('Trying to add pr to base_project, falling back on dummy bundle')
-            bundle = self.env.ref('runbot.bundle_dummy')
-        return bundle
-
     def consistency_warning(self):
         if self.defined_base_id:
             return [('info', 'This bundle has a manualy defined base: %s' % self.defined_base_id.name)]

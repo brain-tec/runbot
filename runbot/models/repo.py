@@ -98,12 +98,18 @@ class Remote(models.Model):
         self._cr.after('commit', self.repo_id._update_git_config)
         return res
 
-    def _github(self, url, payload=None, ignore_errors=False, nb_tries=2):
+    def _github(self, url, payload=None, ignore_errors=False, nb_tries=2, recursive=False):
+        generator = self._github_generator(url, payload=payload, ignore_errors=ignore_errors, nb_tries=2, recursive=recursive)
+        if recursive:
+            return generator
+        result = list(generator)
+        return result[0] if result else False
+
+    def _github_generator(self, url, payload=None, ignore_errors=False, nb_tries=2, recursive=False):
         """Return a http request to be sent to github"""
         for remote in self:
             match_object = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', remote.base_url)
             if match_object:
-
                 url = url.replace(':owner', match_object.group(2))
                 url = url.replace(':repo', match_object.group(3))
                 url = 'https://api.%s%s' % (match_object.group(1), url)
@@ -111,28 +117,40 @@ class Remote(models.Model):
                 if remote.token:
                     session.auth = (remote.token, 'x-oauth-basic')
                 session.headers.update({'Accept': 'application/vnd.github.she-hulk-preview+json'})
-                try_count = 0
-                while try_count < nb_tries:
-                    try:
-                        if payload:
-                            response = session.post(url, data=json.dumps(payload))
-                        else:
-                            response = session.get(url)
-                        response.raise_for_status()
-                        if try_count > 0:
-                            _logger.info('Success after %s tries', (try_count + 1))
-                        return response.json()
-                    except requests.HTTPError:
-                        try_count += 1
-                        if try_count < nb_tries:
-                            time.sleep(2)
-                        else:
-                            if ignore_errors:
-                                _logger.exception('Ignored github error %s %r (try %s/%s)', url, payload, try_count, nb_tries)
+                while url:
+                    if recursive:
+                        _logger.info('Getting page %s', url)
+                    try_count = 0
+                    while try_count < nb_tries:
+                        try:
+                            if payload:
+                                response = session.post(url, data=json.dumps(payload))
                             else:
-                                raise
+                                response = session.get(url)
+                            response.raise_for_status()
+                            if try_count > 0:
+                                _logger.info('Success after %s tries', (try_count + 1))
+                            if recursive:
+                                url = {link.split(';')[1]: link.split(';')[0] for link in response.headers.get('link').split(',')}.get(' rel="next"')
+                                if url:
+                                    url = url.strip('<> ')
+                                yield response.json()
+                                break
+                            else:
+                                yield response.json()
+                                return
+                        except requests.HTTPError:
+                            try_count += 1
+                            if try_count < nb_tries:
+                                time.sleep(2)
+                            else:
+                                if ignore_errors:
+                                    _logger.exception('Ignored github error %s %r (try %s/%s)', url, payload, try_count, nb_tries)
+                                else:
+                                    raise
             else:
                 _logger.error('Invalid url %s for github_status', remote.base_url)
+
 
 
 class Repo(models.Model):
@@ -340,15 +358,10 @@ class Repo(models.Model):
         _logger.info('Cheking %s refs for new branches', len(refs))
         names = [r[0].split('/')[-1] for r in refs]
         branches = self.env['runbot.branch'].search([('name', 'in', names), ('remote_id', 'in', self.remote_ids.ids)])
-        ref_branches = {
-            'refs/%s/%s/%s' % (
-                branch.remote_id.remote_name,
-                'pull' if branch.is_pr else 'heads',
-                branch.name
-                ): branch
-            for branch in branches
-        }
+        ref_branches = {branch.ref(): branch for branch in branches}
+        new_branch_values = []
         for ref_name, sha, date, author, author_email, subject, committer, committer_email in refs:
+            
             if not ref_branches.get(ref_name):
                 # format example:
                 # refs/ruodoo-dev/heads/12.0-must-fail
@@ -358,11 +371,15 @@ class Repo(models.Model):
                 if not remote_id:
                     _logger.warning('Remote %s not found', remote_name)
                     continue
-                new_branch = self.env['runbot.branch'].create({'remote_id': remote_id, 'name': name, 'is_pr': branch_type == 'pull'})
+                new_branch_values.append({'remote_id': remote_id, 'name': name, 'is_pr': branch_type == 'pull'})
                 # TODO catch error for pr info. It may fail for multiple raison. closed? external? check corner cases
                 # TODO mark pr closed: 1206 was closed but fetched
-                _logger.info('new branch %s (%s) found in %s', name, new_branch.id, self.name)
-                ref_branches[ref_name] = new_branch
+                _logger.info('new branch %s found in %s', name, self.name)
+        if new_branch_values:
+            _logger.info('Creating new branches')
+            new_branches = self.env['runbot.branch'].create(new_branch_values)
+            for branch in new_branches:
+                ref_branches[branch.ref()] = branch
         return ref_branches
 
     def _find_new_commits(self, refs, ref_branches):

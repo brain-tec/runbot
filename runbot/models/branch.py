@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import logging
+from collections import defaultdict
 from odoo import models, fields, api
 
 _logger = logging.getLogger(__name__)
@@ -11,14 +12,14 @@ class Branch(models.Model):
     _order = 'name'
     _sql_constraints = [('branch_repo_uniq', 'unique (name,remote_id)', 'The branch must be unique per repository !')]
 
-    name = fields.Char('Ref Name', required=True)
+    name = fields.Char('Name', required=True)
     remote_id = fields.Many2one('runbot.remote', 'Remote', required=True, ondelete='cascade')
 
     head = fields.Many2one('runbot.commit', 'Head Commit')
     head_name = fields.Char('Head name', related='head.name', store=True)
 
-    reference_name = fields.Char(compute='_compute_reference_name', store=True)
-    bundle_id = fields.Many2one('runbot.bundle', 'Bundle', readonly=True, ondelete='cascade')
+    reference_name = fields.Char(compute='_compute_reference_name', string='Bundle name', store=True)
+    bundle_id = fields.Many2one('runbot.bundle', 'Bundle', compute='_compute_bundle_id', store=True, ondelete='cascade')
 
     is_pr = fields.Boolean('IS a pr', required=True)
     pull_head_name = fields.Char(compute='_compute_branch_infos', string='PR HEAD name', readonly=1, store=True)
@@ -58,19 +59,45 @@ class Branch(models.Model):
     def _compute_branch_infos(self, pull_info=None):
         """compute branch_url, pull_head_name and target_branch_name based on name"""
         name_to_remote = {}
+        prs = self.filtered(lambda branch: branch.is_pr)
+        pull_info_dict = {}
+        if not pull_info and len(prs) > 30: # this is arbitrary, we should store # page on remote
+            pr_per_remote = defaultdict(list)
+            for pr in prs:
+                pr_per_remote[pr.remote_id].append(pr)
+            for remote, prs in pr_per_remote.items():
+                _logger.info('Getting info in %s for %s pr using page scan', remote.name, len(prs))
+                pr_names = set([pr.name for pr in prs])
+                count = 0
+                for result in remote._github('/repos/:owner/:repo/pulls?state=all&sort=updated&direction=desc', ignore_errors=True, recursive=True):
+                    for info in result:
+                        number = str(info.get('number'))
+                        pr_names.discard(number)
+                        pull_info_dict[(remote, number)] = info
+                    count += 1
+                    if not pr_names:
+                        break
+                    if count > 100:
+                        _logger.info('Not all pr found after 100 pages: remaining: %s', pr_names)
+                        break
+
         for branch in self:
             if branch.name:
-                pi = pull_info or branch._get_pull_info()
+                pi = branch.is_pr and (pull_info or pull_info_dict.get((branch.remote_id, branch.name)) or branch._get_pull_info())
                 if pi:
                     try:
                         branch.target_branch_name = pi['base']['ref']
                         branch.pull_head_name = pi['head']['label']
-                        pull_head_repo_name = pi['head']['repo']['full_name']
-                        if pull_head_repo_name not in name_to_remote:
-                            name_to_remote[pull_head_repo_name] = self.env['runbot.remote'].search([('name', 'like', '%%:%s' % pull_head_repo_name)], limit=1)
-                        branch.pull_head_remote_id = name_to_remote[pull_head_repo_name]
-                    except TypeError:
-                        _logger.exception('Error for pr %s using pull_info %s', branch.name , pi)
+                        pull_head_repo_name = False
+                        if pi['head'].get('repo'):
+                            pull_head_repo_name = pi['head']['repo'].get('full_name')
+                            if pull_head_repo_name not in name_to_remote:
+                                name_to_remote[pull_head_repo_name] = self.env['runbot.remote'].search([('name', 'like', '%%:%s' % pull_head_repo_name)], limit=1)
+                            branch.pull_head_remote_id = name_to_remote[pull_head_repo_name]
+                        else:
+                            branch.pull_head_remote_id = False
+                    except (TypeError, AttributeError):
+                        _logger.exception('Error for pr %s using pull_info %s', branch.name, pi)
                         raise
 
     @api.depends('name', 'remote_id.base_url', 'is_pr')
@@ -85,12 +112,26 @@ class Branch(models.Model):
             else:
                 branch.branch_url = ''
 
-    @api.model_create_single
-    def create(self, vals):
-        branch = super().create(vals)
-        branch.bundle_id = self.env['runbot.bundle']._get(branch)
-        assert branch.bundle_id
-        return branch
+    @api.depends('reference_name', 'remote_id.repo_id.project_id')
+    def _compute_bundle_id(self):
+        for branch in self:
+            name = branch.reference_name
+            project = branch.remote_id.repo_id.project_id
+            project.ensure_one()
+            bundle = self.env['runbot.bundle'].search([('name', '=', name), ('project_id', '=', project.id)])
+            if not bundle:
+                bundle = self.env['runbot.bundle'].create({
+                    'name': name,
+                    'project_id': project.id,
+                })
+            elif bundle.is_base and branch.is_pr:
+                _logger.warning('Trying to add pr to base_project, falling back on dummy bundle')
+                bundle = self.env.ref('runbot.bundle_dummy')
+            branch.bundle_id = bundle
+
+    def create(self, value_list):
+        branches = super().create(value_list)
+        return branches
 
     def write(self, values):
         head = self.head
@@ -102,8 +143,16 @@ class Branch(models.Model):
         self.ensure_one()
         remote = self.remote_id
         if self.is_pr:
+            _logger.info('Getting info for %s', self.name)
             return remote._github('/repos/:owner/:repo/pulls/%s' % self.name, ignore_errors=False) or {} # TODO catch and send a managable exception
         return {}
+
+    def ref(self):
+        return 'refs/%s/%s/%s' % (
+                self.remote_id.remote_name,
+                'pull' if self.is_pr else 'heads',
+                self.name
+                )
 
     def recompute_infos(self):
         """ public method to recompute infos on demand """
