@@ -99,7 +99,7 @@
         <field name="view_mode">tree,form</field>
     </record>
     <record id="action_bundle_project" model="ir.actions.act_window">
-        <field name="name">Categories</field>
+        <field name="name">Projects</field>
         <field name="type">ir.actions.act_window</field>
         <field name="res_model">runbot.project</field>
         <field name="view_mode">tree,form</field>

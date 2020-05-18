@@ -50,7 +50,7 @@ class Bundle(models.Model):
     _name = "runbot.bundle"
     _description = "Bundle"
 
-    name = fields.Char('Bundle name', required=True, unique=True, help="Name of the base branch")
+    name = fields.Char('Bundle name', required=True, help="Name of the base branch")
     project_id = fields.Many2one('runbot.project', required=True)
     branch_ids = fields.One2many('runbot.branch', 'bundle_id')
 
@@ -63,13 +63,13 @@ class Bundle(models.Model):
     last_batch = fields.Many2one('runbot.batch', index=True)
     last_batchs = fields.Many2many('runbot.batch', 'Last batchs', compute='_compute_last_batchs')
 
-    sticky = fields.Boolean('Sticky')
-    is_base = fields.Boolean('Is base')
+    sticky = fields.Boolean('Sticky', index=True)
+    is_base = fields.Boolean('Is base', index=True)
     defined_base_id = fields.Many2one('runbot.bundle', 'Forced base bundle') # todo add constrains on project
     base_id = fields.Many2one('runbot.bundle', 'Base bundle', compute='_compute_base_id', store=True)
 
     version_id = fields.Many2one('runbot.version', 'Version', compute='_compute_version_id', store=True)
-    version_number = fields.Char(related='version_id.number', store=True)
+    version_number = fields.Char(related='version_id.number', store=True, index=True)
 
     previous_version_base_id = fields.Many2one('runbot.bundle', 'Previous base bundle', compute='_compute_previous_version_base_id')
     intermediate_version_base_ids = fields.Many2many('runbot.bundle', 'Intermediate base bundles', compute='_compute_previous_version_base_id')
@@ -185,18 +185,11 @@ class Bundle(models.Model):
     def write(self, values):
         super().write(values)
         self.flush() # TODO check that
-        #if 'is_base' in values:
-        #    (self.search([
-        #        ('project_id', 'in', self.mapped('project_id').ids),
-        #        ('is_base', '=', True)
-        #    ]) + self)._compute_previous_version_base_id()
-        #    for bundle in self:
-        #        self.env['runbot.bundle'].search([('name', '=like', '%s%%' % bundle.name), ('project_id', '=', self.project_id.id)])._compute_base_id()
 
     def _force(self):
         self.ensure_one()
         if self.last_batch.state == 'preparing':
-            return 
+            return
         new = self.env['runbot.batch'].create({
             'last_update': fields.Datetime.now(),
             'bundle_id': self.id,
@@ -263,7 +256,7 @@ class Batch(models.Model):
     hidden = fields.Boolean('Hidden', default=False)
     age = fields.Integer(compute='_compute_age', string='Build age')
     category_id = fields.Many2one('runbot.trigger.category')
-
+    log_ids = fields.One2many('runbot.batch.log', 'batch_id')
 
     @api.depends('create_date')
     def _compute_age(self):
@@ -310,7 +303,7 @@ class Batch(models.Model):
         #    if slot.build_id.global_state == 'pending' and len(build.slot_ids) == 1:
         #        slot.build_id._skip('Newer build found')  # TODO check no other slot points to build?
         # Don't skip if:
-        # - build is attached to another batch which is last_batch of the bundle 
+        # - build is attached to another batch which is last_batch of the bundle
 
     def _process(self):
         for batch in self:
@@ -323,7 +316,13 @@ class Batch(models.Model):
         self.state = 'ready'
         _logger.info('Preparing batch %s', self.id)
         project = self.bundle_id.project_id
-        triggers = self.env['runbot.trigger'].search([('project_id', '=', project.id), ('category_id', '=', category.id)])
+        triggers = self.env['runbot.trigger'].search([ # could be optimised for multiple batches. Ormcached method?
+            ('project_id', '=', project.id),
+            ('category_id', '=', category.id),
+            '|',
+                ('version_ids', 'in', self.bundle_id.version_id.id),
+                ('version_ids', '=', False)
+        ])
         pushed_repo = self.batch_commit_ids.mapped('commit_id.repo_id')
         dependency_repos = triggers.mapped('dependency_ids')
         all_repos = triggers.mapped('repo_ids') | dependency_repos
@@ -332,35 +331,39 @@ class Batch(models.Model):
         foreign_projects = dependency_repos.mapped('project_id') - project
         # find missing commits on bundle branches head
         def fill_missing(branch_ids, match_type):
-            for branch in branch_ids.sorted('is_pr'): # branch first in case pr is closed. 
-                commit = branch.head
-                nonlocal missing_repos
-                if commit.repo_id in missing_repos:
-                    self.env['runbot.batch.commit'].create({
-                        'commit_id': commit.id,
-                        'batch_id': self.id,
-                        'match_type': 'head',
-                        'branch_id': branch.id
-                    })
-                    missing_repos -= commit.repo_id
-                    # TODO manage multiple branch in same repo
+            if branch_ids:
+                for branch in branch_ids.sorted('is_pr'): # branch first in case pr is closed.
+                    commit = branch.head
+                    nonlocal missing_repos
+                    if commit.repo_id in missing_repos:
+                        self.env['runbot.batch.commit'].create({
+                            'commit_id': commit.id,
+                            'batch_id': self.id,
+                            'match_type': 'head',
+                            'branch_id': branch.id
+                        })
+                        missing_repos -= commit.repo_id
+                        # TODO manage multiple branch in same repo: chose best one and
+                        # add warning if different commit are found
+                        # add warning if bundle has warnings
 
         bundle = self.bundle_id
         if missing_repos:
             fill_missing(bundle.branch_ids, 'head')
 
         if missing_repos and foreign_projects:
-            fill_missing(bundle.search([('name', '=', bundle.name), ('project_id', 'in', foreign_projects.ids)]), 'head')
+            fill_missing(bundle.search([('name', '=', bundle.name), ('project_id', 'in', foreign_projects.ids)]).mapped('branch_ids'), 'head')
 
         bundle = self.bundle_id.base_id
         if missing_repos:
             fill_missing(bundle.branch_ids, 'base')
 
         if missing_repos and foreign_projects:
-            fill_missing(bundle.search([('name', '=', bundle.name), ('project_id', 'in', foreign_projects.ids)]), 'head')
+            fill_missing(bundle.search([('name', '=', bundle.name), ('project_id', 'in', foreign_projects.ids)]).mapped('branch_ids'), 'head')
 
         if missing_repos:
-            _logger.warning('Missing repo %s', missing_repos)
+            _logger.warning('Missing repo %s for batch %s', missing_repos.mapped('name'), self.id)
+            # TODO skip in this case or it will fail
         batch_commit_by_repos = {batch_commit.commit_id.repo_id.id: batch_commit for batch_commit in self.batch_commit_ids}
         version_id = self.bundle_id.version_id.id
         project_id = self.bundle_id.project_id.id
@@ -371,6 +374,9 @@ class Batch(models.Model):
             link_type = 'created'
             build = self.env['runbot.build']
             trigger_repos = trigger.repo_ids | trigger.dependency_ids
+            if trigger_repos & missing_repos:
+                self.warning('Missing commit for repo %s for trigger %s', (trigger_repos & missing_repos).mapped('name'), trigger.name)
+                continue
             # in any case, search for an existing build
             config = config_by_trigger.get(trigger.id, trigger.config_id)
             params = self.env['runbot.build.params'].create({
@@ -387,15 +393,14 @@ class Batch(models.Model):
                 'builds_reference_ids': []  # TODO
             })
             build = self.env['runbot.build'].search([('params_id', '=', params.id), ('parent_id', '=', False)], limit=1, order='id desc')
-            # id desc will take the most recent one if multiple build. Hopefully it is a green build. 
+            # id desc will take the most recent one if multiple build. Hopefully it is a green build.
             # TODO sort on result?
             if build:
                 link_type = 'matched'
-            elif trigger.repo_ids & pushed_repo or force or bundle.build_all: # common repo between triggers and pushed
+            elif trigger.repo_ids & pushed_repo or force or bundle.build_all or bundle.sticky: # common repo between triggers and pushed
                 build = self.env['runbot.build'].create({
                     'params_id': params.id,
                 })
-            # TODO manage other cases
 
             self.env['runbot.batch.slot'].create({
                 'batch_id': self.id,
@@ -404,9 +409,24 @@ class Batch(models.Model):
                 'params_id': params.id,
                 'link_type': link_type,
             })
-            # todo create build
-        self.env['runbot.batch.slot'].flush() # TODO check is usefull
 
+    def warning(self, message, *args):
+        self.log(message, *args, level='WARNING')
+
+    def log(self, message, *args, level='INFO'):
+        self.env['runbot.batch.log'].create({
+            'batch_id': self.id,
+            'message': message % args if args else message,
+            'level': level,
+        })
+
+class BatchLog(models.Model):
+    _name = 'runbot.batch.log'
+    _description = 'Batch log'
+
+    batch_id = fields.Many2one('runbot.batch', index=True)
+    message = fields.Char('Message')
+    level = fields.Char()
 
 class BatchCommit(models.Model):
     _name = 'runbot.batch.commit'

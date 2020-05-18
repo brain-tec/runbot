@@ -34,9 +34,10 @@ class RepoTrigger(models.Model):
     project_id = fields.Many2one('runbot.project', string="Project id", required=True)  # main/security/runbot
     repo_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_triggers', string="Triggers", domain="[('project_id', '=', project_id)]")
     dependency_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_dependencies', string="Dependencies")
-    config_id = fields.Many2one('runbot.build.config', string="Config")
+    config_id = fields.Many2one('runbot.build.config', string="Config", required=True)
     ci_context = fields.Char("Ci context", default='ci/runbot')
     category_id = fields.Many2one('runbot.trigger.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
+    version_ids = fields.Many2many('runbot.version', string="Allowed version ids", help="Only allow for versions, leave empty fo all")
 
 
 class Category(models.Model):
@@ -170,7 +171,7 @@ class Repo(models.Model):
         self.env.cr.execute("""
             SELECT repo_id, time FROM runbot_repo_reftime
             WHERE id IN (
-                SELECT max(id) FROM runbot_repo_reftime 
+                SELECT max(id) FROM runbot_repo_reftime
                 WHERE repo_id = any(%s) GROUP BY repo_id
             )
         """, [self.ids])
@@ -182,7 +183,7 @@ class Repo(models.Model):
         self.env.cr.execute("""
             SELECT repo_id, time FROM runbot_repo_hooktime
             WHERE id IN (
-                SELECT max(id) FROM runbot_repo_hooktime 
+                SELECT max(id) FROM runbot_repo_hooktime
                 WHERE repo_id = any(%s) GROUP BY repo_id
             )
         """, [self.ids])
@@ -312,7 +313,10 @@ class Repo(models.Model):
                 self.set_ref_time(get_ref_time)
                 fields = ['refname', 'objectname', 'committerdate:iso8601', 'authorname', 'authoremail', 'subject', 'committername', 'committeremail']
                 fmt = "%00".join(["%(" + field + ")" for field in fields])
-                git_refs = self._git(['for-each-ref', '--format', fmt, '--sort=-committerdate', 'refs/*/heads/*', 'refs/*/pull/*'])
+                cmd = ['for-each-ref', '--format', fmt, '--sort=-committerdate', 'refs/*/heads/*']
+                if any(remote.fetch_pull for remote in self.remote_ids):
+                    cmd.append('refs/*/pull/*')
+                git_refs = self._git(cmd)
                 git_refs = git_refs.strip()
                 if not git_refs:
                     return []
@@ -321,7 +325,7 @@ class Repo(models.Model):
                 return refs
             except Exception:
                 _logger.exception('Fail to get refs for repo %s', self.name)
-                self.env['runbot.runbot'].warning('Fail to get refs for repo %s', self.name)
+                # TODO self.env['runbot.runbot'].warning('Fail to get refs for repo %s', self.name)
         return []
 
     def _find_or_create_branches(self, refs):
@@ -333,7 +337,7 @@ class Repo(models.Model):
         """
 
         # FIXME WIP
-        _logger.info('Cheking branches')
+        _logger.info('Cheking %s refs for new branches', len(refs))
         names = [r[0].split('/')[-1] for r in refs]
         branches = self.env['runbot.branch'].search([('name', 'in', names), ('remote_id', 'in', self.remote_ids.ids)])
         ref_branches = {
@@ -355,6 +359,8 @@ class Repo(models.Model):
                     _logger.warning('Remote %s not found', remote_name)
                     continue
                 new_branch = self.env['runbot.branch'].create({'remote_id': remote_id, 'name': name, 'is_pr': branch_type == 'pull'})
+                # TODO catch error for pr info. It may fail for multiple raison. closed? external? check corner cases
+                # TODO mark pr closed: 1206 was closed but fetched
                 _logger.info('new branch %s (%s) found in %s', name, new_branch.id, self.name)
                 ref_branches[ref_name] = new_branch
         return ref_branches
@@ -366,7 +372,7 @@ class Repo(models.Model):
                              described in _find_or_create_branches
         """
         self.ensure_one()
-        _logger.info('Cheking commits %s', len(refs))
+        _logger.info('Cheking %s commits for new heads', len(refs))
 
         for ref_name, sha, date, author, author_email, subject, committer, committer_email in refs:
             branch = ref_branches[ref_name]
@@ -386,6 +392,8 @@ class Repo(models.Model):
                         'date': dateutil.parser.parse(date[:19]),
                     })
                 branch.head = commit
+
+                # TODO if a pr is created, status wont be send again if the branch was build. If last status for this commit exist, send it on the repo? per trigger?
                 # TODO add reflog -> history on commit found on branch
 
                 if not self.trigger_ids:
@@ -442,7 +450,7 @@ class Repo(models.Model):
                 _logger.warning('Git init failed with code %s and message: "%s"', git_init.returncode, git_init.stderr)
                 return
             self._update_git_config()
-            self._update_git(True)
+            return True
 
     def _update_git(self, force=False, poll_delay=5*60):
         """ Update the git repo on FS """
@@ -452,7 +460,7 @@ class Repo(models.Model):
             return False
         if not os.path.isdir(os.path.join(repo.path)):
             os.makedirs(repo.path)
-        self._git_init()
+        force = self._git_init() or force
         # TODO bare check repo in remotes
 
         # check for mode == hook

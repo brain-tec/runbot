@@ -15,7 +15,7 @@ class RunbotBadge(Controller):
         '/runbot/badge/<any(default,flat):theme>/<int:repo_id>/<branch>.svg',
     ], type="http", auth="public", methods=['GET', 'HEAD'])
     def badge(self, repo_id, branch, theme='default'):
-        # TODO adapt: no such thing as repo_id. 
+        # TODO adapt: no such thing as repo_id.
         # either change to only use name, and findcorresponding bundle last_instance sum of results.
         # or give a trigger_id and find the result for this trigger (maybe the best solution)
         domain = [('repo_id', '=', repo_id),

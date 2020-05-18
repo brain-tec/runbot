@@ -98,7 +98,7 @@ class CommitStatus(models.Model):
             'target_url': self.target_url,
             'description': self.description,
         }
-        if remote_ids:
+        if False and remote_ids:  # TODO remove this security False
             def send_github_status():
                 try:
                     db_registry = registry(_dbname)

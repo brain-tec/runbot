@@ -54,7 +54,7 @@ def migrate(cr, version):
     security_project = env['runbot.project'].create({
         'name': 'Security'
     })
-    project_matching = { # some hardcoded info 
+    project_matching = { # some hardcoded info
         'odoo': RD_project,
         'enterprise': RD_project,
         'upgrade': RD_project,
@@ -68,7 +68,7 @@ def migrate(cr, version):
     cr.execute('ALTER TABLE runbot_build DROP CONSTRAINT IF EXISTS runbot_build_repo_id_fkey1;')
 
     cr.execute("""
-        SELECT 
+        SELECT
         id, name, duplicate_id, modules, modules_auto, server_files, manifest_files, addons_paths, mode, token, repo_config_id
         FROM runbot_repo order by id
     """)

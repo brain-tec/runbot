@@ -78,7 +78,7 @@
           <a t-attf-href="/runbot/build/#{bu.id}" t-attf-class="btn btn-default" style="width:110px;">
             <span t-esc="slot.trigger_id.name"/>
           </a>
-          <a t-if="bu.local_state=='running'" 
+          <a t-if="bu.local_state=='running'"
             t-attf-href="http://{{bu.domain}}/?db={{bu.dest}}-all"
             class="btn btn-primary" title="Sign in on this build"
             aria-label="Sign in on this build">
@@ -87,8 +87,10 @@
             href="#" data-runbot="wakeup" t-att-data-runbot-build="bu.id"
             t-attf-class="btn btn-default {{'disabled' if bu.requested_action == 'wake_up' else ''}}" title="Wake up this build" aria-label="Wake up this build">
             <i class="fa fa-coffee fa-fw"/></a>
-          <span t-if="bu.local_state not in ('running', 'done')" class="btn btn-info">
+          <span t-if="bu and bu.local_state not in ('running', 'done')" class="btn btn-info">
             <i class="fa fa-spinner fa-spin fa-fw"/></span>
+          <span t-if="not bu" class="btn btn-info">
+            <i class="fa fa-pause fa-fw"/></span>
           </div>
     </template>
 
@@ -140,7 +142,7 @@
                                           <div class="badge badge-light" t-esc="batch.get_formated_age()"/>
                                         </div>
                                         <t t-foreach="batch.slot_ids" t-as="slot">
-                                          <t t-call="runbot.slot_button"/>
+                                          <t t-if="slot.build_id" t-call="runbot.slot_button"/>
                                         </t>
                                         <div t-if="more">
                                           <small>

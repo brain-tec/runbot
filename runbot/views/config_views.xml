@@ -100,7 +100,7 @@
         <tree string="Build Configs">
           <field name="name"/>
           <field name="description"/>
-          <field name="group"/>
+          <field name="update_github_state"/>
         </tree>
       </field>
     </record>

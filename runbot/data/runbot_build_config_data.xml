@@ -29,8 +29,8 @@
         <field name="name">Default</field>
         <field name="update_github_state" eval="True"/>
         <field name="step_order_ids" eval="[(5,0,0),
-        (0, 0, {'step_id': ref('runbot_build_config_step_test_base')}), 
-        (0, 0, {'step_id': ref('runbot_build_config_step_test_all')}), 
+        (0, 0, {'step_id': ref('runbot_build_config_step_test_base')}),
+        (0, 0, {'step_id': ref('runbot_build_config_step_test_all')}),
         (0, 0, {'step_id': ref('runbot_build_config_step_run')})]"/>
         <field name="protected" eval="True"/>
     </record>
@@ -39,7 +39,7 @@
         <field name="name">Default no run</field>
         <field name="update_github_state" eval="True"/>
         <field name="step_order_ids" eval="[(5,0,0),
-        (0, 0, {'step_id': ref('runbot_build_config_step_test_base')}), 
+        (0, 0, {'step_id': ref('runbot_build_config_step_test_base')}),
         (0, 0, {'step_id': ref('runbot_build_config_step_test_all')})]"/>
         <field name="protected" eval="True"/>
     </record>

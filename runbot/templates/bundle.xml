@@ -42,7 +42,7 @@
                                 <td t-esc="batch.create_date"></td>
                                 <td t-esc="batch.last_update" t-if="more"></td>
                                 <td t-esc="batch.state" t-if="more"></td>
-                                <td> 
+                                <td>
                                     <t t-foreach="batch.batch_commit_ids" t-as="bundle_commit">
                                         <a t-attf-href="/runbot/commit/#{bundle_commit.commit_id.id}">
                                             <span class="label" t-esc="bundle_commit.commit_id.dname"/>
@@ -85,13 +85,17 @@
                 Commit date: <span t-esc="commit.date"/><br/>
               </div>
             </td></tr>
-            <tr><td>Slots</td><td>
+            <tr><td>Builds</td><td>
                 <t t-foreach="batch.slot_ids" t-as="slot">
                     <t t-call="runbot.slot_button"/>
                 </t>
             </td></tr>
         </table>
         <div>TODO: Links, rebuild, wizard, launch empty slots, ...</div>
+        <t t-foreach="batch.log_ids" t-as="log">
+            <t t-set="logclass" t-value="dict(ERROR='danger', WARNING='warning', INFO='info').get(log.level, 'warning')"/>
+            <div t-attf-class="alert alert-{{logclass}}"><b t-esc="log.level"/> -- <span t-esc="log.message"/></div>
+        </t>
     </t>
 </template>
 </data>

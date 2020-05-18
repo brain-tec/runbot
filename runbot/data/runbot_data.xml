@@ -30,21 +30,31 @@
     <record model="ir.actions.server" id="action_toggle_is_base">
         <field name="name">Mark is base</field>
         <field name="model_id" ref="runbot.model_runbot_bundle" />
-        <field name="binding_model_id" ref="runbot.model_runbot_bundle" /> 
+        <field name="binding_model_id" ref="runbot.model_runbot_bundle" />
         <field name="type">ir.actions.server</field>
         <field name="state">code</field>
         <field name="code">
             records.write({'is_base': True})
         </field>
     </record>
-    <record model="ir.actions.server" id="action_toggle_no_build">
+    <record model="ir.actions.server" id="action_mark_no_build">
         <field name="name">Mark no build</field>
         <field name="model_id" ref="runbot.model_runbot_bundle" />
-        <field name="binding_model_id" ref="runbot.model_runbot_bundle" /> 
+        <field name="binding_model_id" ref="runbot.model_runbot_bundle" />
         <field name="type">ir.actions.server</field>
         <field name="state">code</field>
         <field name="code">
             records.write({'no_build': True})
+        </field>
+    </record>
+    <record model="ir.actions.server" id="action_mark_build">
+        <field name="name">Mark build</field>
+        <field name="model_id" ref="runbot.model_runbot_bundle" />
+        <field name="binding_model_id" ref="runbot.model_runbot_bundle" />
+        <field name="type">ir.actions.server</field>
+        <field name="state">code</field>
+        <field name="code">
+            records.write({'no_build': False})
         </field>
     </record>
 

@@ -190,7 +190,7 @@ class BuildResult(models.Model):
     parent_id = fields.Many2one('runbot.build', 'Parent Build', index=True)
     parent_path = fields.Char('Parent path', index=True)
     # should we add a has children stored boolean?
-    hidden = fields.Boolean("Don't show build on main page", default=False) # todo is it still usefull? 
+    hidden = fields.Boolean("Don't show build on main page", default=False) # todo is it still usefull?
     children_ids = fields.One2many('runbot.build', 'parent_id')
 
     # config of top_build is inherithed from params, but subbuild will have different configs
@@ -306,7 +306,7 @@ class BuildResult(models.Model):
         return builds
 
     def copy(self, default=None):
-        return super(BuildResult, self.with_context(force_rebuild=True)).copy(default)
+        return super().copy(default)
 
     def write(self, values):
         # some validation to ensure db consistency
@@ -413,30 +413,42 @@ class BuildResult(models.Model):
 
     def _rebuild(self, message=None):
         """Force a rebuild and return a recordset of builds"""
-        rebuilds = self.env['runbot.build']
-        for build in self:
-            if build.local_state in ['running', 'done', 'duplicate']:
-                # TODO kill other build if not correct local_state?
-                # dont rebuild if there is a more recent build for this params? 
-                values = {
-                    'params_id': build.params_id.id,
-                    'build_type': 'rebuild',
-                    'hidden': build.hidden,
-                }
-                if build.parent_id:
-                    values.update({
-                        'parent_id': build.parent_id.id,
-                    })
-                    build.orphan_result = True
-                else:
-                    pass
-                    # replace build in slots? create new slots and marks olds has inactive? 
+        self.ensure_one()
+        if self.local_result == 'ok':
+            return
+        # TODO kill other build if not correct local_state?
+        # dont rebuild if there is a more recent build for this params?
+        values = {
+            'params_id': self.params_id.id,
+            'build_type': 'rebuild',
+            'hidden': self.hidden,
+        }
+        if self.parent_id:
+            values.update({
+                'parent_id': build.parent_id.id,
+            })
+            self.orphan_result = True
 
-                new_build = build.create(values)
-                rebuilds |= new_build
-                user = request.env.user if request else self.env.user
-                new_build._log('rebuild', 'Rebuild initiated by %s%s' % (user.name, (' :%s' % message) if message else ''))
-        return rebuilds
+        new_build = self.create(values)
+        rebuilds |= new_build
+        user = request.env.user if request else self.env.user
+        new_build._log('rebuild', 'Rebuild initiated by %s%s' % (user.name, (' :%s' % message) if message else ''))
+
+        if self.local_state not in ['running', 'done']:
+            self._ask_kill('Killed by rebuild requested by %s (%s) (new build:%s)', user.name, uid, new_build.id)
+
+        if not self.parent_id:
+            slots = self.env['runbot.batch.slot'].search([('build_id', '=', self.id)])
+            for slot in slots:
+                if slot.link_type=='matched':
+                    slot.build_id = new_build
+                else:
+                    slot.active = False
+                    slot.copy({
+                        'build_id': new_build.id,
+                        'link_type': 'rebuild',
+                    })
+        return new_build
 
     def _skip(self, reason=None):
         """Mark builds ids as skipped"""
@@ -677,7 +689,7 @@ class BuildResult(models.Model):
 
             build.write(build_values)
             if ending_build:
-                build._github_status()              
+                build._github_status()
                 if not build.local_result:  # Set 'ok' result if no result set (no tests job on build)
                     build.local_result = 'ok'
                     build._logger("No result set, setting ok by default")

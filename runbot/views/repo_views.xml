@@ -15,6 +15,7 @@
                 <field name="repo_ids"/>
                 <field name="dependency_ids"/>
                 <field name="config_id"/>
+                <field name="version_ids"/>
               </group>
             </sheet>
           </form>
@@ -74,8 +75,20 @@
           </form>
         </field>
     </record>
-          
-    
+
+    <record id="remote_view_tree" model="ir.ui.view">
+        <field name="name">runbot.remote.tree</field>
+        <field name="model">runbot.remote</field>
+        <field name="arch" type="xml">
+            <tree string="Repositories">
+                <field name="name"/>
+                <field name="repo_id"/>
+                <field name="fetch_pull"/>
+                <field name="fetch_heads"/>
+            </tree>
+        </field>
+    </record>
+
     <record id="repo_view_tree" model="ir.ui.view">
         <field name="name">runbot.repo.tree</field>
         <field name="model">runbot.repo</field>
@@ -103,7 +116,7 @@
         <field name="res_model">runbot.remote</field>
         <field name="view_mode">tree,form</field>
     </record>
-    
+
     <menuitem name="Runbot" id="runbot_menu_root"/>
     <menuitem id="runbot_menu_repos_main" name="Repos" parent="runbot_menu_root"/>
     <menuitem
@@ -124,6 +137,6 @@
         sequence="30"
         action="runbot_triggers_action"
       />
-    
+
   </data>
 </odoo>

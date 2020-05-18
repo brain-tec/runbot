@@ -62,12 +62,16 @@ class Branch(models.Model):
             if branch.name:
                 pi = pull_info or branch._get_pull_info()
                 if pi:
-                    branch.target_branch_name = pi['base']['ref']
-                    branch.pull_head_name = pi['head']['label']
-                    pull_head_repo_name = pi['head']['repo']['full_name']
-                    if pull_head_repo_name not in name_to_remote:
-                        name_to_remote[pull_head_repo_name] = self.env['runbot.remote'].search([('name', 'like', '%%:%s' % pull_head_repo_name)], limit=1)
-                    branch.pull_head_remote_id = name_to_remote[pull_head_repo_name]
+                    try:
+                        branch.target_branch_name = pi['base']['ref']
+                        branch.pull_head_name = pi['head']['label']
+                        pull_head_repo_name = pi['head']['repo']['full_name']
+                        if pull_head_repo_name not in name_to_remote:
+                            name_to_remote[pull_head_repo_name] = self.env['runbot.remote'].search([('name', 'like', '%%:%s' % pull_head_repo_name)], limit=1)
+                        branch.pull_head_remote_id = name_to_remote[pull_head_repo_name]
+                    except TypeError:
+                        _logger.exception('Error for pr %s using pull_info %s', branch.name , pi)
+                        raise
 
     @api.depends('name', 'remote_id.base_url', 'is_pr')
     def _compute_branch_url(self):

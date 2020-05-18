@@ -371,7 +371,7 @@ Loading stuff
 odoo.stuff.modules.loading: Modules loaded.
 Some post install stuff
 Initiating shutdown
-"""     
+"""
         self.patchers['isfile'].return_value = True
         build.local_result = 'warn'
         with patch('builtins.open', mock_open(read_data=file_content)):

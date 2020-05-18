@@ -62,9 +62,9 @@ class Runbot(Controller):
                 SELECT id FROM runbot_bundle
                 WHERE {where_clause}
                 ORDER BY
-                    sticky asc,
+                    (case when sticky then 1 when sticky is null then 2 else 2 end),
                     case when sticky then version_number end collate "C" desc,
-                    case when not sticky then last_batch end desc
+                    last_batch desc
                 LIMIT 100""".format(where_clause=where_clause), where_params)
             # TODO check if where clausse is usefull on complete database
             bundles = env['runbot.bundle'].browse([r[0] for r in env.cr.fetchall()])
