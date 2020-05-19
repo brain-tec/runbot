@@ -95,7 +95,8 @@ class Branch(models.Model):
                         if pi['head'].get('repo'):
                             pull_head_repo_name = pi['head']['repo'].get('full_name')
                             if pull_head_repo_name not in name_to_remote:
-                                name_to_remote[pull_head_repo_name] = self.env['runbot.remote'].search([('name', 'like', '%%:%s' % pull_head_repo_name)], limit=1)
+                                owner, repo_name = pull_head_repo_name.split('/')
+                                name_to_remote[pull_head_repo_name] = self.env['runbot.remote'].search([('owner', '=', owner), ('repo_name', '=', repo_name)], limit=1)
                             branch.pull_head_remote_id = name_to_remote[pull_head_repo_name]
                     except (TypeError, AttributeError):
                         _logger.exception('Error for pr %s using pull_info %s', branch.name, pi)

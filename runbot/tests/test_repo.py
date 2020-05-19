@@ -26,17 +26,24 @@ class TestRepo(RunbotCase):
 
         repo = self.repo_server
         remote = self.remote_server
+        # name = 'bla@example.com:base/server'
         self.assertEqual(repo.path, '/tmp/static/repo/server')
         self.assertEqual(remote.base_url, 'example.com/base/server')
         self.assertEqual(remote.short_name, 'base/server')
+        self.assertEqual(remote.owner, 'base')
+        self.assertEqual(remote.repo_name, 'server')
 
         # HTTPS
         remote.name = 'https://bla@example.com/base/server.git'
         self.assertEqual(remote.short_name, 'base/server')
+        self.assertEqual(remote.owner, 'base')
+        self.assertEqual(remote.repo_name, 'server')
 
         # LOCAL
         remote.name = '/path/somewhere/bar.git'
         self.assertEqual(remote.short_name, 'somewhere/bar')
+        self.assertEqual(remote.owner, 'somewhere')
+        self.assertEqual(remote.repo_name, 'bar')
 
 
     @patch('odoo.addons.runbot.models.repo.Repo._get_fetch_head_time')

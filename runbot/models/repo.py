@@ -60,7 +60,10 @@ class Remote(models.Model):
     name = fields.Char('Url', required=True)  # TODO valide with regex
     repo_id = fields.Many2one('runbot.repo', required=True)
 
-    base_url = fields.Char(compute='_compute_base_url', string='Base URL', readonly=True)
+    base_url = fields.Char(compute='_compute_base_infos', string='Base URL', readonly=True)
+    owner = fields.Char(compute='_compute_base_infos', string='Repo Owner', store=True, readonly=True)
+    repo_name = fields.Char(compute='_compute_base_infos', string='Repo Name', store=True, readonly=True)
+
     short_name = fields.Char('Short name', compute='_compute_short_name')
     remote_name = fields.Char('Remote name', compute='_compute_remote_name')
 
@@ -71,12 +74,15 @@ class Remote(models.Model):
     token = fields.Char("Github token", groups="runbot.group_runbot_admin")
 
     @api.depends('name')
-    def _compute_base_url(self):
+    def _compute_base_infos(self):
         for remote in self:
             name = re.sub('.+@', '', remote.name)
             name = re.sub('^https://', '', name)  # support https repo style
             name = re.sub('.git$', '', name)
             name = name.replace(':', '/')
+            s = name.split('/')
+            remote.owner = s[-2]
+            remote.repo_name = s[-1]
             remote.base_url = name
 
     @api.depends('name', 'base_url')
