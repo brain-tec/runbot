@@ -209,7 +209,7 @@ def migrate(cr, version):
     sha_commits = {}
     sha_repo_commits = {}
     branch_heads = {}
-    build_commit_ids = defaultdict(dict)
+    commit_link_ids = defaultdict(dict)
     cr.execute("SELECT count(*) FROM runbot_build")
     nb_build = cr.fetchone()[0]
 
@@ -257,7 +257,7 @@ def migrate(cr, version):
             branch_heads[branch_id] = commit.id
             counter += 1
 
-            build_commit_ids[id][commit.repo_id.id] = commit.id
+            commit_link_ids[id][commit.repo_id.id] = commit.id
 
 
     progress.finish()
@@ -293,11 +293,11 @@ def migrate(cr, version):
         for id, branch_id, repo_id, extra_params, config_id, config_data in cr.fetchall():
 
             remote_id = env['runbot.remote'].browse(repo_id)
-            build_commit_ids_create_values = [
-                {'commit_id': build_commit_ids[id][remote_id.repo_id.id], 'match_type':'exact'}]
+            commit_link_ids_create_values = [
+                {'commit_id': commit_link_ids[id][remote_id.repo_id.id], 'match_type':'exact'}]
 
-            cr.execute('SELECT dependency_hash, dependecy_repo_id, match_type FROM runbot_build_dependency WHERE build_id=%s', (id,))
-            for dependency_hash, dependecy_repo_id, match_type in cr.fetchall():
+            cr.execute('SELECT dependency_hash, dependecy_repo_id, closest_branch_id, match_type FROM runbot_build_dependency WHERE build_id=%s', (id,))
+            for dependency_hash, dependecy_repo_id, closest_branch_id, match_type in cr.fetchall():
                 dependency_remote_id = env['runbot.remote'].browse(dependecy_repo_id)
                 key = (dependency_hash, dependency_remote_id.id)
                 commit = sha_repo_commits.get(key) or sha_commits.get(dependency_hash) # TODO check this (changing repo)
@@ -310,8 +310,9 @@ def migrate(cr, version):
                     })
                     sha_repo_commits[key] = commit
                     sha_commits[dependency_hash] = commit
-                build_commit_ids[id][dependency_remote_id.id] = commit.id
-                build_commit_ids_create_values.append({'commit_id': commit.id, 'match_type':match_type})
+                commit_link_ids[id][dependency_remote_id.id] = commit.id
+                match_type = 'default' if match_type in ('pr_target', 'prefix', 'default') else 'head'
+                commit_link_ids_create_values.append({'commit_id': commit.id, 'match_type':match_type, 'branch_id': closest_branch_id})
 
             params = param.create({
                 'version_id':  branch_to_version[branch_id],
@@ -320,7 +321,7 @@ def migrate(cr, version):
                 'project_id': env['runbot.repo'].browse(remote_id.repo_id.id).project_id,
                 'trigger_id': triggers[remote_id.repo_id.id].id,
                 'config_data': config_data,
-                'build_commit_ids': [(0, 0, values) for values in build_commit_ids_create_values]
+                'commit_link_ids': [(0, 0, values) for values in commit_link_ids_create_values]
             })
             existing[params.fingerprint] = params
             cr.execute('UPDATE runbot_build SET params_id=%s WHERE id=%s OR duplicate_id = %s', (params.id, id, id))
@@ -364,7 +365,7 @@ def migrate(cr, version):
             # not temporal notion in this case, only hash consistency
             batch = False
             build_id = duplicate_id or id
-            build_commits = build_commit_ids[build_id]
+            build_commits = commit_link_ids[build_id]
             batch_repos_ids = []
 
             # check if this build can be added to last_batch
@@ -376,7 +377,7 @@ def migrate(cr, version):
                     # to fix: nightly will be in the same batch of the previous normal one. If config_id is diffrent, create batch?
                     # possible fix: max create_date diff
                     batch = bundle.last_batch
-                    batch_commits = batch.batch_commit_ids.mapped('commit_id')
+                    batch_commits = batch.commit_link_ids.mapped('commit_id')
                     batch_repos_ids = batch_commits.mapped('repo_id').ids
                     for commit in batch_commits:
                         repo_id = commit.repo_id.id
@@ -426,13 +427,13 @@ def migrate(cr, version):
                 'link_type': 'rebuild' if build_type == 'rebuild' else 'matched' if duplicate_id else 'created',
                 'active': True,
             })
+            commit_links_values = []
             for missing_commit in missing_commits: # todo improve this, need time to prefetch params + commits
-                env['runbot.batch.commit'].create({
+                commit_links_values.append({
                     'commit_id': missing_commit,
-                    'batch_id': batch.id,
-                    'match_type': 'new', # TODO fixme
-                    #'has_main' = True, ?
+                    'match_type': 'new',
                 })
+            batch.commit_link_ids = [(0, 0, values) for values in commit_links_values]
 
         env.cache.invalidate()
     progress.finish()

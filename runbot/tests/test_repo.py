@@ -91,7 +91,7 @@ class TestRepo(RunbotCase):
 
         batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
         self.assertEqual(len(batch), 1, 'Batch found')
-        self.assertEqual(batch.batch_commit_ids.commit_id.subject, 'Server subject')
+        self.assertEqual(batch.commit_link_ids.commit_id.subject, 'Server subject')
         self.assertEqual(batch.state, 'preparing')
         self.assertEqual(dev_branch.head_name, 'd0d0caca')
         self.assertEqual(bundle.last_batch, batch)
@@ -122,7 +122,7 @@ class TestRepo(RunbotCase):
         batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
         self.assertEqual(last_batch, batch, "No new batch should have been created")
         self.assertEqual(bundle.last_batch, batch)
-        self.assertEqual(batch.batch_commit_ids.commit_id.mapped('subject'), ['Server subject', 'Addons subject'])
+        self.assertEqual(batch.commit_link_ids.commit_id.mapped('subject'), ['Server subject', 'Addons subject'])
 
         # create a server pr in the same bundle with the same hash
         self.commit_list[self.repo_server.id] += [
@@ -152,7 +152,7 @@ class TestRepo(RunbotCase):
         batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
         self.assertEqual(last_batch, batch, "No new batch should have been created")
         self.assertEqual(bundle.last_batch, batch)
-        self.assertEqual(batch.batch_commit_ids.commit_id.mapped('subject'), ['Server subject', 'Addons subject'])
+        self.assertEqual(batch.commit_link_ids.commit_id.mapped('subject'), ['Server subject', 'Addons subject'])
 
         # A new commit is found in the server repo
         self.commit_list[self.repo_server.id] = [
@@ -187,7 +187,7 @@ class TestRepo(RunbotCase):
         batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
         self.assertEqual(bundle.last_batch, batch)
         self.assertEqual(len(batch), 1, 'No new batch created, updated')
-        self.assertEqual(batch.batch_commit_ids.commit_id.mapped('subject'),  ['A new subject', 'Addons subject'], 'commits should have been updated')
+        self.assertEqual(batch.commit_link_ids.commit_id.mapped('subject'),  ['A new subject', 'Addons subject'], 'commits should have been updated')
         self.assertEqual(batch.state, 'preparing')
 
         self.assertEqual(dev_branch.head_name, 'b00b')
@@ -223,7 +223,7 @@ class TestRepo(RunbotCase):
         batches = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
         self.assertEqual(len(batches), 2, 'No preparing instance and new head -> new batch')
         self.assertEqual(bundle.last_batch.state, 'preparing')
-        self.assertEqual(bundle.last_batch.batch_commit_ids.commit_id.subject, 'A last subject')
+        self.assertEqual(bundle.last_batch.commit_link_ids.commit_id.subject, 'A last subject')
 
         self.commit_list[self.repo_server.id] = first_commit  # branch reset hard to an old commit (and pr closed)
 
@@ -232,13 +232,13 @@ class TestRepo(RunbotCase):
         batches = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)], order='id desc')
         last_batch = bundle.last_batch
         self.assertEqual(len(batches), 2, 'No new batch created, updated')
-        self.assertEqual(last_batch.batch_commit_ids.commit_id.mapped('subject'), ['Server subject'], 'commits should have been updated')
+        self.assertEqual(last_batch.commit_link_ids.commit_id.mapped('subject'), ['Server subject'], 'commits should have been updated')
         self.assertEqual(last_batch.state, 'preparing')
         self.assertEqual(dev_branch.head_name, 'd0d0caca')
         self.env.cr.sql_log = True
         last_batch._prepare()
         self.env.cr.sql_log = False
-        self.assertEqual(last_batch.batch_commit_ids.commit_id.mapped('subject'), ['Server subject', 'Addons subject'])
+        self.assertEqual(last_batch.commit_link_ids.commit_id.mapped('subject'), ['Server subject', 'Addons subject'])
 
         self.assertEqual(last_batch.state, 'ready')
 

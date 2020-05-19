@@ -34,7 +34,7 @@ class TestBuildParams(RunbotCase):
             'version_id': self.version_master.id,
             'project_id': self.project.id,
             'config_id': self.default_config.id,
-            'build_commit_ids': [
+            'commit_link_ids': [
                 (0, 0, {'commit_id': server_commit.id})
             ],
             'config_data': {'foo': 'bar'}
@@ -45,7 +45,7 @@ class TestBuildParams(RunbotCase):
             'version_id': self.version_master.id,
             'project_id': self.project.id,
             'config_id': self.default_config.id,
-            'build_commit_ids': [
+            'commit_link_ids': [
                 (0, 0, {'commit_id': server_commit.id})
             ],
             'config_data': {'foo': 'bar'}
@@ -69,7 +69,7 @@ class TestBuildParams(RunbotCase):
         })
 
         copied_params = params.copy({
-            'build_commit_ids': [
+            'commit_link_ids': [
                 (0, 0, {'commit_id': other_commit.id})
             ]
         })
@@ -91,11 +91,11 @@ class TestBuildResult(RunbotCase):
             'repo_id': self.repo_addons.id,
         })
 
-        self.server_params = self.base_params.copy({'build_commit_ids': [
+        self.server_params = self.base_params.copy({'commit_link_ids': [
             (0, 0, {'commit_id': self.server_commit.id})
         ]})
 
-        self.addons_params = self.base_params.copy({'build_commit_ids': [
+        self.addons_params = self.base_params.copy({'commit_link_ids': [
             (0, 0, {'commit_id': self.server_commit.id}),
             (0, 0, {'commit_id': self.addons_commit.id})
         ]})

@@ -235,7 +235,7 @@ class Batch(models.Model):
 
     last_update = fields.Datetime('Last ref update')
     bundle_id = fields.Many2one('runbot.bundle', required=True, index=True)
-    batch_commit_ids = fields.One2many('runbot.batch.commit', 'batch_id')
+    commit_link_ids = fields.Many2many('runbot.commit.link')
     slot_ids = fields.One2many('runbot.batch.slot', 'batch_id')
     state = fields.Selection([('preparing', 'Preparing'), ('ready', 'Ready'), ('done', 'Done')])
     hidden = fields.Boolean('Hidden', default=False)
@@ -268,18 +268,17 @@ class Batch(models.Model):
         # if not the same hash for repo:
         commit = branch.head
         self.last_update = fields.Datetime.now()
-        for batch_commit in self.batch_commit_ids:
+        for commit_link in self.commit_link_ids:
             # case 1: a commit already exists for the repo (pr+branch, or fast push)
-            if batch_commit.commit_id.repo_id == commit.repo_id:
-                batch_commit.commit_id = commit
+            if commit_link.commit_id.repo_id == commit.repo_id:
+                commit_link.commit_id = commit
                 break
         else:
-            self.env['runbot.batch.commit'].create({
+            self.write({'commit_link_ids': [(0, 0, {
                 'commit_id': commit.id,
-                'batch_id': self.id,
                 'match_type': match_type,
                 'branch_id': branch.id
-            })
+            })]})
 
     def _skip(self):
         if not self or self.bundle_id.is_base:
@@ -308,7 +307,7 @@ class Batch(models.Model):
                 ('version_ids', 'in', self.bundle_id.version_id.id),
                 ('version_ids', '=', False)
         ])
-        pushed_repo = self.batch_commit_ids.mapped('commit_id.repo_id')
+        pushed_repo = self.commit_link_ids.mapped('commit_id.repo_id')
         dependency_repos = triggers.mapped('dependency_ids')
         all_repos = triggers.mapped('repo_ids') | dependency_repos
         missing_repos = all_repos - pushed_repo
@@ -321,12 +320,11 @@ class Batch(models.Model):
                     commit = branch.head
                     nonlocal missing_repos
                     if commit.repo_id in missing_repos:
-                        self.env['runbot.batch.commit'].create({
+                        self.write({'commit_link_ids': [(0, 0, {
                             'commit_id': commit.id,
-                            'batch_id': self.id,
-                            'match_type': 'head',
+                            'match_type': match_type,
                             'branch_id': branch.id
-                        })
+                        })]})
                         missing_repos -= commit.repo_id
                         # TODO manage multiple branch in same repo: chose best one and
                         # add warning if different commit are found
@@ -349,7 +347,7 @@ class Batch(models.Model):
         if missing_repos:
             _logger.warning('Missing repo %s for batch %s', missing_repos.mapped('name'), self.id)
             # TODO skip in this case or it will fail
-        batch_commit_by_repos = {batch_commit.commit_id.repo_id.id: batch_commit for batch_commit in self.batch_commit_ids}
+        commit_link_by_repos = {commit_link.commit_id.repo_id.id: commit_link for commit_link in self.commit_link_ids}
         version_id = self.bundle_id.version_id.id
         project_id = self.bundle_id.project_id.id
         config_by_trigger = {}
@@ -371,10 +369,7 @@ class Batch(models.Model):
                 'project_id': project_id,
                 'trigger_id': trigger.id,  # for future reference and access rights
                 'config_data': {},
-                'build_commit_ids': [(0, 0, {
-                    'commit_id': batch_commit_by_repos[repo.id].commit_id.id,
-                    'match_type': batch_commit_by_repos[repo.id].match_type
-                }) for repo in trigger_repos],
+                'commit_link_ids': [(6, 0, [commit_link_by_repos[repo.id].id for repo in trigger_repos])],
                 'builds_reference_ids': []  # TODO
             })
             build = self.env['runbot.build'].search([('params_id', '=', params.id), ('parent_id', '=', False)], limit=1, order='id desc')
@@ -412,15 +407,6 @@ class BatchLog(models.Model):
     batch_id = fields.Many2one('runbot.batch', index=True)
     message = fields.Char('Message')
     level = fields.Char()
-
-class BatchCommit(models.Model):
-    _name = 'runbot.batch.commit'
-    _description = "Bundle batch commit"
-
-    commit_id = fields.Many2one('runbot.commit', index=True)
-    batch_id = fields.Many2one('runbot.batch', index=True)
-    match_type = fields.Selection([('new', 'New head of branch'), ('head', 'Head of branch'), ('base', 'Found on base branch')])  # HEAD, DEFAULT
-    branch_id = fields.Many2one('runbot.branch', string='Found in branch')
 
 
 class BatchSlot(models.Model):

@@ -146,7 +146,7 @@
                                         </t>
                                         <div t-if="more">
                                           <small>
-                                            <div t-foreach="batch.batch_commit_ids" t-as="bundle_commit" class="one_line">
+                                            <div t-foreach="batch.commit_link_ids" t-as="bundle_commit" class="one_line">
                                               <a t-attf-href="/runbot/commit/#{bundle_commit.commit_id.id}">
                                                   <span class="badge badge-light" t-esc="bundle_commit.commit_id.dname"/>
                                               </a>
@@ -218,7 +218,7 @@
                           </t>
                           <div>
                             <t t-if="more" ><small>
-                            <t t-foreach="batch.batch_commit_ids" t-as="bundle_commit">
+                            <t t-foreach="batch.commit_link_ids" t-as="bundle_commit">
                                   <a t-attf-href="/runbot/commit/#{bundle_commit.commit_id.id}">
                                       <span class="label label-info" t-esc="bundle_commit.commit_id.dname"/>
                                   </a>

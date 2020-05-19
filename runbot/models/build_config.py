@@ -405,7 +405,7 @@ class ConfigStep(models.Model):
         cmd.finals.append(['pg_dump', db_name, '>', sql_dest])
         cmd.finals.append(['cp', '-r', filestore_path, filestore_dest])
         cmd.finals.append(['cd', dump_dir, '&&', 'zip', '-rmq9', zip_path, '*'])
-        infos = '{\n    "db_name": "%s",\n    "build_id": %s,\n    "shas": [%s]\n}' % (db_name, build.id, ', '.join(['"%s"' % build_commit.commit_id.dname for build_commit in build.params_id.build_commit_ids]))
+        infos = '{\n    "db_name": "%s",\n    "build_id": %s,\n    "shas": [%s]\n}' % (db_name, build.id, ', '.join(['"%s"' % build_commit.commit_id.dname for build_commit in build.params_id.commit_link_ids]))
         build.write_file('logs/%s/info.json' % db_name, infos)
 
         if self.flamegraph:
@@ -464,7 +464,7 @@ class ConfigStep(models.Model):
 
     def _coverage_params(self, build, modules_to_install):
         pattern_to_omit = set()
-        for commit in build.params_id.build_commit_ids.mapped('commit_id'):
+        for commit in build.params_id.commit_link_ids.mapped('commit_id'):
             docker_source_folder = build._docker_source_folder(commit)
             for manifest_file in commit.repo_id.manifest_files.split(','):
                 pattern_to_omit.add('*%s' % manifest_file)

@@ -41,7 +41,7 @@ COPY_WHITELIST = [
     "build_type",
     "parent_id",
     "hidden",
-    "build_commit_ids",
+    "commit_link_ids",
     "config_id",
     "orphan_result",
 ]
@@ -58,7 +58,7 @@ class BuildParameters(models.Model):
 
     # on param or on build?
     # execution parametter
-    build_commit_ids = fields.One2many('runbot.build.commit', 'params_id', copy=True)
+    commit_link_ids = fields.Many2many('runbot.commit.link', copy=True)
     version_id = fields.Many2one('runbot.version', required=True, index=True)
     project_id = fields.Many2one('runbot.project', required=True)  # for access rights
     trigger_id = fields.Many2one('runbot.trigger')  # for access rights
@@ -76,7 +76,7 @@ class BuildParameters(models.Model):
     modules = fields.Char('Modules') # TODO fill this with combination of triggers repo_modules and bundle_id.modules (or trigger?)
     fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)
 
-    #@api.depends('version_id', 'project_id', 'extra_params', 'config_id', 'config_data', 'modules', 'build_commit_ids', 'builds_reference_ids')
+    #@api.depends('version_id', 'project_id', 'extra_params', 'config_id', 'config_data', 'modules', 'commit_link_ids', 'builds_reference_ids')
     def _compute_fingerprint(self):
         for param in self:
             cleaned_vals = {
@@ -87,7 +87,7 @@ class BuildParameters(models.Model):
                 'config_id': param.config_id.id,
                 'config_data': param.config_data.dict,
                 'modules': param.modules or '',
-                'build_commit_ids': sorted(param.build_commit_ids.commit_id.ids),
+                'commit_link_ids': sorted(param.commit_link_ids.commit_id.ids),
                 'builds_reference_ids': sorted(param.builds_reference_ids.build_id.ids),
             }
             param.fingerprint = hashlib.sha256(str(cleaned_vals).encode('utf8')).hexdigest()
@@ -738,7 +738,7 @@ class BuildResult(models.Model):
         self.ensure_one()  # will raise exception if hash not found, we don't want to fail for all build.
         # checkout branch
         exports = {}
-        for commit in commits or self.params_id.build_commit_ids.mapped('commit_id'):
+        for commit in commits or self.params_id.commit_link_ids.mapped('commit_id'):
             build_export_path = self._docker_source_folder(commit)
             if build_export_path in exports:
                 self._log('_checkout', 'Multiple repo have same export path in build, some source may be missing for %s' % build_export_path, level='ERROR')
@@ -749,7 +749,7 @@ class BuildResult(models.Model):
     def _get_available_modules(self):
         available_modules = defaultdict(list)
         #repo_modules = []
-        for commit in self.params_id.build_commit_ids.mapped('commit_id'):
+        for commit in self.params_id.commit_link_ids.mapped('commit_id'):
             for (addons_path, module, manifest_file_name) in commit._get_available_modules():
                 if module in available_modules:
                     self._log(
@@ -863,20 +863,20 @@ class BuildResult(models.Model):
             self.requested_action = 'wake_up'
 
     def _get_all_commit(self):
-        return self.build_commit_ids.mapped('commit_id') # todo remove
+        return self.commit_link_ids.mapped('commit_id') # todo remove
 
     def _get_server_commit(self, commits=None):
         """
         returns a commit of the first repo containing server files found in commits or in build commits
         the commits param is not used in code base but could be usefull for jobs and crons
         """
-        for commit in (commits or self.params_id.build_commit_ids.mapped('commit_id')):
+        for commit in (commits or self.params_id.commit_link_ids.mapped('commit_id')):
             if commit.repo_id.server_files:
                 return commit
         raise ValidationError('No repo found with defined server_files')
 
     def _get_addons_path(self, build_commits=None):
-        for commit in (build_commits or self.params_id.build_commit_ids.mapped('commit_id')):
+        for commit in (build_commits or self.params_id.commit_link_ids.mapped('commit_id')):
             source_path = self._docker_source_folder(commit)
             for addons_path in (commit.repo_id.addons_paths or '').split(','):
                 if os.path.isdir(commit._source_path(addons_path)):
@@ -898,7 +898,7 @@ class BuildResult(models.Model):
         python_params = python_params or []
         py_version = py_version if py_version is not None else build._get_py_version()
         pres = []
-        for build_commit in self.params_id.build_commit_ids:
+        for build_commit in self.params_id.commit_link_ids:
             if os.path.isfile(build_commit.commit_id._source_path('requirements.txt')): # this is a change I think
                 repo_dir = self._docker_source_folder(build_commit.commit_id)
                 requirement_path = os.path.join(repo_dir, 'requirements.txt')
@@ -1069,7 +1069,7 @@ class BuildResult(models.Model):
 
                 trigger = self.params_id.trigger_id
                 if trigger.ci_context:
-                    for build_commit in self.params_id.build_commit_ids:
+                    for build_commit in self.params_id.commit_link_ids:
                         commit = build_commit.commit_id
                         if build_commit.match_type != 'default' and commit.repo_id in trigger.repo_ids:
                             commit._github_status(trigger.ci_context, 'state', target_url)

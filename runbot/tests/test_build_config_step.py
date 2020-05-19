@@ -18,7 +18,7 @@ class TestBuildConfigStep(RunbotCase):
             'repo_id': self.repo_server.id
         })
         self.parent_build = self.Build.create({
-            'params_id': self.base_params.copy({'build_commit_ids': [(0, 0, {'commit_id': server_commit.id})]}).id,
+            'params_id': self.base_params.copy({'commit_link_ids': [(0, 0, {'commit_id': server_commit.id})]}).id,
         })
         self.start_patcher('_local_pg_createdb', 'odoo.addons.runbot.models.build.BuildResult._local_pg_createdb', True)
         self.start_patcher('_get_py_version', 'odoo.addons.runbot.models.build.BuildResult._get_py_version', 3)

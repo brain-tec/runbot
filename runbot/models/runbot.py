@@ -300,7 +300,7 @@ class Runbot(models.AbstractModel):
             cannot_be_deleted_builds = self.env['runbot.build'].search([('host', '=', fqdn()), ('local_state', 'not in', ('done', 'duplicate'))])
             cannot_be_deleted_path = set()
             for build in cannot_be_deleted_builds:
-                for build_commit in build.params_id.build_commit_ids:
+                for build_commit in build.params_id.commit_link_ids:
                     cannot_be_deleted_path.add(build_commit.commit_id._source_path())
 
             to_delete = set()

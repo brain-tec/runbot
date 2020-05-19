@@ -43,7 +43,7 @@
                                 <td t-esc="batch.last_update" t-if="more"></td>
                                 <td t-esc="batch.state" t-if="more"></td>
                                 <td>
-                                    <t t-foreach="batch.batch_commit_ids" t-as="bundle_commit">
+                                    <t t-foreach="batch.commit_link_ids" t-as="bundle_commit">
                                         <a t-attf-href="/runbot/commit/#{bundle_commit.commit_id.id}">
                                             <span class="label" t-esc="bundle_commit.commit_id.dname"/>
                                         </a>
@@ -72,7 +72,7 @@
             <tr><td>Create date</td><td t-esc="batch.create_date"/></tr>
             <tr><td>Last update</td><td><t t-esc="batch.last_update"/>(<t t-esc="batch.last_update - batch.create_date"/>)</td></tr>
             <tr><td>Commits</td><td>
-              <div t-foreach="batch.batch_commit_ids" t-as="bundle_commit">
+              <div t-foreach="batch.commit_link_ids" t-as="bundle_commit">
                 <t t-set="commit" t-value="bundle_commit.commit_id"/>
                 <a t-attf-href="/runbot/commit/#{commit.id}">
                     <span class="label" t-esc="commit.dname"/>
