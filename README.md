@@ -16,13 +16,13 @@ This repository contains the source code of Odoo testing bot [runbot.odoo.com](h
 
 Runbot v5 use a set of concept in order to cover all the use cases we need
 
-- **Project**: regroups a set of repositories that workds togeter. Ususally one project is enought and default R&D project exists.
+- **Project**: regroups a set of repositories that works togeter. Ususally one project is enough and a default *R&D* project exists.
 - **Repository**: A repository name regrouping repo and forks Ex: odoo, enterprise
 - **Remote**: A remote for a repository. Example: odoo/odoo, odoo-dev/odoo
 - **Build**: A test instance, using a set of commit and parameter to run some code and produce a result.
-- **Trigger**: Indicates that a build should be created when a new commit is pushed on a repo. A trigger has bot trigger repos, and dependency repo. Ex: new commit on runbot-> build with runbot and a dependency with odoo.
+- **Trigger**: Indicates that a build should be created when a new commit is pushed on a repo. A trigger has both trigger repos, and dependency repo. Ex: new commit on runbot-> build with runbot and a dependency with odoo.
 - **Bundle**: A set or branches that work together: all the branches with the same name and all linked pr in the same project.
-- **Batch**: A containter for builds and commit of a bundle. When new commit is pushed on a branch, if a trigger exists for the repo of that branch, a new batch is created with this commit. After 60 seconds, if no other commit is added to the batch, a build is created by trigger having a new commit in this batch.
+- **Batch**: A container for builds and commit of a bundle. When new commit is pushed on a branch, if a trigger exists for the repo of that branch, a new batch is created with this commit. After 60 seconds, if no other commit is added to the batch, a build is created by trigger having a new commit in this batch.
 
 ## HOW TO
 
@@ -30,7 +30,7 @@ This section give the basic steps to follow to configure the runbot v5.0. The co
 
 ### Setup
 
-Runbot is an addond for odoo, meaning that both odoo and runbot code are needed to run. Some tips to configure odoo are available in [odoo setup documentation](https://www.odoo.com/documentation/13.0/setup/install.html#setup-install-source) (requirements, postgres, ...) This page will mainly focus on runbot specificities.
+Runbot is an addon for odoo, meaning that both odoo and runbot code are needed to run. Some tips to configure odoo are available in [odoo setup documentation](https://www.odoo.com/documentation/13.0/setup/install.html#setup-install-source) (requirements, postgres, ...) This page will mainly focus on runbot specificities.
 
 Chose a workspace and clone both repository.
 
@@ -39,26 +39,38 @@ git clone https://github.com/odoo/odoo.git
 git clone https://github.com/odoo/runbot.git
 ```
 
-Runbot dependeds on some odoo version, runbot v5.0 is currently based on odoo 13.0 (Runbot 13.0.5.0). Both runbot and odoo 13.0 branch should be chekouted. *This logic follow the convention imposed by runbot to run code from different repository, the branch name must be the same or be prefixed by a main branch name.*
+Runbot depends on some odoo version, runbot v5.0 is currently based on odoo 13.0 (Runbot 13.0.5.0). Both runbot and odoo 13.0 branch should be chekouted. *This logic follow the convention imposed by runbot to run code from different repository, the branch name must be the same or be prefixed by a main branch name.*
 
 ```
 git -C odoo checkout 13.0
 git -C runbot checkout 13.0
 ```
 
-You will also need to install docker on your system
+### Specific requirements
+
+You will also need to install docker on your system. The user that will be used to operate the runbot must also have access to the Docker commands. On Debian like system's , it's only a matter of adding the user to the `docker` group.
+
+```
+sudo adduser $USER docker
+```
+
+The only specific python requirement is the `matplotlib` library.
+
+```
+sudo apt install python3-matplotlib
+```
 
 ### Install and start runbot
 
-Odoo being an odoo addon, you need to start odoo giving runbot in the addons path. Install runbot by giving the -i instruction.
+Runbot being an odoo addon, you need to start odoo giving runbot in the addons path. Install runbot by giving the -i instruction.
 
 ```
-python3 odoo/odoo-bin -d runbot_databse --addons-path odoo/addons,runbot -i runbot --stop-after-init --without-demo=1
+python3 odoo/odoo-bin -d runbot_database --addons-path odoo/addons,runbot -i runbot --stop-after-init --without-demo=1
 ```
 
 Then, launch runbot
 ```
-python3 odoo/odoo-bin -d runbot_databse --addons-path odoo/addons,runbot --limit-time-real-cron=1800
+python3 odoo/odoo-bin -d runbot_database --addons-path odoo/addons,runbot --limit-time-real-cron=1800
 ```
 
 Note: --limit-time-real-cron is important to ensure that cron have enough time to build docker images and clone repos the first time. It may be reduced to a lower value later.
@@ -70,7 +82,7 @@ You may want to configure a service or launch odoo in a screen depending on your
 *Note: Runbot is optimized to run commit discovery and build sheduling on different host to allow load share on different machine. This basic configuration will show how to run runbot on a single machine, a less-tested use case*
 
 #### Bootstrap
-One launched, the cron should start to do basic work. The commit discovery and buld sheduling is disabled by default, but runbot bootstrap will start to setup some directories in static.
+Once launched, the cron should start to do basic work. The commit discovery and build sheduling is disabled by default, but runbot bootstrap will start to setup some directories in static.
 >Starting job `Runbot`.
 ```
 ls runbot/runbot/static
@@ -78,8 +90,7 @@ ls runbot/runbot/static
 >build  docker  nginx  repo  sources  src
 
 - **repo** contains the bare repositories
-- **source** contains the exported sources needed for each build
-- **source** contains the exported sources needed for each build
+- **sources** contains the exported sources needed for each build
 - **build** contains the different workspaces for dockers, containing logs/ filestore, ...
 - **docker** contains DockerFile and docker build logs
 - **nginx** contaings the nginx config used to access running instances
@@ -92,8 +103,8 @@ Other cron operation are still disabled for now.
 #### Access backend
 Access odoo "backend" *127.0.0.1:8069/web*
 
-If not connected yep, connect as admin (default password: admin). You may want to check that.Check odoo documentation for other needed configuration as master password. This is mainly needed for production purpose, a local instance will work as it is.
-If you create another user to manage the runbot, you may add the group *Runbot administrator* to this user
+If not connected yet, connect as admin (default password: admin). You may want to check that.Check odoo documentation for other needed configuration as master password. This is mainly needed for production purpose, a local instance will work as it is.
+If you create another Odoo user to manage the runbot, you may add the group *Runbot administrator* to this user
 
 #### Add remotes and repositories
 Access runbot app and go to the Repos->Repositories menu
@@ -123,21 +134,21 @@ Create a repo for you custom addons repo
 #### Tweak runbot parameters and enable features
 
 Acces the runbot settings and tweak the default parameters.
-- The *number of worker* is the ndefault umber of parallel testing builds per machine. It is adviced to keep one physical core per worker on a dedicated machine. On a local machine,keep it low, **2** is a good start (using 8 on runbot.odoo.com).
+- The *number of worker* is the default number of parallel testing builds per machine. It is adviced to keep one physical core per worker on a dedicated machine. On a local machine,keep it low, **2** is a good start (using 8 on runbot.odoo.com).
 
 - The *number of running build* is the number of parallel running builds. Runbot will start to kill running build once this limit is reached. This number can be pumped up on a server (using 60 on runbot.odoo.com).
 - *Runbot domain* will mainly be used for nginx to access running build.
 - Max commit age is the limit after what a branch head will be ignorred in processing. This will reduce the processing of old non deleted branch. Keep in mind that pushing an old commit on a branch will also be ignored by runbot.
 
-- **Discover new commits** is disable by default but is need to fetch repositories and create new commits/batches/builds. **Check** this option.
+- **Discover new commits** is disabled by default but is needed to fetch repositories and create new commits/batches/builds. **Check** this option.
 
-- **Discover new commits** is need to fetch repositories and create new commits/batches/builds. **Check** this option.
+- **Discover new commits** is needed to fetch repositories and create new commits/batches/builds. **Check** this option.
 
-- **Schedule builds** is need to process pending/testing. **Check** this option. To use a dedicated host to schedule builds, leave this option unchecked and use the dedicated tool in rinbot/builder.
+- **Schedule builds** is needed to process pending/testing. **Check** this option. To use a dedicated host to schedule builds, leave this option unchecked and use the dedicated tool in runbot/builder.
 
 Save the parameter. The next cron execution should do a lot of setup.
 NOTE: The default limit_time_real-cron should be ideally set to at least 1800 for this operation.
-- If schedule builds is check, the first time consuming operation will be to build the docker image. You can check the current running dockers with `docker ps -a`. One of them should be up for a few minutes. If the build is not finished at the end of the cron timeout, docker build will either resolve his progress and continue the next step, but could also fail on the same step each time and stay stuck. Ensure to have limit-time-real-cron high enough, depending on your brandwidth and power this value could be 600-1800 (or more). Let's wait and make a coffee. You can also check progress by tailing runbot/static/docker/docker_build.txt
+- If schedule builds is check, the first time consuming operation will be to build the docker image. You can check the current running dockers with `docker ps -a`. One of them should be up for a few minutes. If the build is not finished at the end of the cron timeout, docker build will either resolve its progress and continue the next step, but could also fail on the same step each time and stay stuck. Ensure to have limit-time-real-cron high enough, depending on your brandwidth and power this value could be 600-1800 (or more). Let's wait and make a coffee. You can also check progress by tailing runbot/static/docker/docker_build.txt
 
 - The next git update will init the repositories, a config file with your remotes should be created for each repo. You can check the content in /runbot/static/repo/(runbot|odoo)/config. The repo will be fetched, this operation may take some time too.
 
@@ -149,7 +160,7 @@ Finally, the first new branches/batches should be created. You can list them in 
 
 We need to define which bundle are base versions (master should already be marked as a base). In runbot case we only need 13.0 but all saas- and numerical branches should be marked as base in a general way. A base will be used to fill missing commits in a batch if a bundle doesn't have a branch in each repo, and will trigger the creation of a version. Versions may be use for upgrade test.
 
-Bundles can also be marked as no_build, wo that new commit won't create batch creation and bundle won't be displayed on main page.
+Bundles can also be marked as `no_build`, so that new commit won't create batch creation and bundle won't be displayed on main page.
 
 #### Triggers
 At this point, runbot will discover new branches, new commits, create bundle, but no build will be created.
@@ -164,8 +175,8 @@ When a branch is pushed, a new batch will be created, and after one minute the n
 If a new commit is pushed after that, the previous pending build of the same bundle should be skipped.
 
 #### Hosts
-Runbot is able to share pending builds accross multiple hosts. In this case, there is only one. a new host will nevre assign pending build to himself by default.
-Go in the Build Hosts menu and chose yours. uncheck *Only accept assigned build*. You can also tweek the number of parallel build for this host.
+Runbot is able to share pending builds accross multiple hosts. In the present case, there is only one. A new host will never assign pending build to himself by default.
+Go in the Build Hosts menu and chose yours. Uncheck *Only accept assigned build*. You can also tweak the number of parallel builds for this host.
 
 #### Config
  add test tags to test only filter test
