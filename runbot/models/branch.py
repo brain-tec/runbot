@@ -37,7 +37,7 @@ class Branch(models.Model):
         for branch in self:
             branch.dname = '%s:%s' % (branch.remote_id.short_name, branch.name)
 
-    @api.depends('name', 'target_branch_name', 'pull_head_name', 'pull_head_remote_id')
+    @api.depends('name', 'is_pr', 'target_branch_name', 'pull_head_name', 'pull_head_remote_id')
     def _compute_reference_name(self):
         """
         Unique reference for a branch inside a bundle.
@@ -82,6 +82,9 @@ class Branch(models.Model):
                         break
 
         for branch in self:
+            branch.target_branch_name = False
+            branch.pull_head_name = False
+            branch.pull_head_remote_id = False
             if branch.name:
                 pi = branch.is_pr and (pull_info or pull_info_dict.get((branch.remote_id, branch.name)) or branch._get_pull_info())
                 if pi:
@@ -94,8 +97,6 @@ class Branch(models.Model):
                             if pull_head_repo_name not in name_to_remote:
                                 name_to_remote[pull_head_repo_name] = self.env['runbot.remote'].search([('name', 'like', '%%:%s' % pull_head_repo_name)], limit=1)
                             branch.pull_head_remote_id = name_to_remote[pull_head_repo_name]
-                        else:
-                            branch.pull_head_remote_id = False
                     except (TypeError, AttributeError):
                         _logger.exception('Error for pr %s using pull_info %s', branch.name, pi)
                         raise
