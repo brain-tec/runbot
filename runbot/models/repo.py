@@ -132,6 +132,7 @@ class Remote(models.Model):
                     session.auth = (remote.token, 'x-oauth-basic')
                 session.headers.update({'Accept': 'application/vnd.github.she-hulk-preview+json'})
                 while url:
+                    print(url)
                     if recursive:
                         _logger.info('Getting page %s', url)
                     try_count = 0
@@ -145,7 +146,10 @@ class Remote(models.Model):
                             if try_count > 0:
                                 _logger.info('Success after %s tries', (try_count + 1))
                             if recursive:
-                                url = {link.split(';')[1]: link.split(';')[0] for link in response.headers.get('link').split(',')}.get(' rel="next"')
+                                link = response.headers.get('link')
+                                url = False
+                                if link:
+                                    url = {link.split(';')[1]: link.split(';')[0] for link in link.split(',')}.get(' rel="next"')
                                 if url:
                                     url = url.strip('<> ')
                                 yield response.json()
@@ -432,7 +436,7 @@ class Repo(models.Model):
                 if bundle.no_build:
                     continue
 
-                if bundle.last_batch.state != 'preparing':
+                if bundle.last_batch.state != 'preparing' and commit not in bundle.last_batch.commit_link_ids.mapped('commit_id'):
                     preparing = self.env['runbot.batch'].create({
                         'last_update': fields.Datetime.now(),
                         'bundle_id': bundle.id,
@@ -440,7 +444,8 @@ class Repo(models.Model):
                     })
                     bundle.last_batch = preparing
 
-                bundle.last_batch._new_commit(branch)
+                if bundle.last_batch.state == 'preparing':
+                    bundle.last_batch._new_commit(branch)
 
     def _update_batches(self, force=False):
         """ Find new commits in physical repos"""
