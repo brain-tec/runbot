@@ -60,9 +60,11 @@ class Remote(models.Model):
     name = fields.Char('Url', required=True)  # TODO valide with regex
     repo_id = fields.Many2one('runbot.repo', required=True)
 
-    base_url = fields.Char(compute='_compute_base_infos', string='Base URL', readonly=True)
     owner = fields.Char(compute='_compute_base_infos', string='Repo Owner', store=True, readonly=True)
     repo_name = fields.Char(compute='_compute_base_infos', string='Repo Name', store=True, readonly=True)
+    repo_domain = fields.Char(compute='_compute_base_infos', string='Repo domain', store=True, readonly=True)
+
+    base_url = fields.Char(compute='_compute_base_url', string='Base URL', readonly=True)
 
     short_name = fields.Char('Short name', compute='_compute_short_name')
     remote_name = fields.Char('Remote name', compute='_compute_remote_name')
@@ -81,9 +83,14 @@ class Remote(models.Model):
             name = re.sub('.git$', '', name)
             name = name.replace(':', '/')
             s = name.split('/')
+            remote.repo_domain = s[-3]
             remote.owner = s[-2]
             remote.repo_name = s[-1]
-            remote.base_url = name
+
+    @api.depends('repo_domain', 'owner', 'repo_name')
+    def _compute_base_url(self):
+        for remote in self:
+            remote.base_url = '%s/%s/%s' % (remote.repo_domain, remote.owner, remote.repo_name)
 
     @api.depends('name', 'base_url')
     def _compute_short_name(self):
@@ -116,11 +123,10 @@ class Remote(models.Model):
     def _github_generator(self, url, payload=None, ignore_errors=False, nb_tries=2, recursive=False):
         """Return a http request to be sent to github"""
         for remote in self:
-            match_object = re.search('([^/]+)/([^/]+)/([^/.]+(.git)?)', remote.base_url)
-            if match_object:
-                url = url.replace(':owner', match_object.group(2))
-                url = url.replace(':repo', match_object.group(3))
-                url = 'https://api.%s%s' % (match_object.group(1), url)
+            if remote.owner and remote.repo_name and remote.repo_domain:
+                url = url.replace(':owner', remote.owner)
+                url = url.replace(':repo', remote.repo_name)
+                url = 'https://api.%s%s' % (remote.repo_domain, url)
                 session = requests.Session()
                 if remote.token:
                     session.auth = (remote.token, 'x-oauth-basic')
@@ -156,8 +162,6 @@ class Remote(models.Model):
                                     _logger.exception('Ignored github error %s %r (try %s/%s)', url, payload, try_count, nb_tries)
                                 else:
                                     raise
-            else:
-                _logger.error('Invalid url %s for github_status', remote.base_url)
 
 
 

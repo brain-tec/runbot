@@ -115,7 +115,7 @@ class RunbotErrorLog(models.Model):
 
     def _compute_repo_short_name(self):
         for l in self:
-            l.repo_short_name = '/'.join(l.repo_id.base_url.split('/')[-2:])
+            l.repo_short_name = '%s/%s' % (l.repo_id.owner, l.repo_id.repo_name)
 
     def _compute_build_url(self):
         for l in self:
