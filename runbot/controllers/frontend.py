@@ -26,7 +26,7 @@ class Runbot(Controller):
         level = ['info', 'warning', 'danger'][int(pending_count > warn) + int(pending_count > crit)]
         return pending_count, level, scheduled_count
 
-    @route(['/runbot', '/runbot/<model("runbot.project"):project>'], website=True, auth='public', type='http')
+    @route(['/', '/runbot', '/runbot/<model("runbot.project"):project>'], website=True, auth='public', type='http')
     def bundles(self, project=None, more=False, mode = '', search='', refresh='', **kwargs):
         search = search if len(search) < 60 else search[:60]
         env = request.env

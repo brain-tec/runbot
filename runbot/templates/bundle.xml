@@ -27,6 +27,7 @@
                             <tr t-if="more"><td>Modules</td><td t-esc="bundle.modules or '/'"/></tr>
                         </table>
                     </div>
+                    <div t-foreach="bundle.consistency_warning()" t-as="warning" t-esc="warning[1]" t-attf-class="alert alert-{{warning[0]}}"/>
                     <table class="table table-condensed table-stripped" style="table-layout: initial;">
                         <thead>
                             <tr>
@@ -67,22 +68,34 @@
 <template id="runbot.batch">
   <t t-call='website.layout'>
           <table class="table table-condensed table-responsive table-stripped">
-            <tr><td>Project</td><td t-esc="batch.bundle_id.name"/></tr>
+            <tr><td>Bundle</td><td><a t-esc="batch.bundle_id.name" t-attf-href="/runbot/bundle/{{batch.bundle_id.id}}"/></td></tr>
+            <tr><td>Version</td><td t-esc="batch.slot_ids[0].params_id.version_id.name if batch.slot_ids else bundle.version_id.name"/></tr>
             <tr><td>State</td><td t-esc="batch.state"/></tr>
             <tr><td>Create date</td><td t-esc="batch.create_date"/></tr>
             <tr><td>Last update</td><td><t t-esc="batch.last_update"/>(<t t-esc="batch.last_update - batch.create_date"/>)</td></tr>
             <tr><td>Commits</td><td>
-              <div t-foreach="batch.commit_link_ids" t-as="bundle_commit">
-                <t t-set="commit" t-value="bundle_commit.commit_id"/>
+              <div t-foreach="batch.commit_link_ids" t-as="commit_link">
+                <t t-set="commit" t-value="commit_link.commit_id"/>
+                <span></span>
                 <a t-attf-href="/runbot/commit/#{commit.id}">
                     <span class="label" t-esc="commit.dname"/>
                 </a>
-                <span t-esc="commit.subject"/><br/>
-                Author: <span t-esc="commit.author"/> (<span t-esc="commit.author_email"/>)<br/>
-                <t t-if="commit.author != commit.committer">
-                    Committer: <span t-esc="commit.committer"/>(<span t-esc="commit.author_email"/>)<br/>
+                <small t-if="commit_link.match_type == 'base'">
+                    From base: <span t-esc="commit_link.branch_id.name"/><br/>
+                </small>
+                <small t-else="">
+                    Found in branch <span t-esc="commit_link.branch_id.name"/><br/>
+                    <t t-if="more">Merge base: <span t-esc="commit_link.base_commit_id.name"/><br/></t>
+                </small>
+                <t t-if="more or commit_link.match_type != 'base'">
+                    Subject:  <span t-esc="commit.subject"/><br/>
+                    Author: <span t-esc="commit.author"/> (<span t-esc="commit.author_email"/>)<br/>
+                    <t t-if="commit.author != commit.committer">
+                        Committer: <span t-esc="commit.committer"/>(<span t-esc="commit.author_email"/>)<br/>
+                    </t>
+                    Commit date: <span t-esc="commit.date"/><br/>
                 </t>
-                Commit date: <span t-esc="commit.date"/><br/>
+                <hr/>
               </div>
             </td></tr>
             <tr><td>Builds</td><td>

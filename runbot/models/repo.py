@@ -96,7 +96,9 @@ class Remote(models.Model):
 
     def create(self, values_list):
         remote = super().create(values_list)
-        self._cr.after('commit', self.repo_id._update_git_config)
+        if not remote.repo_id.main_remote_id:
+            remote.repo_id.main_remote_id = remote
+        remote._cr.after('commit', remote.repo_id._update_git_config)  # TODO check this fix
         return remote
 
     def write(self, values):
@@ -167,7 +169,7 @@ class Repo(models.Model):
 
 
     name = fields.Char("Name", unique=True)  # odoo/enterprise/upgrade/security/runbot/design_theme
-    main_remote = fields.Many2one('runbot.remote', "Main remote")
+    main_remote_id = fields.Many2one('runbot.remote', "Main remote")
     remote_ids = fields.One2many('runbot.remote', 'repo_id', "Remotes")
     project_id = fields.Many2one('runbot.project', required=True,
         help="Default bundle project to use when pushing on this repos",
@@ -521,7 +523,7 @@ class Repo(models.Model):
                     host.disable()
         return success
 
-    def _update(self, force=False, poll_delay=5*60):
+    def _update(self, force=False, poll_delay=1*60):  # TODO 5
         """ Update the physical git reposotories on FS"""
         for repo in self:
             try:

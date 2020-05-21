@@ -11,6 +11,8 @@
                     <field name="project_id"/>
                     <field name="sticky"/>
                     <field name="is_base"/>
+                    <field name="base_id"/>
+                    <field name="defined_base_id"/>
                     <field name="version_id"/>
                     <field name="no_build"/>
                     <field name="priority"/>

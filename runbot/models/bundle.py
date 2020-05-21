@@ -2,6 +2,7 @@ import re
 import time
 import logging
 import datetime
+import subprocess
 
 from collections import defaultdict
 from babel.dates import format_timedelta
@@ -83,7 +84,6 @@ class Bundle(models.Model):
         for bundle in self:
             bundle.make_stats = bundle.sticky
 
-
     @api.depends('name', 'is_base', 'defined_base_id', 'base_id.is_base', 'project_id')
     def _compute_base_id(self):
         bases_by_project = {}
@@ -100,8 +100,8 @@ class Bundle(models.Model):
             else:
                 base_bundles = self.search([('is_base', '=', True), ('project_id', '=', project_id)])
                 bases_by_project[project_id] = base_bundles
+
             for candidate in base_bundles:
-                # TODO better that that, external pr wont work, we need to use target for pr, ... + check consistency
                 if bundle.name.startswith(candidate.name):
                     bundle.base_id = candidate
                     break
@@ -206,11 +206,12 @@ class Bundle(models.Model):
         for branch in self.branch_ids:
             if branch.is_pr and branch.target_branch_name != self.base_id.name:
                 if branch.target_branch_name.startswith(self.base_id.name):
-                    warnings.append(('info', 'PR %s targeting a non base branch: %s'), (branch.dname, branch.target_branch_name))
+                    warnings.append(('info', 'PR %s targeting a non base branch: %s' % (branch.dname, branch.target_branch_name)))
                 else:
-                    warnings.append(('warning', 'PR %s targeting wrong version: %s (expecting %s)'), (branch.dname, branch.target_branch_name, self.base_id.name))
+                    warnings.append(('warning', 'PR %s targeting wrong version: %s (expecting %s)' % (branch.dname, branch.target_branch_name, self.base_id.name)))
             elif not branch.is_pr and not branch.name.startswith(self.base_id.name):
-                warnings.append(('warning', 'Branch %s not strating with version name (%s)'), (branch.dname, self.base_id.name))
+                warnings.append(('warning', 'Branch %s not strating with version name (%s)' % (branch.dname, self.base_id.name)))
+        return warnings
 
 
 class TriggerCustomisation(models.Model):
@@ -234,7 +235,7 @@ class Batch(models.Model):
     _description = "Bundle batch"
 
     last_update = fields.Datetime('Last ref update')
-    bundle_id = fields.Many2one('runbot.bundle', required=True, index=True)
+    bundle_id = fields.Many2one('runbot.bundle', required=True, index=True, ondelete='cascade')
     commit_link_ids = fields.Many2many('runbot.commit.link')
     slot_ids = fields.One2many('runbot.batch.slot', 'batch_id')
     state = fields.Selection([('preparing', 'Preparing'), ('ready', 'Ready'), ('done', 'Done')])
@@ -271,7 +272,11 @@ class Batch(models.Model):
         for commit_link in self.commit_link_ids:
             # case 1: a commit already exists for the repo (pr+branch, or fast push)
             if commit_link.commit_id.repo_id == commit.repo_id:
-                commit_link.commit_id = commit
+                if commit_link.commit_id.id != commit.id:
+                    self.log('New head on branch during throttle phase %s: Replacing commit %s with %s', branch.name, commit_link.commit_id.name, commit.name)
+                    commit_link.write({'commit_id': commit.id, 'branch_id': branch.id})
+                elif commit_link.branch_id.is_pr and not branch.is_pr:
+                    commit_link.branch_id = branch # Try to have a branch on commit if possible
                 break
         else:
             self.write({'commit_link_ids': [(0, 0, {
@@ -320,33 +325,69 @@ class Batch(models.Model):
                     commit = branch.head
                     nonlocal missing_repos
                     if commit.repo_id in missing_repos:
-                        self.write({'commit_link_ids': [(0, 0, {
+                        values = {
                             'commit_id': commit.id,
                             'match_type': match_type,
-                            'branch_id': branch.id
-                        })]})
+                            'branch_id': branch.id,
+                        }
+                        if match_type == 'base':
+                            values['base_commit_id'] = commit.id
+                        self.write({'commit_link_ids': [(0, 0, values)]})
                         missing_repos -= commit.repo_id
                         # TODO manage multiple branch in same repo: chose best one and
                         # add warning if different commit are found
                         # add warning if bundle has warnings
 
         bundle = self.bundle_id
+        base_branch_ids = self.bundle_id.base_id.branch_ids
+
         if missing_repos:
             fill_missing(bundle.branch_ids, 'head')
 
         if missing_repos and foreign_projects:
-            fill_missing(bundle.search([('name', '=', bundle.name), ('project_id', 'in', foreign_projects.ids)]).mapped('branch_ids'), 'head')
+            # if a dependency is in another repo, branch won't be in bundle.
+            bundles = bundle.search([('name', '=', bundle.name), ('project_id', 'in', foreign_projects.ids)])
+            fill_missing(bundles.mapped('branch_ids'), 'head')
+            foreign_base_branch_ids = bundles.mapped('base_id.branch_ids')
+            base_branch_ids |= foreign_base_branch_ids
 
-        bundle = self.bundle_id.base_id
+        base_head_per_repo = {}
+        for base_branch_id in base_branch_ids:
+            repo = base_branch_id.remote_id.repo_id
+            if repo.id in base_head_per_repo:
+                self.warning('Multiple base branch found in repo %s', repo.name)
+            else:
+                base_head_per_repo[repo.id] = base_branch_id.head
+
+        for link_commit in self.commit_link_ids:
+            commit = link_commit.commit_id
+            base_head = base_head_per_repo.get(commit.repo_id.id).name
+            if base_head:
+                merge_base_sha = False
+                try:
+                    merge_base_sha = commit.repo_id._git(['merge-base', commit.name, base_head]).strip()
+                    merge_base_commit = self.env['runbot.commit'].search([('name', '=', merge_base_sha), ('repo_id', '=', commit.repo_id.id)])
+                    if not merge_base_commit:
+                        merge_base_commit = self.env['runbot.commit'].create({'name': merge_base_sha, 'repo_id': commit.repo_id.id})
+                        self.warning('Commit for base head %s in %s was created', merge_base_sha, commit.repo_id.name)
+                    link_commit.base_commit_id = merge_base_commit.id
+                except subprocess.CalledProcessError:
+                    self.warning('merge-base failed between %s and %s', commit.name, base_head)
+
+
+            else:
+                self.warning('No base head found for repo %s', commit.repo_id.name)
+
+        # TODO search closest base batch
+
+        #3. Find missing commit in base branches commits
         if missing_repos:
-            fill_missing(bundle.branch_ids, 'base')
-
-        if missing_repos and foreign_projects:
-            fill_missing(bundle.search([('name', '=', bundle.name), ('project_id', 'in', foreign_projects.ids)]).mapped('branch_ids'), 'head')
+            fill_missing(base_branch_ids, 'base')
 
         if missing_repos:
             _logger.warning('Missing repo %s for batch %s', missing_repos.mapped('name'), self.id)
-            # TODO skip in this case or it will fail
+
+
         commit_link_by_repos = {commit_link.commit_id.repo_id.id: commit_link for commit_link in self.commit_link_ids}
         version_id = self.bundle_id.version_id.id
         project_id = self.bundle_id.project_id.id
@@ -391,6 +432,7 @@ class Batch(models.Model):
             })
 
     def warning(self, message, *args):
+        _logger.warning('batch %s: ' + message, self.id, *args)
         self.log(message, *args, level='WARNING')
 
     def log(self, message, *args, level='INFO'):

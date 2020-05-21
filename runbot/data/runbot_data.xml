@@ -68,4 +68,31 @@
         <field name="code">model._cron()</field>
         <field name="state">code</field>
     </record>
+
+
+    <record id="bundle_create" model="base.automation">
+        <field name="name">Base, staging and tmp management</field>
+        <field name="model_id" ref="runbot.model_runbot_bundle"/>
+        <field name="trigger">on_create</field>
+        <field name="active" eval="True"/>
+        <field name="state">code</field>
+        <field name="code">
+if record.name.startswith('tmp.'):
+    record['no_build'] = True
+elif record.name.startswith('staging.'):
+    name = record.name.replace('staging.', '')
+    base = record.env['runbot.bundle'].search([('name', '=', name), ('project_id', '=', record.project_id.id), ('is_base', '=', True)], limit=1)
+    if base:
+        record['defined_base_id'] = base
+else:
+    name = record.name
+    if name.startswith('saas-'):
+        name = text[len('saas-'):]
+    try:
+        float(name)
+        record['is_base']=True
+    except:
+        pass
+       </field>
+   </record>
 </odoo>

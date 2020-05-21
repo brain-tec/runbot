@@ -23,7 +23,7 @@ class Branch(models.Model):
 
     is_pr = fields.Boolean('IS a pr', required=True)
     pull_head_name = fields.Char(compute='_compute_branch_infos', string='PR HEAD name', readonly=1, store=True)
-    pull_head_remote_id = fields.Many2one('runbot.remote', 'Pull head repository', compute='_compute_branch_infos', ondelete='cascade')
+    pull_head_remote_id = fields.Many2one('runbot.remote', 'Pull head repository', compute='_compute_branch_infos', store=True)
     target_branch_name = fields.Char(compute='_compute_branch_infos', string='PR target branch', store=True)
 
     branch_url = fields.Char(compute='_compute_branch_url', string='Branch url', readonly=1)
@@ -122,10 +122,19 @@ class Branch(models.Model):
             project.ensure_one()
             bundle = self.env['runbot.bundle'].search([('name', '=', name), ('project_id', '=', project.id)])
             if not bundle:
-                bundle = self.env['runbot.bundle'].create({
+                values = {
                     'name': name,
                     'project_id': project.id,
-                })
+                }
+                if self.is_pr and self.target_branch_name:  # most likely external_pr, use target as version
+                    base = self.env['runbot.bundle'].search([
+                        ('name', '=', self.target_branch_name),
+                        ('is_base', '=', True),
+                        ('project_id', '=', project.id)
+                    ])
+                    if base:
+                        values['defined_base_id'] = base.id
+                bundle = self.env['runbot.bundle'].create(values)
             elif bundle.is_base and branch.is_pr:
                 _logger.warning('Trying to add pr to base_project, falling back on dummy bundle')
                 bundle = self.env.ref('runbot.bundle_dummy')

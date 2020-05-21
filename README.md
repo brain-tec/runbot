@@ -69,11 +69,13 @@ python3 odoo/odoo-bin -d runbot_database --addons-path odoo/addons,runbot -i run
 ```
 
 Then, launch runbot
-```
-python3 odoo/odoo-bin -d runbot_database --addons-path odoo/addons,runbot --limit-time-real-cron=1800
-```
 
-Note: --limit-time-real-cron is important to ensure that cron have enough time to build docker images and clone repos the first time. It may be reduced to a lower value later.
+```
+python3 odoo/odoo-bin -d runbot_database --addons-path odoo/addons,runbot --limit-memory-soft 4294967296 --limit-memory-hard 4311744512 --limit-time-real-cron=1800
+
+Note:
+- --limit-time-real-cron is important to ensure that cron have enough time to build docker images and clone repos the first time. It may be reduced to a lower value later (600 is adviced).
+- --limit-memory-* is not mandatory, but fetching odoo on multiple remote with only 2Gib may result in a failure of the fetch command. If git fails to create async thread or run out of memory, increasing memory limit may be a good idea. *cf. odoo-bin --help for more info.*
 
 You may want to configure a service or launch odoo in a screen depending on your preferences.
 

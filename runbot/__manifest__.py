@@ -7,7 +7,7 @@
     'website': "http://runbot.odoo.com",
     'category': 'Website',
     'version': '5.0',
-    'depends': ['website', 'base'],
+    'depends': ['website', 'base', 'base_automation'],
     'data': [
         'security/runbot_security.xml',
         'security/ir.model.access.csv',
