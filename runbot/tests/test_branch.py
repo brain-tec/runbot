@@ -117,7 +117,6 @@ class TestBranchRelations(RunbotCase):
 
         self.assertEqual(b.bundle_id.base_id.name, 'master')
 
-
     def test_relations_pr(self):
         self.Branch.create({
                 'remote_id': self.remote_server_dev.id,
@@ -126,8 +125,8 @@ class TestBranchRelations(RunbotCase):
             })
 
         self.patchers['github_patcher'].return_value = {
-            'base':{'ref':'master-test-tri'},
-            'head':{'label':'dev:master-test-tri-imp', 'repo':{'full_name': 'dev/server'}},
+            'base': {'ref': 'master-test-tri'},
+            'head': {'label': 'dev:master-test-tri-imp', 'repo': {'full_name': 'dev/server'}},
             }
         b = self.Branch.create({
                 'remote_id': self.remote_server_dev.id,
@@ -139,5 +138,3 @@ class TestBranchRelations(RunbotCase):
         self.assertEqual(b.bundle_id.base_id.name, 'master')
         self.assertEqual(b.bundle_id.previous_version_base_id.name, '13.0')
         self.assertEqual(sorted(b.bundle_id.intermediate_version_base_ids.mapped('name')), ['saas-13.1', 'saas-13.2'])
-
-

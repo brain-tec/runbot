@@ -126,9 +126,9 @@ class Branch(models.Model):
                     'name': name,
                     'project_id': project.id,
                 }
-                if self.is_pr and self.target_branch_name:  # most likely external_pr, use target as version
+                if branch.is_pr and branch.target_branch_name:  # most likely external_pr, use target as version
                     base = self.env['runbot.bundle'].search([
-                        ('name', '=', self.target_branch_name),
+                        ('name', '=', branch.target_branch_name),
                         ('is_base', '=', True),
                         ('project_id', '=', project.id)
                     ])
