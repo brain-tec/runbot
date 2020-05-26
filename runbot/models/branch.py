@@ -27,7 +27,7 @@ class Branch(models.Model):
     target_branch_name = fields.Char(compute='_compute_branch_infos', string='PR target branch', store=True)
 
     branch_url = fields.Char(compute='_compute_branch_url', string='Branch url', readonly=1)
-    dname = fields.Char('Display name', compute='_compute_dname')
+    dname = fields.Char('Display name', compute='_compute_dname', search='_search_dname')
 
     # alive = fields.Boolean('Alive', default=True)
     # TODO branch exist or not, pr is open or not. Should replace old _is_on_remote behaviour
@@ -36,6 +36,13 @@ class Branch(models.Model):
     def _compute_dname(self):
         for branch in self:
             branch.dname = '%s:%s' % (branch.remote_id.short_name, branch.name)
+
+    def _search_dname(self, operator, value):
+        if ':' not in value:
+            return [('name', operator, 'value')]
+        repo_short_name, branch_name = value.split(':')
+        owner, repo_name = repo_short_name.split('/')
+        return ['&', ('remote_id', '=', self.env['runbot.remote'].search([('owner', '=', owner), ('repo_name', '=', repo_name)]).id), ('name', operator, branch_name)]
 
     @api.depends('name', 'is_pr', 'target_branch_name', 'pull_head_name', 'pull_head_remote_id')
     def _compute_reference_name(self):
@@ -116,7 +123,10 @@ class Branch(models.Model):
 
     @api.depends('reference_name', 'remote_id.repo_id.project_id')
     def _compute_bundle_id(self):
+        dummy = self.env.ref('runbot.bundle_dummy')
         for branch in self:
+            if branch.bundle_id == dummy:
+                continue
             name = branch.reference_name
             project = branch.remote_id.repo_id.project_id
             project.ensure_one()
@@ -137,7 +147,7 @@ class Branch(models.Model):
                 bundle = self.env['runbot.bundle'].create(values)
             elif bundle.is_base and branch.is_pr:
                 _logger.warning('Trying to add pr to base_project, falling back on dummy bundle')
-                bundle = self.env.ref('runbot.bundle_dummy')
+                bundle = dummy
             branch.bundle_id = bundle
 
     def create(self, value_list):

@@ -87,7 +87,7 @@ elif record.name.startswith('staging.'):
 else:
     name = record.name
     if name.startswith('saas-'):
-        name = text[len('saas-'):]
+        name = name[len('saas-'):]
     try:
         float(name)
         record['is_base']=True

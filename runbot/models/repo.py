@@ -132,7 +132,6 @@ class Remote(models.Model):
                     session.auth = (remote.token, 'x-oauth-basic')
                 session.headers.update({'Accept': 'application/vnd.github.she-hulk-preview+json'})
                 while url:
-                    print(url)
                     if recursive:
                         _logger.info('Getting page %s', url)
                     try_count = 0

@@ -10,7 +10,7 @@
             </header>
             <sheet>
               <group name="branch_group">
-                <field name="bundle_id"/>
+                <field name="bundle_id" readonly='0'/>
                 <field name="remote_id"/>
                 <field name="name"/>
                 <field name="branch_url"/>

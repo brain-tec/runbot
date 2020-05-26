@@ -332,6 +332,7 @@ class Batch(models.Model):
                         }
                         if match_type == 'base':
                             values['base_commit_id'] = commit.id
+                            values['merge_base_commit_id'] = commit.id
                         self.write({'commit_link_ids': [(0, 0, values)]})
                         missing_repos -= commit.repo_id
                         # TODO manage multiple branch in same repo: chose best one and
@@ -339,7 +340,7 @@ class Batch(models.Model):
                         # add warning if bundle has warnings
 
         bundle = self.bundle_id
-        base_branch_ids = self.bundle_id.base_id.branch_ids
+        base_branches = self.bundle_id.base_id.branch_ids
 
         if missing_repos:
             fill_missing(bundle.branch_ids, 'head')
@@ -348,41 +349,15 @@ class Batch(models.Model):
             # if a dependency is in another repo, branch won't be in bundle.
             bundles = bundle.search([('name', '=', bundle.name), ('project_id', 'in', foreign_projects.ids)])
             fill_missing(bundles.mapped('branch_ids'), 'head')
-            foreign_base_branch_ids = bundles.mapped('base_id.branch_ids')
-            base_branch_ids |= foreign_base_branch_ids
+            foreign_base_branches = bundles.mapped('base_id.branch_ids')
+            base_branches |= foreign_base_branches
 
-        base_head_per_repo = {}
-        for base_branch_id in base_branch_ids:
-            repo = base_branch_id.remote_id.repo_id
-            if repo.id in base_head_per_repo:
-                self.warning('Multiple base branch found in repo %s', repo.name)
-            else:
-                base_head_per_repo[repo.id] = base_branch_id.head
+        self._update_commits_infos(base_branches)  # set base_commit, diff infos, ...
 
-        for link_commit in self.commit_link_ids:
-            commit = link_commit.commit_id
-            base_head = base_head_per_repo.get(commit.repo_id.id).name
-            if base_head:
-                merge_base_sha = False
-                try:
-                    merge_base_sha = commit.repo_id._git(['merge-base', commit.name, base_head]).strip()
-                    merge_base_commit = self.env['runbot.commit'].search([('name', '=', merge_base_sha), ('repo_id', '=', commit.repo_id.id)])
-                    if not merge_base_commit:
-                        merge_base_commit = self.env['runbot.commit'].create({'name': merge_base_sha, 'repo_id': commit.repo_id.id})
-                        self.warning('Commit for base head %s in %s was created', merge_base_sha, commit.repo_id.name)
-                    link_commit.base_commit_id = merge_base_commit.id
-                except subprocess.CalledProcessError:
-                    self.warning('merge-base failed between %s and %s', commit.name, base_head)
-
-
-            else:
-                self.warning('No base head found for repo %s', commit.repo_id.name)
-
-        # TODO search closest base batch
-
+        # TODO search closest base batch to find base commits instead
         #3. Find missing commit in base branches commits
         if missing_repos:
-            fill_missing(base_branch_ids, 'base')
+            fill_missing(base_branches, 'base')
 
         if missing_repos:
             _logger.warning('Missing repo %s for batch %s', missing_repos.mapped('name'), self.id)
@@ -430,6 +405,58 @@ class Batch(models.Model):
                 'params_id': params.id,
                 'link_type': link_type,
             })
+
+    def _update_commits_infos(self, base_branches):
+        base_head_per_repo = {}
+        for base_branch in base_branches:
+            repo = base_branch.remote_id.repo_id
+            if repo.id in base_head_per_repo:
+                self.warning('Multiple base branch found in repo %s', repo.name)
+            else:
+                base_head_per_repo[repo.id] = base_branch.head
+
+        for link_commit in self.commit_link_ids:
+            commit = link_commit.commit_id
+            base_head = base_head_per_repo.get(commit.repo_id.id)
+            if not base_head:
+                self.warning('No base head found for repo %s', commit.repo_id.name)
+                continue
+            link_commit.base_commit_id = base_head
+            merge_base_sha = False
+            try:
+                link_commit.base_ahead = link_commit.base_behind = 0
+                link_commit.file_changed = link_commit.diff_add = link_commit.diff_remove = 0
+                link_commit.merge_base_commit_id = commit.id
+                if commit.name == base_head.name:
+                    continue
+                merge_base_sha = commit.repo_id._git(['merge-base', commit.name, base_head.name]).strip()
+                merge_base_commit = self.env['runbot.commit'].search([('name', '=', merge_base_sha), ('repo_id', '=', commit.repo_id.id)])
+                if not merge_base_commit:
+                    merge_base_commit = self.env['runbot.commit'].create({'name': merge_base_sha, 'repo_id': commit.repo_id.id})
+                    self.warning('Commit for base head %s in %s was created', merge_base_sha, commit.repo_id.name)
+                link_commit.merge_base_commit_id = merge_base_commit.id
+
+                if merge_base_sha == commit.name:
+                    continue
+                ahead, behind = commit.repo_id._git(['rev-list', '--left-right', '--count', '%s...%s' % (commit.name, base_head.name)]).strip().split('\t')
+
+                link_commit.base_ahead = int(ahead)
+                link_commit.base_behind = int(behind)
+
+                # diff. Iter on --numstat, easier to parse than --shortstat summary
+                diff = commit.repo_id._git(['diff', '--numstat', merge_base_sha, commit.name]).strip()
+                if diff:
+                    for line in diff.split('\n'):
+                        link_commit.file_changed += 1
+                        add, remove, _ = line.split(None, 2)
+                        try:
+                            link_commit.diff_add += int(add)
+                            link_commit.diff_remove += int(remove)
+                        except ValueError:  # binary files
+                            pass
+            except subprocess.CalledProcessError:
+                self.warning('Commit info failed between %s and %s', commit.name, base_head.name)
+
 
     def warning(self, message, *args):
         _logger.warning('batch %s: ' + message, self.id, *args)
