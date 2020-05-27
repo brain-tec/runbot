@@ -22,6 +22,7 @@ class runbot_repo(models.Model):
     _inherit = "runbot.repo"
 
     no_build = fields.Boolean(default=False)
+    is_restore = fields.Boolean('Restore database')
     restored_db = fields.Binary(string='Database to restore (zip)', help='Zip file containing an sql dump and a filestore', attachment=True)
     restored_db_filename = fields.Char()
     use_requirements_txt = fields.Boolean('Use requirements.txt', default=True,
@@ -34,7 +35,7 @@ class runbot_repo(models.Model):
     custom_config_template = fields.Text('Custom configuration',
                                          help="This config will be placed in a text file, behind the [option] line, and passed with a -c to the jobs.")
     forced_branch_ids =  fields.One2many('runbot.forced.branch', 'repo_id', string='Replacing branch names')
-
+    template_db_name = fields.Char(string='Template database')
 
 class runbot_forced_branch(models.Model):
     _name = "runbot.forced.branch"

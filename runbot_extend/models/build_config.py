@@ -103,9 +103,7 @@ class ConfigStep(models.Model):
         return ['--omit', ','.join(pattern_to_omit)]
 
 
-    def _restore_db(self, build, log_path):
-        if not build.db_to_restore:
-            return
+    def _restore_db_from_zip(self, build):
         db_name = '%s-%s' % (build.dest, self.db_name)
         build._log('restore', 'Restoring database on %s' % db_name)
         os.makedirs(build._path('temp'), exist_ok=True)
@@ -133,6 +131,23 @@ class ConfigStep(models.Model):
         # 2. dump.sql is restored to {db_name}
         cmd += ['&&', 'psql -a %s < %s/%s' % (db_name, folder_to_restore, 'dump.sql')]
         cmd += ['&&', 'rm -rf %s' % folder_to_restore]
+        return cmd, restore_volumes
+
+    def _restore_db_from_template(self, build):
+        db_name = '%s-%s' % (build.dest, self.db_name)
+        template_db_name = build.repo_id.template_db_name
+        build._log('restore', 'Restoring database from %s on %s' % (template_db_name, db_name))
+        restore_volumes = {} #TODO
+        cmd = ['createdb -T %s %s' % (template_db_name, db_name)]
+        return cmd, restore_volumes
+
+    def _restore_db(self, build, log_path):
+        if not build.db_to_restore:
+            return
+        if build.repo_id.template_db_name:
+            cmd, restore_volumes = self._restore_db_from_template(build)
+        else:
+            cmd, restore_volumes = self._restore_db_from_zip(build)
         return docker_run(' '.join(cmd), log_path, build._path(), build._get_docker_name(), ro_volumes=restore_volumes)
 
     def _upgrade_db(self, build, log_path):

@@ -34,7 +34,7 @@ class runbot_branch(models.Model):
 
     def _get_branch_quickconnect_url(self, fqdn, dest):
         self.ensure_one()
-        if self.repo_id.restored_db:
+        if self.repo_id.is_restore:
             r = {}
             r[self.id] = "http://%s/web/login?db=%s-restored&login=admin&redirect=/web?debug=1" % (
                 fqdn, dest)
