@@ -137,7 +137,7 @@
                                           <div class="badge badge-light" t-esc="batch.get_formated_age()"/>
                                         </div>
                                         <t t-foreach="batch.slot_ids" t-as="slot">
-                                          <t t-if="slot.build_id" t-call="runbot.slot_button"/>
+                                          <t t-if="slot.build_id and not slot.trigger_id.hide" t-call="runbot.slot_button"/>
                                         </t>
                                         <div t-if="more">
                                           <small>

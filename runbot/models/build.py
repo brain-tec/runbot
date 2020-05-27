@@ -74,6 +74,7 @@ class BuildParameters(models.Model):
 
     builds_reference_ids = fields.One2many('runbot.build.reference', 'params_id', copy=True)
     modules = fields.Char('Modules') # TODO fill this with combination of triggers repo_modules and bundle_id.modules (or trigger?)
+    batch_id = fields.Many2one('runbot.batch', help="strore batch to ensure no duplicate detection. Allow to use commit link for commit analysis.")
     fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)
 
     #@api.depends('version_id', 'project_id', 'extra_params', 'config_id', 'config_data', 'modules', 'commit_link_ids', 'builds_reference_ids')
@@ -90,6 +91,8 @@ class BuildParameters(models.Model):
                 'commit_link_ids': sorted(param.commit_link_ids.commit_id.ids),
                 'builds_reference_ids': sorted(param.builds_reference_ids.build_id.ids),
             }
+            if param.batch_id:
+                cleaned_vals['batch_id'] = param.batch_id.id
             param.fingerprint = hashlib.sha256(str(cleaned_vals).encode('utf8')).hexdigest()
 
     def create(self, values):
@@ -321,6 +324,17 @@ class BuildResult(models.Model):
         if 'log_counter' in values: # not 100% usefull but more correct ( see test_ir_logging)
             self.flush()
         return res
+
+    def result_multi(self):
+        if all(build.global_result == 'ok' or not build.global_result for build in self):
+            return 'ok'
+        if any(build.global_result in ('skipped', 'killed', 'manually_killed') for build in self):
+            return 'killed'
+        if any(build.global_result == 'ko' for build in self):
+            return 'ko'
+        if any(build.global_result == 'warning' for build in self):
+            return 'warning'
+        return 'ko'  # ?
 
     def update_build_end(self):
         for build in self:

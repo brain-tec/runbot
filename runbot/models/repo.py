@@ -21,6 +21,11 @@ def _sanitize(name):
     return name
 
 
+#  TODO access rights. 
+# -- Trigger group: filter displayed build slots. 
+# -- Project group: forbid acces to all related ressources (commit, build, bundle, batch, ...)
+
+
 class RepoTrigger(models.Model):
     """
     List of repo parts that must be part of the same bundle
@@ -38,6 +43,8 @@ class RepoTrigger(models.Model):
     ci_context = fields.Char("Ci context", default='ci/runbot')
     category_id = fields.Many2one('runbot.trigger.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
     version_ids = fields.Many2many('runbot.version', string="Allowed version ids", help="Only allow for versions, leave empty fo all")
+    group_ids = fields.Many2many('res.groups', string='Limited to groups')
+    hide = fields.Boolean('Hide batch on main page')
 
 
 class Category(models.Model):

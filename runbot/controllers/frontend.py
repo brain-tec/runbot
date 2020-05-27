@@ -111,8 +111,9 @@ class Runbot(Controller):
         batch = bundle._force()
         return werkzeug.utils.redirect('/runbot/batch/%s' % batch.id)
 
-    @route(['/runbot/batch/<model("runbot.batch"):batch>'], website=True, auth='public', type='http')
-    def batch(self, batch=None, more=False, **kwargs):
+    @route(['/runbot/batch/<int:batch_id>'], website=True, auth='public', type='http')
+    def batch(self, batch_id=None, more=False, **kwargs):
+        batch = request.env['runbot.batch'].browse(batch_id)
         context = {
             'batch': batch,
             'more': more is not False,
@@ -120,6 +121,17 @@ class Runbot(Controller):
             'project': batch.bundle_id.project_id,
         }
         return request.render('runbot.batch', context)
+
+    @route(['/runbot/commit/<model("runbot.commit"):commit>'], website=True, auth='public', type='http')
+    def commit(self, commit=None, more=False, **kwargs):
+        context = {
+            'commit': commit,
+            'more': more is not False,
+            'projects': request.env['runbot.project'].search([]),
+            'project': commit.repo_id.project_id,
+            'reflogs': request.env['runbot.ref.log'].search([('commit_id', '=', commit.id)])
+        }
+        return request.render('runbot.commit', context)
 
     @route([
         '/runbot/build/<int:build_id>/<operation>',

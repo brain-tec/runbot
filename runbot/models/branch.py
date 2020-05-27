@@ -155,10 +155,11 @@ class Branch(models.Model):
         return branches
 
     def write(self, values):
-        head = self.head
+        if 'head' in values:
+            head = self.head
         super().write(values)
-        if head != self.head:
-            self.env['runbot.ref.log'].create({'commit_id': head.id})
+        if 'head' in values and head != self.head:
+            self.env['runbot.ref.log'].create({'commit_id': head.id, 'branch_id': self.id})
 
     def _get_pull_info(self):
         self.ensure_one()

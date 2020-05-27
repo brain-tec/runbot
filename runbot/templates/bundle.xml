@@ -70,55 +70,61 @@
     </t>
 </template>
 <template id="runbot.batch">
-  <t t-call='website.layout'>
-          <table class="table table-condensed table-responsive table-stripped">
-            <tr><td>Bundle</td><td><a t-esc="batch.bundle_id.name" t-attf-href="/runbot/bundle/{{batch.bundle_id.id}}"/></td></tr>
-            <tr><td>Version</td><td t-esc="batch.slot_ids[0].params_id.version_id.name if batch.slot_ids else batch.bundle_id.version_id.name"/></tr>
-            <tr><td>State</td><td t-esc="batch.state"/></tr>
-            <tr><td>Create date</td><td t-esc="batch.create_date"/></tr>
-            <tr><td>Last update</td><td><t t-esc="batch.last_update"/>(<t t-esc="batch.last_update - batch.create_date"/>)</td></tr>
-            <tr><td>Commits</td><td>
-              <div t-foreach="batch.commit_link_ids.sorted(key=lambda lc: (lc.commit_id.repo_id.sequence, lc.commit_id.repo_id.id))" t-as="commit_link">
-                <t t-set="commit" t-value="commit_link.commit_id"/>
-                <span></span>
-                <a t-attf-href="/runbot/commit/#{commit.id}">
-                    <span class="label" t-esc="commit.dname"/>
-                </a>
-                <small t-if="commit_link.match_type == 'base'">
-                    from base: <span t-esc="commit_link.branch_id.name"/><br/>
-                </small>
-                <small t-else="">
-                    found in branch <span t-esc="commit_link.branch_id.name"/>
-                    <t t-if="batch.state != 'preparing'">
-                        <span t-esc="'+%s' % commit_link.diff_add" class="text-success"></span>
-                        <span t-esc="'+%s' % commit_link.diff_remove" class="text-danger"></span>
-                        <span class="text-info">(<span t-esc="commit_link.file_changed"/> <i class="fa fa-file"/>)</span>
+   <t t-call='website.layout'>
+        <div class="table-responsive">
+            <table class="table table-stripped">
+                <tr><td>Bundle</td><td><a t-esc="batch.bundle_id.name" t-attf-href="/runbot/bundle/{{batch.bundle_id.id}}"/></td></tr>
+                <tr><td>Version</td><td t-esc="batch.slot_ids[0].params_id.version_id.name if batch.slot_ids else batch.bundle_id.version_id.name"/></tr>
+                <tr><td>State</td><td t-esc="batch.state"/></tr>
+                <tr><td>Create date</td><td t-esc="batch.create_date"/></tr>
+                <tr><td>Last update</td><td><t t-esc="batch.last_update"/>(<t t-esc="batch.last_update - batch.create_date"/>)</td></tr>
+                <tr t-att-class="'bg-info-light' if batch.state=='preparing' else 'bg-success-light' if not any(log.level != 'INFO' for log in batch.log_ids) else 'bg-warning-light'"><td>Commits</td><td>
+                <div t-foreach="batch.commit_link_ids.sorted(key=lambda lc: (lc.commit_id.repo_id.sequence, lc.commit_id.repo_id.id))" t-as="commit_link">
+                    <t t-set="commit" t-value="commit_link.commit_id"/>
+                    <span></span>
+                    <a t-attf-href="/runbot/commit/#{commit.id}">
+                        <i class="fa fa-hashtag" t-if="commit_link.match_type == 'new'"/>
+                        <i class="fa fa-refresh" t-if="commit_link.match_type == 'head'"/>
+                        <i class="fa fa-intersection" t-if="commit_link.match_type == 'base_match'"/>
+                        <i class="fa fa-code-fork" t-if="commit_link.match_type == 'base_head'"/>
+                        <span class="label" t-esc="commit.dname"/>
+                    </a>
+                    <small t-if="commit_link.match_type and commit_link.match_type.startswith('base')">
+                        from base: <span t-esc="commit_link.branch_id.name"/><br/>
+                    </small>
+                    <small t-else="">
+                        found in branch <span t-esc="commit_link.branch_id.name"/>
+                        <t t-if="batch.state != 'preparing'">
+                            <span t-esc="'+%s' % commit_link.diff_add" class="text-success"></span>
+                            <span t-esc="'+%s' % commit_link.diff_remove" class="text-danger"></span>
+                            <span class="text-info">(<span t-esc="commit_link.file_changed"/> <i class="fa fa-file"/>)</span>
+                        </t>
+                        <br/>
+                        <t t-if="more">
+                            Base head: <span t-esc="commit_link.base_commit_id.name"/><br/>
+                            Merge base: <span t-esc="commit_link.merge_base_commit_id.name"/>
+                            (<span t-esc="'%s ahead' % commit_link.base_ahead" class="text-success"></span>,
+                            <span t-esc="'%s behind' % commit_link.base_behind" class="text-danger"></span>)<br/>
+                        </t>
+                    </small>
+                    <t t-if="more or not (commit_link.match_type and commit_link.match_type.startswith('base'))">
+                        Subject:  <span t-esc="commit.subject"/><br/>
+                        Author: <span t-esc="commit.author"/> (<span t-esc="commit.author_email"/>)<br/>
+                        <t t-if="commit.author != commit.committer">
+                            Committer: <span t-esc="commit.committer"/>(<span t-esc="commit.author_email"/>)<br/>
+                        </t>
+                        Commit date: <span t-esc="commit.date"/><br/>
                     </t>
-                    <br/>
-                    <t t-if="more">
-                        Base head: <span t-esc="commit_link.base_commit_id.name"/><br/>
-                        Merge base: <span t-esc="commit_link.merge_base_commit_id.name"/>
-                        (<span t-esc="'%s ahead' % commit_link.base_ahead" class="text-success"></span>,
-                        <span t-esc="'%s behind' % commit_link.base_behind" class="text-danger"></span>)<br/>
+                    <hr/>
+                </div>
+                </td></tr>
+                <tr><td>Builds</td><td>
+                    <t t-foreach="batch.slot_ids" t-as="slot">
+                        <t t-call="runbot.slot_button"/>
                     </t>
-                </small>
-                <t t-if="more or commit_link.match_type != 'base'">
-                    Subject:  <span t-esc="commit.subject"/><br/>
-                    Author: <span t-esc="commit.author"/> (<span t-esc="commit.author_email"/>)<br/>
-                    <t t-if="commit.author != commit.committer">
-                        Committer: <span t-esc="commit.committer"/>(<span t-esc="commit.author_email"/>)<br/>
-                    </t>
-                    Commit date: <span t-esc="commit.date"/><br/>
-                </t>
-                <hr/>
-              </div>
-            </td></tr>
-            <tr><td>Builds</td><td>
-                <t t-foreach="batch.slot_ids" t-as="slot">
-                    <t t-call="runbot.slot_button"/>
-                </t>
-            </td></tr>
-        </table>
+                </td></tr>
+            </table>
+        </div>
         <div>TODO: Links, rebuild, wizard, launch empty slots, ...</div>
         <t t-foreach="batch.log_ids" t-as="log">
             <t t-set="logclass" t-value="dict(ERROR='danger', WARNING='warning', INFO='info').get(log.level, 'warning')"/>

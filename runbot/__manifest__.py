@@ -33,6 +33,7 @@
         'templates/git.xml',
         'templates/badge.xml',
         'templates/bundle.xml',
+        'templates/commit.xml',
         'data/runbot_data.xml',
         'data/runbot_build_config_data.xml',
         'data/build_parse.xml',

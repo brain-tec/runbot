@@ -273,10 +273,10 @@ class Batch(models.Model):
             # case 1: a commit already exists for the repo (pr+branch, or fast push)
             if commit_link.commit_id.repo_id == commit.repo_id:
                 if commit_link.commit_id.id != commit.id:
-                    self.log('New head on branch during throttle phase %s: Replacing commit %s with %s', branch.name, commit_link.commit_id.name, commit.name)
+                    self.log('New head on branch %s during throttle phase: Replacing commit %s with %s', branch.name, commit_link.commit_id.name, commit.name)
                     commit_link.write({'commit_id': commit.id, 'branch_id': branch.id})
                 elif commit_link.branch_id.is_pr and not branch.is_pr:
-                    commit_link.branch_id = branch # Try to have a branch on commit if possible
+                    commit_link.branch_id = branch  # Try to have a branch instead of pr on commit if possible
                 break
         else:
             self.write({'commit_link_ids': [(0, 0, {
@@ -317,12 +317,10 @@ class Batch(models.Model):
         all_repos = triggers.mapped('repo_ids') | dependency_repos
         missing_repos = all_repos - pushed_repo
 
-        foreign_projects = dependency_repos.mapped('project_id') - project
         # find missing commits on bundle branches head
-        def fill_missing(branch_ids, match_type):
-            if branch_ids:
-                for branch in branch_ids.sorted('is_pr'): # branch first in case pr is closed.
-                    commit = branch.head
+        def fill_missing(branch_commits, match_type):
+            if branch_commits:
+                for branch, commit in branch_commits.items(): # branch first in case pr is closed.
                     nonlocal missing_repos
                     if commit.repo_id in missing_repos:
                         values = {
@@ -330,7 +328,7 @@ class Batch(models.Model):
                             'match_type': match_type,
                             'branch_id': branch.id,
                         }
-                        if match_type == 'base':
+                        if match_type.startswith('base'):
                             values['base_commit_id'] = commit.id
                             values['merge_base_commit_id'] = commit.id
                         self.write({'commit_link_ids': [(0, 0, values)]})
@@ -340,24 +338,55 @@ class Batch(models.Model):
                         # add warning if bundle has warnings
 
         bundle = self.bundle_id
-        base_branches = self.bundle_id.base_id.branch_ids
+ 
+        # 1.1 find missing commit in bundle heads
+        if missing_repos:
+            fill_missing({branch: branch.head for branch in bundle.branch_ids.sorted('is_pr')}, 'head')
+
+        # 1.2 find merge_base info for those commits
+        #  use last not preparing batch to define previous repos_heads instead of branches heads:
+        #  Will allow to have a diff info on base bundle, compare with previous bundle 
+        last_base_batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.base_id.id), ('state', '!=', 'preparing')])
+        print(self, last_base_batch)
+        base_head_per_repo = {commit.repo_id.id: commit for commit in last_base_batch.commit_link_ids.mapped('commit_id')}
+        self._update_commits_infos(base_head_per_repo)  # set base_commit, diff infos, ...
+
+        #2. Find missing commit in a compatible base bundle
+        if missing_repos and not bundle.is_base:
+            merge_base_commits = self.commit_link_ids.mapped('merge_base_commit_id')
+            link_commit = self.env['runbot.commit.link'].search([
+                ('commit_id', 'in', merge_base_commits.ids),
+                ('match_type', 'in', ('new', 'head'))
+            ])
+            batches = self.env['runbot.batch'].search([
+                ('bundle_id', '=', bundle.base_id.id),
+                ('commit_link_ids', 'in', link_commit.ids),
+                ('state', '!=', 'preparing')
+            ])
+            if batches:
+                batches = batches.sorted(lambda b: (len(b.commit_link_ids.mapped('commit_id') & merge_base_commits), b.id), reverse=True)
+                batch = batches[0]
+                self.log('Using batch %s to define missing commits', batch.id)
+                matched = batch.commit_link_ids.mapped('commit_id') & merge_base_commits
+                if len(matched) != len(merge_base_commits):
+                    self.warning('Only %s out of %s merge base matched. You may want to rebase your branches to ensure compatibility', len(matched), len(merge_base_commits) )
+                fill_missing({branch: branch.head for branch in batch.commit_link_ids.mapped('branch_id')}, 'base_match')
+
+        #3. Find missing commit in base heads
+        if missing_repos:
+            if not bundle.is_base:
+                self.log('Not all commit found in bundle branches and base batch. Fallback on base branches heads.')
+            fill_missing({branch: branch.head for branch in self.bundle_id.base_id.branch_ids}, 'base_head')
 
         if missing_repos:
-            fill_missing(bundle.branch_ids, 'head')
-
-        if missing_repos and foreign_projects:
-            # if a dependency is in another repo, branch won't be in bundle.
-            bundles = bundle.search([('name', '=', bundle.name), ('project_id', 'in', foreign_projects.ids)])
-            fill_missing(bundles.mapped('branch_ids'), 'head')
-            foreign_base_branches = bundles.mapped('base_id.branch_ids')
-            base_branches |= foreign_base_branches
-
-        self._update_commits_infos(base_branches)  # set base_commit, diff infos, ...
-
-        # TODO search closest base batch to find base commits instead
-        #3. Find missing commit in base branches commits
-        if missing_repos:
-            fill_missing(base_branches, 'base')
+            foreign_projects = dependency_repos.mapped('project_id') - project
+            if foreign_projects:
+                self.log('Not all commit found. Fallback on foreign base branches heads.')
+                foreign_bundles = bundle.search([('name', '=', bundle.name), ('project_id', 'in', foreign_projects.ids)])
+                fill_missing({branch: branch.head for branch in foreign_bundles.mapped('branch_ids').sorted('is_pr')}, 'head')
+                if missing_repos:
+                    foreign_bundles = bundle.search([('name', '=', bundle.base_id.name), ('project_id', 'in', foreign_projects.ids)])
+                    fill_missing({branch: branch.head for branch in foreign_bundles.mapped('branch_ids').sorted('is_pr')}, 'base_head')
 
         if missing_repos:
             _logger.warning('Missing repo %s for batch %s', missing_repos.mapped('name'), self.id)
@@ -378,7 +407,8 @@ class Batch(models.Model):
                 continue
             # in any case, search for an existing build
             config = config_by_trigger.get(trigger.id, trigger.config_id)
-            params = self.env['runbot.build.params'].create({
+
+            params_value = {
                 'version_id':  version_id,
                 'extra_params': '',
                 'config_id': config.id,
@@ -387,7 +417,8 @@ class Batch(models.Model):
                 'config_data': {},
                 'commit_link_ids': [(6, 0, [commit_link_by_repos[repo.id].id for repo in trigger_repos])],
                 'builds_reference_ids': []  # TODO
-            })
+            }
+            params = self.env['runbot.build.params'].create(params_value)
             build = self.env['runbot.build'].search([('params_id', '=', params.id), ('parent_id', '=', False)], limit=1, order='id desc')
             # id desc will take the most recent one if multiple build. Hopefully it is a green build.
             # TODO sort on result?
@@ -406,15 +437,7 @@ class Batch(models.Model):
                 'link_type': link_type,
             })
 
-    def _update_commits_infos(self, base_branches):
-        base_head_per_repo = {}
-        for base_branch in base_branches:
-            repo = base_branch.remote_id.repo_id
-            if repo.id in base_head_per_repo:
-                self.warning('Multiple base branch found in repo %s', repo.name)
-            else:
-                base_head_per_repo[repo.id] = base_branch.head
-
+    def _update_commits_infos(self, base_head_per_repo):
         for link_commit in self.commit_link_ids:
             commit = link_commit.commit_id
             base_head = base_head_per_repo.get(commit.repo_id.id)
@@ -498,3 +521,21 @@ class BatchSlot(models.Model):
 
     def fa_link_type(self):
         return self._fa_link_type.get(self.link_type, 'exclamation-triangle')
+
+
+class RunbotCommitLink(models.Model):
+    _name = "runbot.commit.link"
+    _description = "Build commit"
+
+    commit_id = fields.Many2one('runbot.commit', 'Commit', required=True, index=True)
+    # Link info
+    match_type = fields.Selection([('new', 'New head of branch'), ('head', 'Head of branch'), ('base_head', 'Found on base branch'), ('base_match', 'Found on base branch')])  # HEAD, DEFAULT
+    branch_id = fields.Many2one('runbot.branch', string='Found in branch')  # Shouldn't be use for anything else than display
+
+    base_commit_id = fields.Many2one('runbot.commit', 'Base head commit')
+    merge_base_commit_id = fields.Many2one('runbot.commit', 'Merge Base commit')
+    base_behind = fields.Integer('# commits behind base')
+    base_ahead = fields.Integer('# commits ahead base')
+    file_changed = fields.Integer('# file changed')
+    diff_add = fields.Integer('# line added')
+    diff_remove = fields.Integer('# line removed')
