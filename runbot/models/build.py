@@ -198,7 +198,7 @@ class BuildResult(models.Model):
     keep_running = fields.Boolean('Keep running', help='Keep running')
     log_counter = fields.Integer('Log Lines counter', default=100)
 
-    slot_ids = fields.One2many('runbot.batch.slot', 'build_id')
+    slot_ids = fields.One2many('runbot.batch.slot', 'build_id', context={'active_test': True})
     killable = fields.Boolean('Killable')
 
     @api.depends('params_id.config_id')

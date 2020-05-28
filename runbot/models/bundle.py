@@ -290,16 +290,16 @@ class Batch(models.Model):
             batch.state = 'done'
             batch.log('Skipping batch')
             for slot in batch.slot_ids:
-                slot.active = False
+                slot.skipped = False
                 build = slot.build_id
-                assert not slot in build.slot_ids
-                if not build.slot_ids:  # TODO check that active test is used
+                testing_slots = build.slot_ids.filtered(lambda s: not s.skipped)
+                if not testing_slots:  # TODO check that active test is used
                     if build.global_state == 'pending':
                         build._skip('Newer build found')
                     elif build.global_state in ('waiting', 'testing'):
                         build.killable = True
                 elif slot.link_type == 'created':
-                    batches = build.slot_ids.mapped('batch_id')
+                    batches = testing_slots.mapped('batch_id')
                     _logger.info('Cannot skip build %s build is still in use in batches %s', build.id, batches.ids)
                     bundles = batches.mapped('bundle_id') - batch.bundle_id
                     if bundles:
@@ -550,6 +550,7 @@ class BatchSlot(models.Model):
     params_id = fields.Many2one('runbot.build.params', index=True, required=True)
     link_type = fields.Selection([('created', 'Build created'), ('matched', 'Existing build matched'), ('rebuild', 'Rebuild')], required=True) # rebuild type?
     active = fields.Boolean('Attached', default=True)
+    skipped = fields.Boolean('Skipped', default=False)
     # rebuild, what to do: since build ccan be in multiple batch:
     # - replace for all batch?
     # - only available on batch and replace for batch only?
