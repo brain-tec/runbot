@@ -326,5 +326,16 @@ class Runbot(models.AbstractModel):
         if ignored:
             _logger.debug('docker (%s) not deleted because not dest format', " ".join(list(ignored)))
 
-    def warning(self):
-        pass  # TODO
+    def warning(self, message):
+        return self.env['runbot.warning'].create({'message': message})
+
+
+class RunbotWarning(models.Model):
+    """
+    Generic Warnings for runbot
+    """
+
+    _name = 'runbot.warning'
+    _description = 'Generic Runbot Warning'
+
+    message = fields.Char("Warning", index=True)

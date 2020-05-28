@@ -366,7 +366,7 @@ class Repo(models.Model):
                 return refs
             except Exception:
                 _logger.exception('Fail to get refs for repo %s', self.name)
-                # TODO self.env['runbot.runbot'].warning('Fail to get refs for repo %s', self.name)
+                self.env['runbot.runbot'].warning('Fail to get refs for repo %s', self.name)
         return []
 
     def _find_or_create_branches(self, refs):
