@@ -20,7 +20,22 @@
             </sheet>
           </form>
         </field>
-    </record>
+      </record>
+
+      <record id="repo_trigger_catgory_form" model="ir.ui.view">
+        <field name="name">runbot.repo.trigger.category.form</field>
+        <field name="model">runbot.trigger.category</field>
+        <field name="arch" type="xml">
+          <form>
+            <sheet>
+              <group name="category_group">
+                <field name="name"/>
+                <field name="icon"/>
+              </group>
+            </sheet>
+          </form>
+        </field>
+      </record>
 
       <record id="repo_form" model="ir.ui.view">
         <field name="name">runbot.repo.form</field>
@@ -117,6 +132,12 @@
         <field name="view_mode">tree,form</field>
     </record>
 
+    <record id="runbot_triggers_category_action" model="ir.actions.act_window">
+        <field name="name">Trigger Categories</field>
+        <field name="res_model">runbot.trigger.category</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+
     <menuitem name="Runbot" id="runbot_menu_root"/>
     <menuitem id="runbot_menu_repos_main" name="Repos" parent="runbot_menu_root"/>
     <menuitem
@@ -137,6 +158,11 @@
         sequence="30"
         action="runbot_triggers_action"
       />
-
+      <menuitem
+        id="runbot_menu_trigger_category"
+        parent="runbot_menu_repos_main"
+        sequence="40"
+        action="runbot_triggers_category_action"
+      />
   </data>
 </odoo>

@@ -53,7 +53,6 @@ class Category(models.Model):
 
     name = fields.Char("Name")
     icon = fields.Char("Font awesome icon")
-    # TODO add a view?
 
 
 class Remote(models.Model):
