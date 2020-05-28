@@ -63,6 +63,7 @@ class Bundle(models.Model):
     batch_ids = fields.One2many('runbot.batch', 'bundle_id')
     last_batch = fields.Many2one('runbot.batch', index=True, domain=lambda self: [('category_id', '=', self.env.ref('runbot.default_category').id)])
     last_batchs = fields.Many2many('runbot.batch', 'Last batchs', compute='_compute_last_batchs')
+    last_done_batch = fields.Many2many('runbot.batch', 'Last batchs', compute='_compute_last_done_batch')
 
     sticky = fields.Boolean('Sticky', index=True)
     is_base = fields.Boolean('Is base', index=True)
@@ -158,11 +159,12 @@ class Bundle(models.Model):
                         runbot_bundle bundle INNER JOIN runbot_batch batch ON bundle.id=batch.bundle_id
                     WHERE
                         bundle.id in %s
+                        AND batch.category_id = %s
                     ) AS bundle_batch
                 WHERE
                     row <= 4
                 ORDER BY row, id desc
-                """, [tuple(self.ids)]
+                """, [tuple(self.ids), self.env.ref('runbot.runbot_build_config_default').id] # TODO use context ?  make context dependant
             )
             batchs = self.env['runbot.batch'].browse([r[0] for r in self.env.cr.fetchall()])
             for batch in batchs:
@@ -170,6 +172,31 @@ class Bundle(models.Model):
 
             for bundle in self:
                 bundle.last_batchs = [(6, 0, batch_ids[bundle.id])]
+
+    def _compute_last_done_batch(self):
+        if self:
+            self.env.cr.execute("""
+                SELECT
+                    id
+                FROM (
+                    SELECT
+                        batch.id AS id,
+                        row_number() OVER (PARTITION BY batch.bundle_id order by batch.id desc) AS row
+                    FROM
+                        runbot_bundle bundle INNER JOIN runbot_batch batch ON bundle.id=batch.bundle_id
+                    WHERE
+                        bundle.id in %s
+                        AND batch.state = 'done'
+                        AND batch.category_id = %s
+                    ) AS bundle_batch
+                WHERE
+                    row = 1
+                ORDER BY row, id desc
+                """, [tuple(self.ids), self.env.ref('runbot.runbot_build_config_default').id]
+            )
+            batchs = self.env['runbot.batch'].browse([r[0] for r in self.env.cr.fetchall()])
+            for batch in batchs:
+                batch.bundle_id.last_done_batch = batch
 
     def create(self, values_list):
         # self.flush() # TODO check that
@@ -359,7 +386,7 @@ class Batch(models.Model):
                 branch_per_repo[repo] = branch
             elif branch_per_repo[repo].head != branch.head:
                 obranch = branch_per_repo[repo]
-                self.warning("Branch %s and branc %s in repo %s don't have the same head: %s ≠ %s", (branch.dname, obranch.dname, repo.name, branch.head.name, obranch.head.name))
+                self.warning("Branch %s and branch %s in repo %s don't have the same head: %s ≠ %s", branch.dname, obranch.dname, repo.name, branch.head.name, obranch.head.name)
 
         # 1.1 FIND missing commit in bundle heads
         if missing_repos:

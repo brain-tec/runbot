@@ -22,17 +22,20 @@
           <div class="row">
             <div class='col-md-12'>
               <div>
-                <span t-attf-class="label label-{{pending_level}}">Pending: <t t-esc="pending_total"/></span>
+                <span t-attf-class="badge badge-{{pending_level}}">Pending: <t t-esc="pending_total"/></span>
               </div>
-              <t t-foreach="glances_data.keys()" t-as="repo">
-                <h4><t t-esc="repo"/>
-                </h4>
-                <t t-foreach="glances_data[repo]" t-as="br">
-                  <t t-if="br[1] == 'ko'"><t t-set="klass">danger</t></t>
-                  <t t-if="br[1] == 'warn'"><t t-set="klass">warning</t></t>
-                  <t t-if="br[1] == 'ok'"><t t-set="klass">success</t></t>
-                  <t t-if="br[1] == 'killed'"><t t-set="klass">killed</t></t>
-                  <span t-attf-class="label label-{{klass}}"><t t-esc="br[0]"/></span>
+              <t t-set="project_id"></t>
+              <t t-set="nb_project" t-value="len(bundles.mapped('project_id'))"/>
+              <t t-foreach="bundles.sorted(lambda b: (-b.project_id.id, b.version_id.number), reverse=True)" t-as="bundle">
+                <h3 t-if="nb_project > 1 and project_id != bundle.project_id.id" t-esc="bundle.project_id.name"/>
+                <t t-set="project_id" t-value="bundle.project_id.id"/>
+                <h4><t t-esc="bundle.name"/></h4>
+                <t t-foreach="bundle.last_done_batch.slot_ids" t-as="slot">
+                  <t t-if="slot.build_id.global_result == 'ko'"><t t-set="klass">danger</t></t>
+                  <t t-if="slot.build_id.global_result == 'warn'"><t t-set="klass">warning</t></t>
+                  <t t-if="slot.build_id.global_result == 'ok'"><t t-set="klass">success</t></t>
+                  <t t-if="slot.build_id.global_result == 'killed'"><t t-set="klass">killed</t></t>
+                  <span t-attf-class="badge badge-{{klass}}"><t t-esc="slot.trigger_id.name"/></span>
                 </t>
               </t>
             </div>

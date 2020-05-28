@@ -29,7 +29,7 @@ class RunbotBadge(Controller):
             ('bundle_id', '=', bundle.id),
             ('state', '=', 'done'),
             ('category_id', '=', request.env.ref('runbot.default_category').id)
-        ])
+        ], order='id desc', limit=1)
 
         builds = batch.slot_ids.filtered(lambda s: s.trigger_id in triggers).mapped('build_id')
         if not builds:

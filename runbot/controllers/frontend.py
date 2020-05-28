@@ -173,53 +173,15 @@ class Runbot(Controller):
         }
         return request.render("runbot.build", context)
 
-    def _glances_ctx(self):
-        repos = request.env['runbot.repo'].search([])   # respect record rules
-        # TODO adapt
-        # TODO for record rule, replace by project instead
-        default_config_id = request.env.ref('runbot.runbot_build_config_default').id
-
-        #bundles = request.env['runbot.bundle'].search([('sticky', '=', True)]]
-#
-        #    ('category_id', '=', request.env.ref('runbot.default_category').id)
-#
-#
-        #query = """
-        #    SELECT split_part(r.name, ':', 2),
-        #           br.branch_name,
-        #           (array_agg(bu.global_result order by bu.id desc))[1]
-        #      FROM runbot_build bu
-        #      JOIN runbot_branch br on (br.id = bu.branch_id)
-        #      JOIN runbot_repo r on (r.id = br.repo_id)
-        #     WHERE br.sticky
-        #       AND br.repo_id in %s
-        #       AND (bu.hidden = 'f' OR bu.hidden IS NULL)
-        #       AND (
-        #            bu.global_state in ('running', 'done')
-        #       )
-        #       AND bu.global_result not in ('skipped', 'manually_killed')
-        #       AND (bu.config_id = r.repo_config_id
-        #            OR bu.config_id =  br.branch_config_id
-        #            OR bu.config_id =  %s)
-        #  GROUP BY 1,2,r.sequence,br.id
-        #  ORDER BY r.sequence, (br.branch_name='master'), br.id
-        #"""
-        #cr = request.env.cr
-        #cr.execute(query, (tuple(repos.ids), default_config_id))
-        #ctx = OrderedDict()
-        #for row in cr.fetchall():
-        #    ctx.setdefault(row[0], []).append(row[1:])
-        #return ctx
-
     @route('/runbot/glances', type='http', auth='public', website=True)
     def glances(self, refresh=None):
-        glances_ctx = self._glances_ctx()
+        bundles = request.env['runbot.bundle'].search([('sticky', '=', True)]) # NOTE we dont filter on project
         pending = self._pending()
         qctx = {
             'refresh': refresh,
             'pending_total': pending[0],
             'pending_level': pending[1],
-            'glances_data': glances_ctx,
+            'bundles': bundles,
         }
         return request.render("runbot.glances", qctx)
 
@@ -227,7 +189,6 @@ class Runbot(Controller):
             '/runbot/monitoring/<int:config_id>',
             '/runbot/monitoring/<int:config_id>/<int:view_id>'], type='http', auth='user', website=True)
     def monitoring(self, config_id=None, view_id=None, refresh=None, **kwargs):
-        glances_ctx = self._glances_ctx()
         pending = self._pending()
         hosts_data = request.env['runbot.host'].search([])
 
