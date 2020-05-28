@@ -130,7 +130,11 @@
                                   <div class="row">
                                     <t t-foreach="bundle.last_batchs" t-as="batch">
                                       <t t-if="batch.state=='preparing'"><t t-set="klass">default</t></t>
-                                      <t t-if="batch.state=='ready'"><t t-set="klass">success</t></t>
+                                      <t t-if="batch.state=='ready'"><t t-set="klass">info</t></t>
+                                      <t t-if="batch.state=='done'">
+                                        <t t-set="klass">success</t>
+                                        <!--<t t-if="any(slot.build_id.global_result != 'ok' for slot in batch.slot_ids)" t-set="klass">danger</t> -->
+                                      </t>
                                       <div t-attf-class="col-md-6 col-xl-3 bg-{{klass}}-light cell {{'d-none d-xl-block' if batch_index > 1 else ''}}">
                                         <div>
                                           <a t-attf-href="/runbot/batch/#{batch.id}" class="fa fa-asterisk"/>

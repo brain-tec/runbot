@@ -288,21 +288,28 @@ class Batch(models.Model):
             if batch.bundle_id.is_base or batch.state == 'done':
                 continue
             batch.state = 'done'
+            batch.log('Skipping batch')
             for slot in batch.slot_ids:
-                batch.log('Skipping batch')
                 slot.active = False
                 build = slot.build_id
-                if len(build.slot_ids) == 0:  # check that active test is used
+                assert not slot in build.slot_ids
+                if not build.slot_ids:  # TODO check that active test is used
                     if build.global_state == 'pending':
                         build._skip('Newer build found')
                     elif build.global_state in ('waiting', 'testing'):
                         build.killable = True
+                elif slot.link_type == 'created':
+                    batches = build.slot_ids.mapped('batch_id')
+                    _logger.info('Cannot skip build %s build is still in use in batches %s', build.id, batches.ids)
+                    bundles = batches.mapped('bundle_id') - batch.bundle_id
+                    if bundles:
+                        batch.log('Cannot kill or skip build %s, build is used in another bundle: %s', build.id, bundles.mapped('name'))
 
     def _process(self):
         for batch in self:
             if batch.state == 'preparing' and batch.last_update < fields.Datetime.now() - datetime.timedelta(seconds=60):
                 batch._prepare()
-            elif batch.state == 'ready' and all(slot.build_id.global_state in ('running', 'done') for slot in batch.slot_ids):
+            elif batch.state == 'ready' and all(slot.build_id.global_state in (False, 'running', 'done') for slot in batch.slot_ids):
                 batch.log('Batch done')
                 batch.state = 'done'
 
