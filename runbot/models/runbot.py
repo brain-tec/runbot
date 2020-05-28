@@ -134,7 +134,6 @@ class Runbot(models.AbstractModel):
                     ('params_id', '=', top_parent.params_id.id),
                     ('build_type', '=', 'normal'),
                     ('parent_id', '=', False),
-                    ('hidden', '=', False),
                 ])
                 if newer_candidates:
                     top_parent._ask_kill(message='Build automatically killed, newer build found %s.' % newer_candidates.ids)

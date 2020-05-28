@@ -58,7 +58,6 @@ class MultiBuildWizard(models.TransientModel):
                 'job_type': 'create_build',
                 'create_config_ids': [(4, config_single.id)],
                 'number_builds': self.number_builds,
-                'hide_build': True,
             })
 
             config_multi = self.env['runbot.build.config'].create({'name': self.config_multi_name})

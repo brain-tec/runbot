@@ -58,7 +58,6 @@
                         <field name="build_type"/>
                         <field name="parent_id"/>
                         <field name="orphan_result"/>
-                        <field name="hidden" groups="base.group_no_one"/>
                         <field name="build_url" widget="url" readonly="1"/>
                         <field name="keep_running"/>
                         <field name="gc_date" readonly="1"/>

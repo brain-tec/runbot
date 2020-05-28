@@ -107,7 +107,6 @@ class RunbotErrorLog(models.Model):
     host = fields.Char(string='Host', readonly=True)
     config_id = fields.Many2one('runbot.build.config', string='Config', readonly=True)
     parent_id = fields.Many2one('runbot.build', string='Parent build', readonly=True)
-    hidden = fields.Boolean(string='Hidden', readonly=True)
     #bundle_id = fields.Many2one('runbot.bundle', string='Bundle', readonly=True)
     #bundle_name = fields.Char(string='Bundle name', readonly=True)
     #bundle_sticky = fields.Boolean(string='Sticky', readonly=True)
@@ -156,8 +155,7 @@ class RunbotErrorLog(models.Model):
                 bu.global_result  AS global_result,
                 bu.create_date  AS bu_create_date,
                 bu.host  AS host,
-                bu.parent_id  AS parent_id,
-                bu.hidden  AS hidden
+                bu.parent_id  AS parent_id
             FROM
                 ir_logging AS l
             JOIN

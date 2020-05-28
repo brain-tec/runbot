@@ -40,7 +40,6 @@ COPY_WHITELIST = [
     "extra_params",
     "build_type",
     "parent_id",
-    "hidden",
     "commit_link_ids",
     "config_id",
     "orphan_result",
@@ -193,7 +192,6 @@ class BuildResult(models.Model):
     parent_id = fields.Many2one('runbot.build', 'Parent Build', index=True)
     parent_path = fields.Char('Parent path', index=True)
     # should we add a has children stored boolean?
-    hidden = fields.Boolean("Don't show build on main page", default=False) # todo is it still usefull?
     children_ids = fields.One2many('runbot.build', 'parent_id')
 
     # config of top_build is inherithed from params, but subbuild will have different configs
@@ -258,8 +256,6 @@ class BuildResult(models.Model):
 
     def _get_state_score(self, result):
         return state_order.index(result)
-
-    # random note: need to count hidden in pending and testing build displayed in frontend
 
     @api.depends('children_ids.global_result', 'local_result', 'children_ids.orphan_result')
     def _compute_global_result(self):
@@ -435,7 +431,6 @@ class BuildResult(models.Model):
         values = {
             'params_id': self.params_id.id,
             'build_type': 'rebuild',
-            'hidden': self.hidden,
         }
         if self.parent_id:
             values.update({

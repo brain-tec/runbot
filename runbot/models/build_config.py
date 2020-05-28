@@ -145,7 +145,6 @@ class ConfigStep(models.Model):
     # create_build
     create_config_ids = fields.Many2many('runbot.build.config', 'runbot_build_config_step_ids_create_config_ids_rel', string='New Build Configs', track_visibility='onchange', index=True)
     number_builds = fields.Integer('Number of build to create', default=1, track_visibility='onchange')
-    hide_build = fields.Boolean('Hide created build in frontend', default=True, track_visibility='onchange')
 
     force_host = fields.Boolean('Use same host as parent for children', default=False, track_visibility='onchange')  # future
     make_orphan = fields.Boolean('No effect on the parent result', help='Created build result will not affect parent build result', default=False, track_visibility='onchange')
@@ -248,7 +247,6 @@ class ConfigStep(models.Model):
                     'params_id': build.params_id.copy({'config_id': create_config.id}).id,
                     'parent_id': build.id,
                     'build_type': build.build_type,
-                    'hidden': self.hide_build,
                     'orphan_result': self.make_orphan,
                 })
                 build._log('create_build', 'created with config %s' % create_config.name, log_type='subbuild', path=str(children.id))

@@ -415,7 +415,6 @@ class TestBuildResult(RunbotCase):
         build1_1 = self.Build.create({
             'params_id': self.server_params.id,
             'parent_id': build1.id,
-            'hidden': True,
         })
         build1_2 = self.Build.create({
             'params_id': self.server_params.id,

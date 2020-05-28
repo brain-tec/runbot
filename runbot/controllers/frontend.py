@@ -184,7 +184,6 @@ class Runbot(Controller):
               JOIN runbot_repo r on (r.id = br.repo_id)
              WHERE br.sticky
                AND br.repo_id in %s
-               AND (bu.hidden = 'f' OR bu.hidden IS NULL)
                AND (
                     bu.global_state in ('running', 'done')
                )
@@ -230,7 +229,6 @@ class Runbot(Controller):
                                 AND global_state in ('running', 'done')
                                 AND branch_id in (SELECT id FROM runbot_branch where sticky='t')
                                 AND local_state != 'duplicate'
-                                AND hidden = false
                                 ORDER BY branch_id ASC, id DESC""", [int(monitored_config_id)])
         last_monitored = request.env['runbot.build'].browse([r[1] for r in request.env.cr.fetchall()])
 
@@ -269,7 +267,6 @@ class Runbot(Controller):
                                 AND global_state in ('running', 'done')
                                 AND branch_id in (SELECT id FROM runbot_branch where sticky='t' and repo_id in %s)
                                 AND local_state != 'duplicate'
-                                AND hidden = false
                                 ORDER BY branch_id ASC, id DESC""", [int(monitored_config_id), tuple(readable_repos.ids)])
         last_monitored = request.env['runbot.build'].browse([r[1] for r in request.env.cr.fetchall()])
 
