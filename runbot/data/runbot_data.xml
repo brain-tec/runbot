@@ -3,13 +3,13 @@
         <field name="name">Default</field>
         <field name="icon">gear</field>
     </record>
-    <record model="runbot.trigger.category" id="runbot.default_nightly">
+    <record model="runbot.trigger.category" id="runbot.nightly_category">
         <field name="name">Nightly</field>
-        <field name="icon">gear</field>
+        <field name="icon">stars</field>
     </record>
-    <record model="runbot.trigger.category" id="runbot.default_weekly">
+    <record model="runbot.trigger.category" id="runbot.weekly_category">
         <field name="name">Weekly</field>
-        <field name="icon">gear</field>
+        <field name="icon">calendar-week</field>
     </record>
 
     <record model="runbot.project" id="runbot.main_project">

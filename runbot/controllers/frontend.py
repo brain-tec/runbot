@@ -186,38 +186,31 @@ class Runbot(Controller):
         return request.render("runbot.glances", qctx)
 
     @route(['/runbot/monitoring',
-            '/runbot/monitoring/<int:config_id>',
-            '/runbot/monitoring/<int:config_id>/<int:view_id>'], type='http', auth='user', website=True)
-    def monitoring(self, config_id=None, view_id=None, refresh=None, **kwargs):
+            '/runbot/monitoring/<int:category_id>',
+            '/runbot/monitoring/<int:category_id>/<int:view_id>'], type='http', auth='user', website=True)
+    def monitoring(self, category_id=None, view_id=None, refresh=None, **kwargs):
         pending = self._pending()
         hosts_data = request.env['runbot.host'].search([])
-
-        last_monitored = None
-
-        monitored_config_id = config_id or int(request.env['ir.config_parameter'].sudo().get_param('runbot.monitored_config_id', 1))
-        request.env.cr.execute("""SELECT DISTINCT ON (branch_id) branch_id, id FROM runbot_build
-                                WHERE config_id = %s
-                                AND global_state in ('running', 'done')
-                                AND branch_id in (SELECT id FROM runbot_branch where sticky='t')
-                                AND local_state != 'duplicate'
-                                ORDER BY branch_id ASC, id DESC""", [int(monitored_config_id)])
-        last_monitored = request.env['runbot.build'].browse([r[1] for r in request.env.cr.fetchall()])
-
-        config = request.env['runbot.build.config'].browse(monitored_config_id)
+        if category_id:
+            category = request.env['runbot.trigger.category'].browse(category_id)
+            assert category.exists()
+        else:
+            category = request.env.ref('runbot.nightly_category')
+            category_id = category.id
+        bundles = request.env['runbot.bundle'].search([('sticky', '=', True)]) # NOTE we dont filter on project
         qctx = {
-            'config': config,
+            'category': category,
             'refresh': refresh,
             'pending_total': pending[0],
             'pending_level': pending[1],
             'scheduled_count': pending[2],
-            'glances_data': glances_ctx,
+            'bundles': bundles,
             'hosts_data': hosts_data,
-            'last_monitored': last_monitored,  # nightly
             'auto_tags': request.env['runbot.build.error'].disabling_tags(),
             'build_errors': request.env['runbot.build.error'].search([('random', '=', True)]),
             'kwargs': kwargs
         }
-        return request.render(view_id if view_id else config.monitoring_view_id.id or "runbot.monitoring", qctx)
+        return request.render(view_id if view_id else "runbot.monitoring", qctx)
 
     @route(['/runbot/config/<int:config_id>',
             '/runbot/config/<config_name>'], type='http', auth="public", website=True)

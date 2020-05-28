@@ -30,7 +30,6 @@ class Config(models.Model):
     protected = fields.Boolean('Protected', default=False, track_visibility='onchange')
     group = fields.Many2one('runbot.build.config', 'Configuration group', help="Group of config's and config steps")
     group_name = fields.Char('Group name', related='group.name')
-    monitoring_view_id = fields.Many2one('ir.ui.view', 'Monitoring view')
     build_refs_descriptors_ids = fields.One2many('runbot.build.reference.descriptor', compute='_compute_build_refs_descriptors_ids')
     # todo compute step_ids ?
 

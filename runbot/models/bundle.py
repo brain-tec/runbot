@@ -173,8 +173,12 @@ class Bundle(models.Model):
             for bundle in self:
                 bundle.last_batchs = [(6, 0, batch_ids[bundle.id])]
 
+    @api.depends_context('category_id')
     def _compute_last_done_batch(self):
         if self:
+            for bundle in self:
+                bundle.last_done_batch = False
+            category_id = self.env.context.get('category_id', self.env.ref('runbot.runbot_build_config_default').id)
             self.env.cr.execute("""
                 SELECT
                     id
@@ -192,7 +196,7 @@ class Bundle(models.Model):
                 WHERE
                     row = 1
                 ORDER BY row, id desc
-                """, [tuple(self.ids), self.env.ref('runbot.runbot_build_config_default').id]
+                """, [tuple(self.ids), category_id]
             )
             batchs = self.env['runbot.batch'].browse([r[0] for r in self.env.cr.fetchall()])
             for batch in batchs:
@@ -390,7 +394,7 @@ class Batch(models.Model):
 
         # 1.1 FIND missing commit in bundle heads
         if missing_repos:
-            fill_missing({branch: branch.head for branch in bundle.branch_ids.sorted('is_pr', reverse=True)}, 'head')
+            fill_missing({branch: branch.head for branch in bundle.branch_ids.sorted(lambda b: (b.head.id, b.is_pr), reverse=True)}, 'head')
 
         # 1.2 FIND merge_base info for those commits
         #  use last not preparing batch to define previous repos_heads instead of branches heads:

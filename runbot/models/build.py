@@ -431,12 +431,11 @@ class BuildResult(models.Model):
         }
         if self.parent_id:
             values.update({
-                'parent_id': build.parent_id.id,
+                'parent_id': self.parent_id.id,
             })
             self.orphan_result = True
 
         new_build = self.create(values)
-        rebuilds |= new_build
         user = request.env.user if request else self.env.user
         new_build._log('rebuild', 'Rebuild initiated by %s%s' % (user.name, (' :%s' % message) if message else ''))
 

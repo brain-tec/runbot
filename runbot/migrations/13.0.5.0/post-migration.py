@@ -16,6 +16,8 @@ def _bar(total):
 _logger = logging.getLogger(__name__)
 
 
+# TODO set nightly category on nighlty bundle (and weekly)
+
 class RunbotMigrationException(Exception):
     pass
 
@@ -30,7 +32,7 @@ def migrate(cr, version):
     env['runbot.remote']._github = _github
 
     # some checks:
-    for keyword in ('real_build', 'duplicate_id', '_get_all_commit', '_get_repo', '_copy_dependency_ids', 'Commit'):
+    for keyword in ('real_build', 'duplicate_id', '_get_all_commit', '_get_repo', '_copy_dependency_ids', 'Commit', '_get_repo_available_modules'):
         matches = env['runbot.build.config.step'].search([('python_code', 'like', keyword)])
         if matches:
             _logger.warning('Some python steps found with %s ref: %s', keyword, matches)
