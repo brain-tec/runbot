@@ -83,10 +83,10 @@
                     <t t-set="commit" t-value="commit_link.commit_id"/>
                     <span></span>
                     <a t-attf-href="/runbot/commit/#{commit.id}">
-                        <i class="fa fa-hashtag" t-if="commit_link.match_type == 'new'"/>
-                        <i class="fa fa-refresh" t-if="commit_link.match_type == 'head'"/>
-                        <i class="fa fa-intersection" t-if="commit_link.match_type == 'base_match'"/>
-                        <i class="fa fa-code-fork" t-if="commit_link.match_type == 'base_head'"/>
+                        <i class="fa fa-fw fa-hashtag" t-if="commit_link.match_type == 'new'"/>
+                        <i class="fa fa-fw fa-refresh" t-if="commit_link.match_type == 'head'"/>
+                        <i class="fa fa-fw fa-intersection" t-if="commit_link.match_type == 'base_match'"/>
+                        <i class="fa fa-fw fa-code-fork" t-if="commit_link.match_type == 'base_head'"/>
                         <span class="label" t-esc="commit.dname"/>
                     </a>
                     <small t-if="commit_link.match_type and commit_link.match_type.startswith('base')">

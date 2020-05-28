@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import operator
 import werkzeug
+import logging
+
 from collections import OrderedDict
 
 import werkzeug.utils
@@ -14,6 +16,8 @@ from ..common import uniq_list, flatten, fqdn
 from odoo.osv import expression
 
 from odoo.exceptions import UserError
+
+_logger = logging.getLogger(__name__)
 
 class Runbot(Controller):
 
@@ -105,9 +109,10 @@ class Runbot(Controller):
 
     @route([
         '/runbot/bundle/<model("runbot.bundle"):bundle>/force',
-    ], type='http', auth="public", methods=['GET', 'POST'], csrf=False)
+    ], type='http', auth="user", methods=['GET', 'POST'], csrf=False)
     def force_bundle(self, bundle, **post):
-        batch = bundle._force()
+        _logger.info('user %s forcing bundle %s', request.env.user.name, bundle.name) # user must be able to read bundle
+        batch = bundle.sudo()._force()
         return werkzeug.utils.redirect('/runbot/batch/%s' % batch.id)
 
     @route(['/runbot/batch/<int:batch_id>'], website=True, auth='public', type='http')
@@ -154,7 +159,6 @@ class Runbot(Controller):
         """Events/Logs"""
 
         Build = request.env['runbot.build']
-        Logging = request.env['ir.logging']
 
         build = Build.browse([build_id])[0]
         if not build.exists():

@@ -314,7 +314,6 @@ class Batch(models.Model):
                 batch.state = 'done'
 
     def _prepare(self, force=False):
-        #  For all commit on real branches:
         self.state = 'ready'
         _logger.info('Preparing batch %s', self.id)
         project = self.bundle_id.project_id
@@ -351,20 +350,30 @@ class Batch(models.Model):
                         # add warning if bundle has warnings
 
         bundle = self.bundle_id
- 
-        # 1.1 find missing commit in bundle heads
+        # CHECK branch heads consistency
+        branch_per_repo = {}
+        for branch in bundle.branch_ids.sorted('is_pr', reverse=True):
+            commit = branch.head
+            repo = commit.repo_id
+            if not repo in branch_per_repo:
+                branch_per_repo[repo] = branch
+            elif branch_per_repo[repo].head != branch.head:
+                obranch = branch_per_repo[repo]
+                self.warning("Branch %s and branc %s in repo %s don't have the same head: %s ≠ %s", (branch.dname, obranch.dname, repo.name, branch.head.name, obranch.head.name))
+
+        # 1.1 FIND missing commit in bundle heads
         if missing_repos:
             fill_missing({branch: branch.head for branch in bundle.branch_ids.sorted('is_pr', reverse=True)}, 'head')
 
-        # 1.2 find merge_base info for those commits
+        # 1.2 FIND merge_base info for those commits
         #  use last not preparing batch to define previous repos_heads instead of branches heads:
         #  Will allow to have a diff info on base bundle, compare with previous bundle
-        last_base_batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.base_id.id), ('state', '!=', 'preparing')], order='id desc', limit=1)
+        last_base_batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.base_id.id), ('state', '!=', 'preparing'), ('id', '!=', self.id)], order='id desc', limit=1)
         print(last_base_batch)
         base_head_per_repo = {commit.repo_id.id: commit for commit in last_base_batch.commit_link_ids.mapped('commit_id')}
         self._update_commits_infos(base_head_per_repo)  # set base_commit, diff infos, ...
 
-        #2. Find missing commit in a compatible base bundle
+        # 2. FIND missing commit in a compatible base bundle
         if missing_repos and not bundle.is_base:
             merge_base_commits = self.commit_link_ids.mapped('merge_base_commit_id')
             link_commit = self.env['runbot.commit.link'].search([
@@ -385,12 +394,13 @@ class Batch(models.Model):
                     self.warning('Only %s out of %s merge base matched. You may want to rebase your branches to ensure compatibility', len(matched), len(merge_base_commits) )
                 fill_missing({branch: branch.head for branch in batch.commit_link_ids.mapped('branch_id')}, 'base_match')
 
-        #3. Find missing commit in base heads
+        # 3. FIND missing commit in base heads
         if missing_repos:
             if not bundle.is_base:
                 self.log('Not all commit found in bundle branches and base batch. Fallback on base branches heads.')
             fill_missing({branch: branch.head for branch in self.bundle_id.base_id.branch_ids}, 'base_head')
 
+        # 4. FIND missing commit in foreign project
         if missing_repos:
             foreign_projects = dependency_repos.mapped('project_id') - project
             if foreign_projects:
@@ -401,9 +411,12 @@ class Batch(models.Model):
                     foreign_bundles = bundle.search([('name', '=', bundle.base_id.name), ('project_id', 'in', foreign_projects.ids)])
                     fill_missing({branch: branch.head for branch in foreign_bundles.mapped('branch_ids')}, 'base_head')
 
+        # CHECK missing commit
         if missing_repos:
             _logger.warning('Missing repo %s for batch %s', missing_repos.mapped('name'), self.id)
 
+
+        # CREATE builds
         commit_link_by_repos = {commit_link.commit_id.repo_id.id: commit_link for commit_link in self.commit_link_ids}
         version_id = self.bundle_id.version_id.id
         project_id = self.bundle_id.project_id.id
@@ -450,6 +463,7 @@ class Batch(models.Model):
                 'link_type': link_type,
             })
 
+        # SKIP older batches
         default_category = self.env.ref('runbot.default_category')
         if not bundle.sticky and self.category_id == default_category:
             skippable = self.env['runbot.batch'].search([
@@ -458,7 +472,6 @@ class Batch(models.Model):
                 ('id', '<', self.id),
                 ('category_id', '=', default_category.id)
             ])
-            print('skippable:', skippable)
             skippable._skip()
 
     def _update_commits_infos(self, base_head_per_repo):
