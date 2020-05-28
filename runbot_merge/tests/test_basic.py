@@ -935,34 +935,6 @@ def test_ci_failure_after_review(env, repo, users, config):
         (users['user'], "'ci/runbot' failed on this reviewed PR.".format_map(users)),
     ]
 
-def test_reopen_state(env, repo):
-    """ The PR should be validated on opening and reopening in case there's
-    already a CI+ stored (as the CI might never trigger unless explicitly
-    re-requested)
-    """
-    with repo:
-        m = repo.make_commit(None, 'initial', None, tree={'m': 'm'})
-        repo.make_ref('heads/master', m)
-
-        c = repo.make_commit(m, 'fist', None, tree={'m': 'c1'})
-        repo.post_status(c, 'success', 'legal/cla')
-        repo.post_status(c, 'success', 'ci/runbot')
-        prx = repo.make_pr(title='title', body='body', target='master', head=c)
-
-    pr = env['runbot_merge.pull_requests'].search([
-        ('repository.name', '=', repo.name),
-        ('number', '=', prx.number),
-    ])
-    assert pr.state == 'validated', \
-        "if a PR is created on a CI'd commit, it should be validated immediately"
-
-    with repo: prx.close()
-    assert pr.state == 'closed'
-
-    with repo: prx.open()
-    assert pr.state == 'validated', \
-        "if a PR is reopened and had a CI'd head, it should be validated immediately"
-
 def test_reopen_merged_pr(env, repo, config, users):
     """ Reopening a *merged* PR should cause us to immediately close it again,
     and insult whoever did it
@@ -1297,6 +1269,7 @@ class TestMergeMethod:
             ('repository.name', '=', repo.name),
             ('number', '=', prx.number),
         ])
+        pr.merge_method = 'rebase-merge'
         assert not pr.squash, "a PR with a single commit should not be squashed"
 
         with repo:
@@ -1306,6 +1279,8 @@ class TestMergeMethod:
                 force=True
             )
         assert pr.squash, "a PR with a single commit should be squashed"
+        assert not pr.merge_method, \
+            "resetting a PR to a single commit should remove the merge method"
 
     def test_pr_no_method(self, repo, env, users, config):
         """ a multi-repo PR should not be staged by default, should also get
@@ -2147,6 +2122,10 @@ class TestPRUpdate(object):
             ('repository.name', '=', repo.name),
             ('number', '=', prx.number)
         ])
+        assert pr.state == 'opened'
+        assert pr.head == c
+        assert pr.squash
+
         with repo:
             prx.close()
 
@@ -2156,11 +2135,41 @@ class TestPRUpdate(object):
 
         assert pr.state == 'closed'
         assert pr.head == c
+        assert pr.squash
 
         with repo:
             prx.open()
         assert pr.state == 'opened'
         assert pr.head == c2
+        assert not pr.squash
+
+    def test_update_closed_revalidate(self, env, repo):
+        """ The PR should be validated on opening and reopening in case there's
+        already a CI+ stored (as the CI might never trigger unless explicitly
+        re-requested)
+        """
+        with repo:
+            m = repo.make_commit(None, 'initial', None, tree={'m': 'm'})
+            repo.make_ref('heads/master', m)
+
+            c = repo.make_commit(m, 'fist', None, tree={'m': 'c1'})
+            repo.post_status(c, 'success', 'legal/cla')
+            repo.post_status(c, 'success', 'ci/runbot')
+            prx = repo.make_pr(title='title', body='body', target='master', head=c)
+
+        pr = env['runbot_merge.pull_requests'].search([
+            ('repository.name', '=', repo.name),
+            ('number', '=', prx.number),
+        ])
+        assert pr.state == 'validated', \
+            "if a PR is created on a CI'd commit, it should be validated immediately"
+
+        with repo: prx.close()
+        assert pr.state == 'closed'
+
+        with repo: prx.open()
+        assert pr.state == 'validated', \
+            "if a PR is reopened and had a CI'd head, it should be validated immediately"
 
     @pytest.mark.xfail(reason="github doesn't allow reopening force-pushed PRs", strict=True)
     def test_force_update_closed(self, env, repo):
