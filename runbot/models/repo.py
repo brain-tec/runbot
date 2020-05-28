@@ -308,7 +308,6 @@ class Repo(models.Model):
         if p1.returncode:
             raise RunbotException("Git archive failed for %s with error code %s. (%s)" % (sha, p1.returncode, p1.stderr.read().decode()))
         if err:
-            # TODO FIXME this error is not catched, redirected to syslog.
             raise RunbotException("Export for %s failed. (%s)" % (sha, err))
 
         # migration scripts link if necessary
