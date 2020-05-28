@@ -76,7 +76,6 @@
                             <field name="trigger_id"/>
                             <field name="build_id"/>
                             <field name="link_type"/>
-                            <field name="result"/>
                         </tree>
                     </field>
                 </group>

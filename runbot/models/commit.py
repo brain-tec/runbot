@@ -1,7 +1,7 @@
 
 from ..common import os
 import glob
-from odoo import models, fields, api
+from odoo import models, fields, api, registry
 import logging
 
 _logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ class CommitStatus(models.Model):
     target_url = fields.Char('Url')
     description = fields.Char('Description')
 
-    def send(self):
+    def send(self, force=False):
         user_id = self.env.user.id
         _dbname = self.env.cr.dbname
         _context = self.env.context
@@ -98,7 +98,7 @@ class CommitStatus(models.Model):
             'target_url': self.target_url,
             'description': self.description,
         }
-        if False and remote_ids:  # TODO remove this security False
+        if force and remote_ids:  # TODO remove this security force false and
             def send_github_status():
                 try:
                     db_registry = registry(_dbname)

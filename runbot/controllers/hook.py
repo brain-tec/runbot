@@ -12,7 +12,7 @@ _logger = logging.getLogger(__name__)
 class RunbotHook(http.Controller):
 
     @http.route(['/runbot/hook/<int:remote_id>', '/runbot/hook/org'], type='http', auth="public", website=True, csrf=False)
-    # TODO adapt
+    # TODO test
     def hook(self, remote_id=None, **post):
         event = request.httprequest.headers.get("X-Github-Event")
         payload = json.loads(request.params.get('payload', '{}'))

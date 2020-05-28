@@ -61,12 +61,12 @@ class Bundle(models.Model):
     modules = fields.Char("Modules to install", help="Comma-separated list of modules to install and test.")
 
     batch_ids = fields.One2many('runbot.batch', 'bundle_id')
-    last_batch = fields.Many2one('runbot.batch', index=True)
+    last_batch = fields.Many2one('runbot.batch', index=True, domain=lambda self: [('category_id', '=', self.env.ref('runbot.default_category').id)])
     last_batchs = fields.Many2many('runbot.batch', 'Last batchs', compute='_compute_last_batchs')
 
     sticky = fields.Boolean('Sticky', index=True)
     is_base = fields.Boolean('Is base', index=True)
-    defined_base_id = fields.Many2one('runbot.bundle', 'Forced base bundle') # todo add constrains on project
+    defined_base_id = fields.Many2one('runbot.bundle', 'Forced base bundle', domain=lambda self: [('project_id', '=', self.project_id.id)])
     base_id = fields.Many2one('runbot.bundle', 'Base bundle', compute='_compute_base_id', store=True)
 
     version_id = fields.Many2one('runbot.version', 'Version', compute='_compute_version_id', store=True)
@@ -119,7 +119,6 @@ class Bundle(models.Model):
     @api.depends('is_base', 'base_id.previous_version_base_id')
     def _compute_previous_version_base_id(self):
         for bundle in self.sorted(key='is_base', reverse=True):
-
             if not bundle.is_base:
                 bundle.previous_version_base_id = bundle.base_id.previous_version_base_id
                 bundle.intermediate_version_base_ids = bundle.base_id.intermediate_version_base_ids
@@ -129,7 +128,6 @@ class Bundle(models.Model):
                     ('is_major', '=', True)
                 ], order='number desc', limit=1)
                 if previous_version:
-                    # todo what if multiple results
                     bundle.previous_version_base_id = self.env['runbot.bundle'].search([
                         ('version_id', '=', previous_version.id),
                         ('is_base', '=', True),
@@ -174,7 +172,7 @@ class Bundle(models.Model):
                 bundle.last_batchs = [(6, 0, batch_ids[bundle.id])]
 
     def create(self, values_list):
-        self.flush() # TODO check that
+        # self.flush() # TODO check that
         return super().create(values_list)
         #if any(values.get('is_base') for values in values_list):
         #    (self.search([
@@ -184,7 +182,7 @@ class Bundle(models.Model):
 
     def write(self, values):
         super().write(values)
-        self.flush() # TODO check that
+        # self.flush() # TODO check that
 
     def _force(self):
         self.ensure_one()
@@ -241,7 +239,7 @@ class Batch(models.Model):
     state = fields.Selection([('preparing', 'Preparing'), ('ready', 'Ready'), ('done', 'Done')])
     hidden = fields.Boolean('Hidden', default=False)
     age = fields.Integer(compute='_compute_age', string='Build age')
-    category_id = fields.Many2one('runbot.trigger.category')
+    category_id = fields.Many2one('runbot.trigger.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
     log_ids = fields.One2many('runbot.batch.log', 'batch_id')
 
     @api.depends('create_date')
@@ -249,7 +247,7 @@ class Batch(models.Model):
         """Return the time between job start and now"""
         for batch in self:
             if batch.create_date:
-                batch.age = int(time.time() - dt2time(batch.create_date)) # TODO remove hack time.time()
+                batch.age = int(time.time() - dt2time(batch.create_date))
             else:
                 batch.buildage_age = 0
 
@@ -275,8 +273,8 @@ class Batch(models.Model):
                 if commit_link.commit_id.id != commit.id:
                     self.log('New head on branch %s during throttle phase: Replacing commit %s with %s', branch.name, commit_link.commit_id.name, commit.name)
                     commit_link.write({'commit_id': commit.id, 'branch_id': branch.id})
-                elif commit_link.branch_id.is_pr and not branch.is_pr:
-                    commit_link.branch_id = branch  # Try to have a branch instead of pr on commit if possible
+                elif not commit_link.branch_id.is_pr and branch.is_pr:
+                    commit_link.branch_id = branch  # Try to have a pr instead of branch on commit if possible ?
                 break
         else:
             self.write({'commit_link_ids': [(0, 0, {
@@ -286,30 +284,38 @@ class Batch(models.Model):
             })]})
 
     def _skip(self):
-        if not self or self.bundle_id.is_base:
-            return
-        #for slot in self.slot_ids:
-        #    if slot.build_id.global_state == 'pending' and len(build.slot_ids) == 1:
-        #        slot.build_id._skip('Newer build found')  # TODO check no other slot points to build?
-        # Don't skip if:
-        # - build is attached to another batch which is last_batch of the bundle
+        for batch in self:
+            if batch.bundle_id.is_base or batch.state == 'done':
+                continue
+            batch.state = 'done'
+            for slot in batch.slot_ids:
+                batch.log('Skipping batch')
+                slot.active = False
+                build = slot.build_id
+                if len(build.slot_ids) == 0:  # check that active test is used
+                    if build.global_state == 'pending':
+                        build._skip('Newer build found')
+                    elif build.global_state in ('waiting', 'testing'):
+                        build.killable = True
 
     def _process(self):
         for batch in self:
             if batch.state == 'preparing' and batch.last_update < fields.Datetime.now() - datetime.timedelta(seconds=60):
                 batch._prepare()
+            elif batch.state == 'ready' and all(slot.build_id.global_state in ('running', 'done') for slot in batch.slot_ids):
+                batch.log('Batch done')
+                batch.state = 'done'
 
-    def _prepare(self, force=False, category=None):
+    def _prepare(self, force=False):
         #  For all commit on real branches:
-        category = category or self.env.ref('runbot.default_category')
         self.state = 'ready'
         _logger.info('Preparing batch %s', self.id)
         project = self.bundle_id.project_id
-        triggers = self.env['runbot.trigger'].search([ # could be optimised for multiple batches. Ormcached method?
+        triggers = self.env['runbot.trigger'].search([  # could be optimised for multiple batches. Ormcached method?
             ('project_id', '=', project.id),
-            ('category_id', '=', category.id),
+            ('category_id', '=', self.category_id.id),
             '|',
-                ('version_ids', 'in', self.bundle_id.version_id.id),
+                ('version_ids', 'in', self.bundle_id.version_id.id),  # upgrade trigger are only used in master version
                 ('version_ids', '=', False)
         ])
         pushed_repo = self.commit_link_ids.mapped('commit_id.repo_id')
@@ -341,13 +347,13 @@ class Batch(models.Model):
  
         # 1.1 find missing commit in bundle heads
         if missing_repos:
-            fill_missing({branch: branch.head for branch in bundle.branch_ids.sorted('is_pr')}, 'head')
+            fill_missing({branch: branch.head for branch in bundle.branch_ids.sorted('is_pr', reverse=True)}, 'head')
 
         # 1.2 find merge_base info for those commits
         #  use last not preparing batch to define previous repos_heads instead of branches heads:
-        #  Will allow to have a diff info on base bundle, compare with previous bundle 
-        last_base_batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.base_id.id), ('state', '!=', 'preparing')])
-        print(self, last_base_batch)
+        #  Will allow to have a diff info on base bundle, compare with previous bundle
+        last_base_batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.base_id.id), ('state', '!=', 'preparing')], order='id desc', limit=1)
+        print(last_base_batch)
         base_head_per_repo = {commit.repo_id.id: commit for commit in last_base_batch.commit_link_ids.mapped('commit_id')}
         self._update_commits_infos(base_head_per_repo)  # set base_commit, diff infos, ...
 
@@ -383,14 +389,13 @@ class Batch(models.Model):
             if foreign_projects:
                 self.log('Not all commit found. Fallback on foreign base branches heads.')
                 foreign_bundles = bundle.search([('name', '=', bundle.name), ('project_id', 'in', foreign_projects.ids)])
-                fill_missing({branch: branch.head for branch in foreign_bundles.mapped('branch_ids').sorted('is_pr')}, 'head')
+                fill_missing({branch: branch.head for branch in foreign_bundles.mapped('branch_ids').sorted('is_pr', reverse=True)}, 'head')
                 if missing_repos:
                     foreign_bundles = bundle.search([('name', '=', bundle.base_id.name), ('project_id', 'in', foreign_projects.ids)])
-                    fill_missing({branch: branch.head for branch in foreign_bundles.mapped('branch_ids').sorted('is_pr')}, 'base_head')
+                    fill_missing({branch: branch.head for branch in foreign_bundles.mapped('branch_ids')}, 'base_head')
 
         if missing_repos:
             _logger.warning('Missing repo %s for batch %s', missing_repos.mapped('name'), self.id)
-
 
         commit_link_by_repos = {commit_link.commit_id.repo_id.id: commit_link for commit_link in self.commit_link_ids}
         version_id = self.bundle_id.version_id.id
@@ -416,7 +421,8 @@ class Batch(models.Model):
                 'trigger_id': trigger.id,  # for future reference and access rights
                 'config_data': {},
                 'commit_link_ids': [(6, 0, [commit_link_by_repos[repo.id].id for repo in trigger_repos])],
-                'builds_reference_ids': []  # TODO
+                'builds_reference_ids': [],  # TODO
+                'modules': bundle.modules
             }
             params = self.env['runbot.build.params'].create(params_value)
             build = self.env['runbot.build'].search([('params_id', '=', params.id), ('parent_id', '=', False)], limit=1, order='id desc')
@@ -424,11 +430,11 @@ class Batch(models.Model):
             # TODO sort on result?
             if build:
                 link_type = 'matched'
-            elif trigger.repo_ids & pushed_repo or force or bundle.build_all or bundle.sticky: # common repo between triggers and pushed
+                build.killable = False
+            elif (trigger.repo_ids & pushed_repo) or force or bundle.build_all or bundle.sticky: # common repo between triggers and pushed
                 build = self.env['runbot.build'].create({
                     'params_id': params.id,
                 })
-
             self.env['runbot.batch.slot'].create({
                 'batch_id': self.id,
                 'trigger_id': trigger.id,
@@ -436,6 +442,17 @@ class Batch(models.Model):
                 'params_id': params.id,
                 'link_type': link_type,
             })
+
+        default_category = self.env.ref('runbot.default_category')
+        if not bundle.sticky and self.category_id == default_category:
+            skippable = self.env['runbot.batch'].search([
+                ('bundle_id', '=', bundle.id),
+                ('state', '!=', 'done'),
+                ('id', '<', self.id),
+                ('category_id', '=', default_category.id)
+            ])
+            print('skippable:', skippable)
+            skippable._skip()
 
     def _update_commits_infos(self, base_head_per_repo):
         for link_commit in self.commit_link_ids:
@@ -513,7 +530,6 @@ class BatchSlot(models.Model):
     params_id = fields.Many2one('runbot.build.params', index=True, required=True)
     link_type = fields.Selection([('created', 'Build created'), ('matched', 'Existing build matched'), ('rebuild', 'Rebuild')], required=True) # rebuild type?
     active = fields.Boolean('Attached', default=True)
-    result = fields.Selection("Result", related='build_id.global_result')
     # rebuild, what to do: since build ccan be in multiple batch:
     # - replace for all batch?
     # - only available on batch and replace for batch only?

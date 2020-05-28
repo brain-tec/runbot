@@ -109,34 +109,11 @@ class Runbot(models.AbstractModel):
         nb_pending = Build.search_count([('local_state', '=', 'pending'), ('host', '=', False)])
         if available_slots > 0 or nb_pending == 0:
             return
-        self.env.cr.execute("""
-            SELECT
-                runbot_build.id
-            FROM
-                runbot_build
-            LEFT JOIN
-                runbot_batch_slot ON runbot_batch_slot.build_id = runbot_build.id
-            LEFT JOIN
-                runbot_batch ON runbot_batch_slot.batch_id = runbot_batch.id
-            LEFT JOIN
-                runbot_bundle ON runbot_bundle.id = runbot_batch.bundle_id
-            WHERE
-                runbot_build.local_state in ('testing', 'pending')
-            AND
-                runbot_bundle.sticky = true;
-            """)
-        cannot_be_killed_ids = self.env.cr.fetchall()
+
         for build in testing_builds:
             top_parent = build._get_top_parent()
-            if build.id not in cannot_be_killed_ids and top_parent.id not in cannot_be_killed_ids:
-                newer_candidates = Build.search([
-                    ('id', '>', build.id),
-                    ('params_id', '=', top_parent.params_id.id),
-                    ('build_type', '=', 'normal'),
-                    ('parent_id', '=', False),
-                ])
-                if newer_candidates:
-                    top_parent._ask_kill(message='Build automatically killed, newer build found %s.' % newer_candidates.ids)
+            if build.killable:
+                top_parent._ask_kill(message='Build automatically killed, new batch found.')  # TODO check. Message was giving new build.
 
     def _allocate_builds(self, host, nb_slots, domain=None):
         if nb_slots <= 0:
@@ -149,8 +126,6 @@ class Runbot(models.AbstractModel):
         where_clause, where_params = e.to_sql()
 
         # self-assign to be sure that another runbot batch cannot self assign the same builds
-
-        # TODO check: priority removed. Not a big deal, but maybe for staging. Add a priority on bundle, + transfer priority to build?
         query = """UPDATE
                         runbot_build
                     SET
@@ -174,7 +149,6 @@ class Runbot(models.AbstractModel):
         return self.env.get('ir.config_parameter').get_param('runbot.runbot_domain', fqdn())
 
     def _reload_nginx(self):
-        # TODO move this elsewhere
         env = self.env
         settings = {}
         settings['port'] = config.get('http_port')
@@ -252,20 +226,29 @@ class Runbot(models.AbstractModel):
         while time.time() - start_time < timeout:
             if runbot_do_fetch:
                 repos = self.env['runbot.repo'].search([('mode', '!=', 'disabled')])
-                preparing_batch = self.env['runbot.batch'].search([('state', '=', 'preparing')])
+
+                processing_batch = self.env['runbot.batch'].search([('state', '!=', 'done')], order='id asc')
+                preparing_batch = processing_batch.filtered(lambda b: b.state == 'preparing')
+
                 for repo in repos:
                     repo._update_batches(bool(preparing_batch))
                     self._commit()
-                preparing_batch._process()
+                if processing_batch:
+                    _logger.info('starting processing of %s batches', len(processing_batch))
+                    processing_batch._process()
+                    _logger.info('end processing')
                 self._commit()
             if runbot_do_schedule:
                 sleep_time = self._scheduler_loop_turn(host, update_frequency)
-                time.sleep(sleep_time)
+                self.sleep(sleep_time)
             else:
-                time.sleep(update_frequency)
+                self.sleep(update_frequency)
             self._commit()
 
         host.last_end_loop = fields.Datetime.now()
+
+    def sleep(self, t):
+        time.sleep(t)
 
     def _scheduler_loop_turn(self, host, default_sleep=1):
         try:

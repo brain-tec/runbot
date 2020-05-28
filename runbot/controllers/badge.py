@@ -27,7 +27,8 @@ class RunbotBadge(Controller):
             return request.not_found()
         batch = request.env['runbot.batch'].search([
             ('bundle_id', '=', bundle.id),
-            ('state', '=', 'done')
+            ('state', '=', 'done'),
+            ('category_id', '=', request.env.ref('runbot.default_category').id)
         ])
 
         builds = batch.slot_ids.filtered(lambda s: s.trigger_id in triggers).mapped('build_id')

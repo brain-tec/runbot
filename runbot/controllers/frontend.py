@@ -27,7 +27,7 @@ class Runbot(Controller):
         return pending_count, level, scheduled_count
 
     @route(['/', '/runbot', '/runbot/<model("runbot.project"):project>'], website=True, auth='public', type='http')
-    def bundles(self, project=None, more=False, mode = '', search='', refresh='', **kwargs):
+    def bundles(self, project=None, more=False, search='', refresh='', **kwargs):
         search = search if len(search) < 60 else search[:60]
         env = request.env
         projects = env['runbot.project'].search([])
@@ -51,7 +51,7 @@ class Runbot(Controller):
         if project:
             # basic search to start, only bundle name. TODO add batch.commits and bundle pr numbers (all branches names)
 
-            domain = [('last_batch', '!=', False),('project_id', '=', project.id), ('no_build', '=', False)]
+            domain = [('last_batch', '!=', False), ('project_id', '=', project.id), ('no_build', '=', False)]
             if search:
                 search_domain = expression.OR([[('name', 'like', search_elem)] for search_elem in search.split("|")])
                 domain = expression.AND([domain, search_domain])
@@ -66,7 +66,6 @@ class Runbot(Controller):
                     case when sticky then version_number end collate "C" desc,
                     last_batch desc
                 LIMIT 100""".format(where_clause=where_clause), where_params)
-            # TODO check if where clausse is usefull on complete database
             bundles = env['runbot.bundle'].browse([r[0] for r in env.cr.fetchall()])
 
             context.update({
@@ -75,7 +74,7 @@ class Runbot(Controller):
             })
 
         context.update({'message': request.env['ir.config_parameter'].sudo().get_param('runbot.runbot_message')})
-        return request.render('runbot.bundles', context) # TODO tile view remove or use remove
+        return request.render('runbot.bundles', context)
 
     @route([
         '/runbot/bundle/<model("runbot.bundle"):bundle>',
@@ -175,31 +174,38 @@ class Runbot(Controller):
         # TODO adapt
         # TODO for record rule, replace by project instead
         default_config_id = request.env.ref('runbot.runbot_build_config_default').id
-        query = """
-            SELECT split_part(r.name, ':', 2),
-                   br.branch_name,
-                   (array_agg(bu.global_result order by bu.id desc))[1]
-              FROM runbot_build bu
-              JOIN runbot_branch br on (br.id = bu.branch_id)
-              JOIN runbot_repo r on (r.id = br.repo_id)
-             WHERE br.sticky
-               AND br.repo_id in %s
-               AND (
-                    bu.global_state in ('running', 'done')
-               )
-               AND bu.global_result not in ('skipped', 'manually_killed')
-               AND (bu.config_id = r.repo_config_id
-                    OR bu.config_id =  br.branch_config_id
-                    OR bu.config_id =  %s)
-          GROUP BY 1,2,r.sequence,br.id
-          ORDER BY r.sequence, (br.branch_name='master'), br.id
-        """
-        cr = request.env.cr
-        cr.execute(query, (tuple(repos.ids), default_config_id))
-        ctx = OrderedDict()
-        for row in cr.fetchall():
-            ctx.setdefault(row[0], []).append(row[1:])
-        return ctx
+
+        #bundles = request.env['runbot.bundle'].search([('sticky', '=', True)]]
+#
+        #    ('category_id', '=', request.env.ref('runbot.default_category').id)
+#
+#
+        #query = """
+        #    SELECT split_part(r.name, ':', 2),
+        #           br.branch_name,
+        #           (array_agg(bu.global_result order by bu.id desc))[1]
+        #      FROM runbot_build bu
+        #      JOIN runbot_branch br on (br.id = bu.branch_id)
+        #      JOIN runbot_repo r on (r.id = br.repo_id)
+        #     WHERE br.sticky
+        #       AND br.repo_id in %s
+        #       AND (bu.hidden = 'f' OR bu.hidden IS NULL)
+        #       AND (
+        #            bu.global_state in ('running', 'done')
+        #       )
+        #       AND bu.global_result not in ('skipped', 'manually_killed')
+        #       AND (bu.config_id = r.repo_config_id
+        #            OR bu.config_id =  br.branch_config_id
+        #            OR bu.config_id =  %s)
+        #  GROUP BY 1,2,r.sequence,br.id
+        #  ORDER BY r.sequence, (br.branch_name='master'), br.id
+        #"""
+        #cr = request.env.cr
+        #cr.execute(query, (tuple(repos.ids), default_config_id))
+        #ctx = OrderedDict()
+        #for row in cr.fetchall():
+        #    ctx.setdefault(row[0], []).append(row[1:])
+        #return ctx
 
     @route('/runbot/glances', type='http', auth='public', website=True)
     def glances(self, refresh=None):

@@ -79,7 +79,7 @@ class Config(models.Model):
                     raise UserError('Jobs of type run_odoo should be preceded by a job of type install_odoo')
         self._check_recustion()
 
-    def _check_recustion(self, visited=None):  # todo test
+    def _check_recustion(self, visited=None):
         visited = visited or []
         recursion = False
         if self in visited:
@@ -243,7 +243,7 @@ class ConfigStep(models.Model):
                 if count > 200:
                     build._logger('Too much build created')
                     break
-                children = Build.create({ # TODO create build_result instead using same build params? or
+                children = Build.create({
                     'params_id': build.params_id.copy({'config_id': create_config.id}).id,
                     'parent_id': build.id,
                     'build_type': build.build_type,
@@ -578,7 +578,7 @@ class ConfigStep(models.Model):
         return build_values
 
     def _make_stats(self, build):
-        if not self.make_stats:  # TODO maybe add a make_stat on build inherited from bundle creator. (not in params)
+        if not self.make_stats:  # TODO garbage collect non sticky stat
             return
         build._log('make_stats', 'Getting stats from log file')
         log_path = build._path('logs', '%s.txt' % self.name)

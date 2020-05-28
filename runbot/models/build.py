@@ -68,12 +68,9 @@ class BuildParameters(models.Model):
         default=lambda self: self.env.ref('runbot.runbot_build_config_default', raise_if_not_found=False))
     config_data = JsonDictField('Config Data')
 
-
     build_ids = fields.One2many('runbot.build', 'params_id')
-
     builds_reference_ids = fields.One2many('runbot.build.reference', 'params_id', copy=True)
-    modules = fields.Char('Modules') # TODO fill this with combination of triggers repo_modules and bundle_id.modules (or trigger?)
-    batch_id = fields.Many2one('runbot.batch', help="strore batch to ensure no duplicate detection. Allow to use commit link for commit analysis.")
+    modules = fields.Char('Modules')
     fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)
 
     #@api.depends('version_id', 'project_id', 'extra_params', 'config_id', 'config_data', 'modules', 'commit_link_ids', 'builds_reference_ids')
@@ -90,8 +87,6 @@ class BuildParameters(models.Model):
                 'commit_link_ids': sorted(param.commit_link_ids.commit_id.ids),
                 'builds_reference_ids': sorted(param.builds_reference_ids.build_id.ids),
             }
-            if param.batch_id:
-                cleaned_vals['batch_id'] = param.batch_id.id
             param.fingerprint = hashlib.sha256(str(cleaned_vals).encode('utf8')).hexdigest()
 
     def create(self, values):
@@ -202,6 +197,9 @@ class BuildResult(models.Model):
     build_error_ids = fields.Many2many('runbot.build.error', 'runbot_build_error_ids_runbot_build_rel', string='Errors')
     keep_running = fields.Boolean('Keep running', help='Keep running')
     log_counter = fields.Integer('Log Lines counter', default=100)
+
+    slot_ids = fields.One2many('runbot.batch.slot', 'build_id')
+    killable = fields.Boolean('Killable')
 
     @api.depends('params_id.config_id')
     def _compute_log_list(self):  # storing this field because it will be access trhoug repo viewn and keep track of the list at create
@@ -426,8 +424,7 @@ class BuildResult(models.Model):
         self.ensure_one()
         if self.local_result == 'ok':
             return
-        # TODO kill other build if not correct local_state?
-        # dont rebuild if there is a more recent build for this params?
+        # TODO don't rebuild if there is a more recent build for this params?
         values = {
             'params_id': self.params_id.id,
             'build_type': 'rebuild',
@@ -782,7 +779,7 @@ class BuildResult(models.Model):
                 if pat.startswith('-'):
                     pat = pat.strip('- ')
                     default -= {mod for mod in default if fnmatch.fnmatch(mod, pat)}
-                else:
+                elif pat:
                     default |= {mod for mod in all if fnmatch.fnmatch(mod, pat)}
             return default
 
@@ -791,6 +788,8 @@ class BuildResult(models.Model):
         for repo, module_list in self._get_available_modules().items():
             available_modules += module_list
             modules_to_install |= filter_patterns(repo.modules, module_list, module_list)
+
+        modules_to_install = filter_patterns(self.params_id.modules, modules_to_install, available_modules)
         modules_to_install = filter_patterns(modules_patterns, modules_to_install, available_modules)
 
         return sorted(modules_to_install)
@@ -870,9 +869,6 @@ class BuildResult(models.Model):
             self._log('wake_up', 'Impossibe to wake up, state is not done')
         else:
             self.requested_action = 'wake_up'
-
-    def _get_all_commit(self):
-        return self.commit_link_ids.mapped('commit_id') # todo remove
 
     def _get_server_commit(self, commits=None):
         """

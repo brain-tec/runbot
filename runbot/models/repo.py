@@ -289,7 +289,7 @@ class Repo(models.Model):
             if not self._hash_exists(sha):
                 for remote in self.remote_ids:
                     try:
-                        self._git(['fetch', remote.remote_name, sha])  # TODO test me
+                        self._git(['fetch', remote.remote_name, sha])
                         _logger.info('Success fetching specific head %s on %s', sha, remote)
                         break
                     except subprocess.CalledProcessError:
@@ -434,7 +434,6 @@ class Repo(models.Model):
                 branch.head = commit
 
                 # TODO if a pr is created, status wont be send again if the branch was build. If last status for this commit exist, send it on the repo? per trigger?
-                # TODO add reflog -> history on commit found on branch
 
                 if not self.trigger_ids:
                     continue
@@ -502,9 +501,7 @@ class Repo(models.Model):
         if not os.path.isdir(os.path.join(repo.path)):
             os.makedirs(repo.path)
         force = self._git_init() or force
-        # TODO bare check repo in remotes
 
-        # check for mode == hook
         fname_fetch_head = os.path.join(repo.path, 'FETCH_HEAD')
         if not force and os.path.isfile(fname_fetch_head):
             fetch_time = os.path.getmtime(fname_fetch_head)
@@ -539,7 +536,7 @@ class Repo(models.Model):
                     host.disable()
         return success
 
-    def _update(self, force=False, poll_delay=1*60):  # TODO 5
+    def _update(self, force=False, poll_delay=5*60):
         """ Update the physical git reposotories on FS"""
         for repo in self:
             try:
