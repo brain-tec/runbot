@@ -35,12 +35,15 @@ class Runbot(Controller):
         search = search if len(search) < 60 else search[:60]
         env = request.env
         projects = env['runbot.project'].search([])
+        categories = env['runbot.trigger.category'].search([])
         if not project and projects:
             project = projects[0]
 
         pending_count, level, scheduled_count = self._pending()
         context = {
             'projects': projects,
+            'active_category_id': request.env['ir.model.data'].xmlid_to_res_id('runbot.default_category'),
+            'categories': categories,
             'project': project,
             'search': search,
             'refresh': refresh,
@@ -78,7 +81,8 @@ class Runbot(Controller):
             })
 
         context.update({'message': request.env['ir.config_parameter'].sudo().get_param('runbot.runbot_message')})
-        return request.render('runbot.bundles', context)
+        res = request.render('runbot.bundles', context)
+        return res
 
     @route([
         '/runbot/bundle/<model("runbot.bundle"):bundle>',
@@ -169,6 +173,7 @@ class Runbot(Controller):
             'fqdn': fqdn(),
             'more': more is not False,
             'projects': request.env['runbot.project'].search([]),
+            'default_category': request.env['ir.model.data'].xmlid_to_res_id('runbot.default_category'),
             #'project': build_id.param_id.project_id, TODO how to find project? store cat? trigger?
         }
         return request.render("runbot.build", context)

@@ -79,6 +79,13 @@ def s2human(time):
         threshold=2.1,
     )
 
+def s2human_long(time):
+    return format_timedelta(
+        datetime.timedelta(seconds=-time),
+        threshold=2.1,
+        add_direction=True, locale='en'
+    )
+
 
 @contextlib.contextmanager
 def local_pgadmin_cursor():

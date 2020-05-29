@@ -1,168 +1,202 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <data>
-      <template id="runbot.layout" inherit_id="website.layout" name="Custom website layout">
-          <xpath expr="//footer" position="replace">
-          </xpath>
-          <xpath expr="//nav[hasclass('navbar')]" position="replace">
-            <nav class="navbar navbar-expand-md navbar-light bg-light">
-                  <a t-if="project" t-attf-href="/runbot/{{slug(project)}}?search={{request.params.get('search', '')}}">
-                    <b style="color:#777;"><t t-esc="project.name"/></b>
-                  </a>
-                  <button type="button" class="navbar-toggler" data-toggle="collapse" data-target="#top_menu_collapse">
-                      <span class="navbar-toggler-icon"/>
-                  </button>
-                  <div class="collapse navbar-collapse" id="top_menu_collapse">
-                      <ul class="nav navbar-nav ml-auto text-right" id="top_menu">
-                         <t t-if="projects">
-                              <t t-foreach="projects" t-as="project">
-                                  <li><a t-attf-href="/runbot/{{slug(project)}}?search={{request.params.get('search', '')}}"><t t-esc="project.name"/></a></li>
-                              </t>
-                          </t>
-                          <li class="nav-item divider" t-ignore="true" t-if="not user_id._is_public()"/>
-                          <li class="nav-item dropdown" t-ignore="true" t-if="not user_id._is_public()">
-                              <a href="#" class="nav-link dropdown-toggle" data-toggle="dropdown">
-                                  <b>
-                                      <span t-esc="user_id.name[:23] + '...' if user_id.name and len(user_id.name) &gt; 25 else user_id.name"/>
-                                  </b>
-                              </a>
-                              <div class="dropdown-menu js_usermenu" role="menu">
-                                  <a id="o_logout" class="dropdown-item" t-attf-href="/web/session/logout?redirect=/" role="menuitem">Logout</a>
-                              </div>
-                          </li>
-                      </ul>
-                      <t t-raw="nav_form or ''">
-                      </t>
-                  </div>
-            </nav>
-          </xpath>
-      </template>
+  <data>
+    <template id="runbot.layout" inherit_id="website.layout" name="Custom website layout">
+      <xpath expr="//footer" position="replace">
+      </xpath>
+      <xpath expr="//nav[hasclass('navbar')]" position="replace">
+        <nav class="navbar navbar-expand-md navbar-light bg-light">
+          <a t-if="project" t-attf-href="/runbot/{{slug(project)}}?search={{request.params.get('search', '')}}">
+            <b style="color:#777;">
+              <t t-esc="project.name"/>
+            </b>
+          </a>
+          <button type="button" class="navbar-toggler" data-toggle="collapse" data-target="#top_menu_collapse">
+            <span class="navbar-toggler-icon"/>
+          </button>
+          <div class="collapse navbar-collapse" id="top_menu_collapse">
+            <ul class="nav navbar-nav ml-auto text-right" id="top_menu">
+              <t t-if="projects">
+                <t t-foreach="projects" t-as="project">
+                  <li>
+                    <a t-attf-href="/runbot/{{slug(project)}}?search={{request.params.get('search', '')}}">
+                      <t t-esc="project.name"/>
+                    </a>
+                  </li>
+                </t>
+              </t>
+              <li class="nav-item divider" t-ignore="true" t-if="not user_id._is_public()"/>
+              <li class="nav-item dropdown" t-ignore="true" t-if="not user_id._is_public()">
+                <a href="#" class="nav-link dropdown-toggle" data-toggle="dropdown">
+                  <b>
+                    <span t-esc="user_id.name[:23] + '...' if user_id.name and len(user_id.name) &gt; 25 else user_id.name"/>
+                  </b>
+                </a>
+                <div class="dropdown-menu js_usermenu" role="menu">
+                  <a id="o_logout" class="dropdown-item" t-attf-href="/web/session/logout?redirect=/" role="menuitem">Logout</a>
+                </div>
+              </li>
+            </ul>
+            <t t-raw="nav_form or ''">
+            </t>
+          </div>
+        </nav>
+      </xpath>
+    </template>
 
-      <!-- remove black bar with app switcher -->
-      <template id="inherits_no_black_bar" inherit_id="website.user_navbar" name="Inherits No black user_navbar">
-          <xpath expr="//nav[@id='oe_main_menu_navbar']" position="attributes">
-              <attribute name="groups">base.group_website_publisher</attribute>
-          </xpath>
-          <xpath expr="//t[@t-set='body_classname']" position="attributes">
-              <attribute name="t-value">'o_connected_user' if env['ir.ui.view'].user_has_groups('base.group_website_publisher') else None</attribute>
-          </xpath>
-      </template>
+    <!-- remove black bar with app switcher -->
+    <template id="inherits_no_black_bar" inherit_id="website.user_navbar" name="Inherits No black user_navbar">
+      <xpath expr="//nav[@id='oe_main_menu_navbar']" position="attributes">
+        <attribute name="groups">base.group_website_publisher</attribute>
+      </xpath>
+      <xpath expr="//t[@t-set='body_classname']" position="attributes">
+        <attribute name="t-value">'o_connected_user' if env['ir.ui.view'].user_has_groups('base.group_website_publisher') else None</attribute>
+      </xpath>
+    </template>
 
-      <template id="runbot.slots_infos" name="Hosts slot nb pending/testing/slots">
-        <span t-attf-class="badge badge-{{pending_level}}">Pending: <t t-esc="pending_total"/></span>
-        <t t-set="testing" t-value="hosts_data._total_testing()"/>
-        <t t-set="workers" t-value="hosts_data._total_workers()"/>
-        <t t-set="klass">success</t>
-        <t t-if="not workers" t-set="klass">danger</t>
-        <t t-else="">
-          <t t-if="int(testing)/workers > 0" t-set="klass">info</t>
-          <t t-if="int(testing)/workers > 0.75" t-set="klass">warning</t>
-          <t t-if="int(testing)/workers >= 1" t-set="klass">danger</t>
-        </t>
-        <span t-attf-class="badge badge-{{klass}}">Testing: <t t-esc="testing"/>/<t t-esc="workers"/></span>
-      </template>
+    <template id="runbot.slots_infos" name="Hosts slot nb pending/testing/slots">
+      <span t-attf-class="badge badge-{{pending_level}}">
+        Pending:
+        <t t-esc="pending_total"/>
+      </span>
+      <t t-set="testing" t-value="hosts_data._total_testing()"/>
+      <t t-set="workers" t-value="hosts_data._total_workers()"/>
+      <t t-set="klass">success</t>
+      <t t-if="not workers" t-set="klass">danger</t>
+      <t t-else="">
+        <t t-if="int(testing)/workers > 0" t-set="klass">info</t>
+        <t t-if="int(testing)/workers > 0.75" t-set="klass">warning</t>
+        <t t-if="int(testing)/workers >= 1" t-set="klass">danger</t>
+      </t>
+      <span t-attf-class="badge badge-{{klass}}">
+        Testing:
+        <t t-esc="testing"/>
+        /
+        <t t-esc="workers"/>
+      </span>
+    </template>
 
     <template id="runbot.slot_button">
-        <t t-set="bu" t-value="slot.build_id"/>
-        <t t-set="color" t-value="bu.get_color_class()"/>
-        <div t-attf-class="btn-group btn-group-ssm">
-          <i t-attf-class="fa fa-{{slot.fa_link_type()}} btn btn-{{color}} disabled"/>
-          <a t-if="bu" t-attf-href="/runbot/build/#{bu.id}" t-attf-class="btn btn-default" style="width:110px;">
-            <span t-esc="slot.trigger_id.name"/>
-          </a>
-          <span t-else="" t-attf-class="btn btn-default disabled" style="width:110px;">
-            <span t-esc="slot.trigger_id.name"/>
-          </span>
-          <a t-if="bu.local_state=='running'"
-            t-attf-href="http://{{bu.domain}}/?db={{bu.dest}}-all"
-            class="btn btn-primary" title="Sign in on this build"
-            aria-label="Sign in on this build">
-            <i class="fa fa-sign-in fa-fw"/></a>
-          <a t-if="bu.local_state=='done'"
-            href="#" data-runbot="wakeup" t-att-data-runbot-build="bu.id"
-            t-attf-class="btn btn-default {{'disabled' if bu.requested_action == 'wake_up' else ''}}" title="Wake up this build" aria-label="Wake up this build">
-            <i class="fa fa-coffee fa-fw"/></a>
-          <span t-if="bu and bu.local_state not in ('running', 'done')" class="btn btn-info">
-            <i class="fa fa-spinner fa-spin fa-fw"/></span>
-          <span t-if="not bu" class="btn btn-info" help="Create build">
-            <i class="fa fa-pause fa-fw"/></span>
-          </div>
+      <t t-set="bu" t-value="slot.build_id"/>
+      <t t-set="color" t-value="bu.get_color_class()"/>
+      <div t-attf-class="btn-group btn-group-ssm">
+        <i t-attf-class="fa fa-{{slot.fa_link_type()}} btn btn-{{color}} disabled"/>
+        <a t-if="bu" t-attf-href="/runbot/build/#{bu.id}" t-attf-class="btn btn-default" style="width:110px;">
+          <span t-esc="slot.trigger_id.name"/>
+        </a>
+        <span t-else="" t-attf-class="btn btn-default disabled" style="width:110px;">
+          <span t-esc="slot.trigger_id.name"/>
+        </span>
+        <a t-if="bu.local_state=='running'"
+          t-attf-href="http://{{bu.domain}}/?db={{bu.dest}}-all"
+          class="btn btn-primary" title="Sign in on this build"
+          aria-label="Sign in on this build">
+          <i class="fa fa-sign-in fa-fw"/>
+        </a>
+        <a t-if="bu.local_state=='done'"
+          href="#" data-runbot="wakeup" t-att-data-runbot-build="bu.id"
+          t-attf-class="btn btn-default {{'disabled' if bu.requested_action == 'wake_up' else ''}}" title="Wake up this build" aria-label="Wake up this build">
+          <i class="fa fa-coffee fa-fw"/>
+        </a>
+        <span t-if="bu and bu.local_state not in ('running', 'done')" class="btn btn-info">
+          <i class="fa fa-spinner fa-spin fa-fw"/>
+        </span>
+        <span t-if="not bu" class="btn btn-info" help="Create build">
+          <i class="fa fa-pause fa-fw"/>
+        </span>
+      </div>
     </template>
 
 
-      <template id="runbot.bundles">
-          <t t-call='web.frontend_layout'>
-              <t t-set="head">
-                  <t t-if="refresh">
-                      <meta http-equiv="refresh" t-att-content="refresh"/>
-                  </t>
-              </t>
-              <t t-set="nav_form">
-                <form class="form-inline my-2 my-lg-0" role="search" t-att-action="qu(search='')" method="get">
-                  <div class="input-group md-form form-sm form-2 pl-0">
-                    <input class="form-control my-0 py-1 red-border" type="text" placeholder="Search" aria-label="Search" name="search" t-att-value="search"/>
-                    <div class="input-group-append">
-                      <button type='submit' class="input-group-text red lighten-3" id="basic-text1"><i class="fa fa-search text-grey"></i></button>
+    <template id="runbot.bundles">
+      <t t-call='web.frontend_layout'>
+        <t t-set="head">
+          <t t-if="refresh">
+            <meta http-equiv="refresh" t-att-content="refresh"/>
+          </t>
+        </t>
+        <t t-set="nav_form">
+          <form class="form-inline my-2 my-lg-0" role="search" t-att-action="qu(search='')" method="get">
+            <div class="input-group md-form form-sm form-2 pl-0">
+              <input class="form-control my-0 py-1 red-border" type="text" placeholder="Search" aria-label="Search" name="search" t-att-value="search"/>
+              <div class="input-group-append">
+                <button type='submit' class="input-group-text red lighten-3" id="basic-text1">
+                  <i class="fa fa-search text-grey"/>
+                </button>
+              </div>
+            </div>
+          </form>
+        </t>
+        <div class="container-fluid">
+          <div class="row">
+            <div class='col-md-12'>
+              <span class="pull-right" t-call="runbot.slots_infos"/>
+            </div>
+            <div class='col-md-12'>
+              <div t-if="message" class="alert alert-warning" role="alert">
+                <t t-esc="message" />
+              </div>
+              <div t-if="not project" class="mb32">
+                <h1>No project</h1>
+              </div>
+              <div t-else="">
+                <!-- test optimisation to compute last_done_batch in batch
+                <t t-set="sticky_bundles" t-value="bundles.filtered('sticky')"/>
+                <t t-esc="[sticky_bundles.with_context(category_id=category.id).last_done_batch for category in categories]"/>-->
+                <!-- not working...-->
+
+                <div t-foreach="bundles" t-as="bundle" class="row">
+                  <div class="col-md-3 col-lg-2 cell">
+                    <div class="one_line">
+                      <i t-if="bundle.sticky" class="fa fa-star" style="color: #f0ad4e" />
+                      <a t-attf-href="/runbot/bundle/#{bundle.id}">
+                        <b t-esc="bundle.name"/>
+                      </a>
+                      <br/>
+                      <t t-if="bundle.sticky" t-foreach="categories" t-as="category">
+                        <a t-if="active_category_id != category.id"
+                          t-attf-href="/runbot/batch/{{bundle.with_context(category_id=category.id).last_done_batch.id}}"
+                          t-attf-class="fa fa-{{category.icon}}"
+                          />
+                      </t>
                     </div>
                   </div>
-                </form>
-              </t>
-              <div class="container-fluid">
-                  <div class="row">
-                      <div class='col-md-12'><span class="pull-right" t-call="runbot.slots_infos"/></div>
-                      <div class='col-md-12'>
-                          <div t-if="message" class="alert alert-warning" role="alert">
-                            <t t-esc="message" />
+                  <div class="col-md-9 col-lg-10">
+                    <div class="row">
+                      <t t-foreach="bundle.last_batchs" t-as="batch">
+                        <t t-if="batch.state=='preparing'" t-set="klass">default</t>
+                        <t t-if="batch.state=='ready'" t-set="klass">info</t>
+                        <t t-if="batch.state=='done'" t-set="klass">success</t>
+                        <!--<t t-if="batch.state=='done' and any(slot.build_id.global_result != 'ok' for slot in batch.slot_ids)" t-set="klass">danger</t> -->
+
+                        <div t-attf-class="col-md-6 col-xl-3 bg-{{klass}}-light cell {{'d-none d-xl-block' if batch_index > 1 else ''}}">
+                          <div>
+                            <a t-attf-href="/runbot/batch/#{batch.id}" class="fa fa-asterisk"/>
+                            <div class="badge badge-light" t-esc="batch.get_formated_age()"/>
                           </div>
-                          <div t-if="not project" class="mb32">
-                              <h1>No project</h1>
-                          </div>
-                          <div t-else="">
-                                <div t-foreach="bundles" t-as="bundle" class="row">
-                                <div class="col-md-3 col-lg-2 cell">
-                                    <div class="one_line">
-                                      <i t-if="bundle.sticky" class="fa fa-star" style="color: #f0ad4e" />
-                                      <a t-attf-href="/runbot/bundle/#{bundle.id}">
-                                      <b t-esc="bundle.name"/></a>
-                                    </div>
-                                </div>
-                                <div class="col-md-9 col-lg-10">
-                                  <div class="row">
-                                    <t t-foreach="bundle.last_batchs" t-as="batch">
-                                      <t t-if="batch.state=='preparing'"><t t-set="klass">default</t></t>
-                                      <t t-if="batch.state=='ready'"><t t-set="klass">info</t></t>
-                                      <t t-if="batch.state=='done'">
-                                        <t t-set="klass">success</t>
-                                        <!--<t t-if="any(slot.build_id.global_result != 'ok' for slot in batch.slot_ids)" t-set="klass">danger</t> -->
-                                      </t>
-                                      <div t-attf-class="col-md-6 col-xl-3 bg-{{klass}}-light cell {{'d-none d-xl-block' if batch_index > 1 else ''}}">
-                                        <div>
-                                          <a t-attf-href="/runbot/batch/#{batch.id}" class="fa fa-asterisk"/>
-                                          <div class="badge badge-light" t-esc="batch.get_formated_age()"/>
-                                        </div>
-                                        <t t-foreach="batch.slot_ids" t-as="slot">
-                                          <t t-if="slot.build_id and not slot.trigger_id.hide" t-call="runbot.slot_button"/>
-                                        </t>
-                                        <div t-if="more">
-                                          <small>
-                                            <div t-foreach="batch.commit_link_ids" t-as="bundle_commit" class="one_line">
-                                              <a t-attf-href="/runbot/commit/#{bundle_commit.commit_id.id}">
-                                                  <span class="badge badge-light" t-esc="bundle_commit.commit_id.dname"/>
-                                              </a>
-                                              <span title="bundle_commit.commit_id.subject" t-esc="bundle_commit.commit_id.subject"></span>
-                                            </div>
-                                          </small>
-                                        </div>
-                                      </div>
-                                    </t>
-                                    </div>
-                                </div>
+                          <t t-foreach="batch.slot_ids" t-as="slot">
+                            <t t-if="slot.build_id and not slot.trigger_id.hide" t-call="runbot.slot_button"/>
+                          </t>
+                          <div t-if="more">
+                            <small>
+                              <div t-foreach="batch.commit_link_ids.sorted(lambda cl: (cl.commit_id.repo_id.sequence, cl.commit_id.repo_id.id))" t-as="bundle_commit" class="one_line">
+                                <a t-attf-href="/runbot/commit/#{bundle_commit.commit_id.id}">
+                                  <span class="badge badge-light" t-esc="bundle_commit.commit_id.dname"/>
+                                </a>
+                                <span title="bundle_commit.commit_id.subject" t-esc="bundle_commit.commit_id.subject"/>
                               </div>
+                            </small>
                           </div>
-                      </div>
+                        </div>
+                      </t>
+                    </div>
                   </div>
+                </div>
               </div>
-          </t>
-      </template>
-    </data>
+            </div>
+          </div>
+        </div>
+      </t>
+    </template>
+  </data>
 </odoo>

@@ -7,7 +7,7 @@ import subprocess
 from collections import defaultdict
 from babel.dates import format_timedelta
 from odoo import models, fields, api
-from ..common import dt2time
+from ..common import dt2time, s2human_long
 
 
 _logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ class Bundle(models.Model):
 
     sticky = fields.Boolean('Sticky', index=True)
     is_base = fields.Boolean('Is base', index=True)
-    defined_base_id = fields.Many2one('runbot.bundle', 'Forced base bundle', domain=lambda self: [('project_id', '=', self.project_id.id)])
+    defined_base_id = fields.Many2one('runbot.bundle', 'Forced base bundle', domain="[('project_id', '=', project_id), ('is_base', '=', True)]")
     base_id = fields.Many2one('runbot.bundle', 'Base bundle', compute='_compute_base_id', store=True)
 
     version_id = fields.Many2one('runbot.version', 'Version', compute='_compute_version_id', store=True)
@@ -178,7 +178,7 @@ class Bundle(models.Model):
         if self:
             for bundle in self:
                 bundle.last_done_batch = False
-            category_id = self.env.context.get('category_id', self.env.ref('runbot.runbot_build_config_default').id)
+            category_id = self.env.context.get('category_id', self.env['ir.model.data'].xmlid_to_res_id('runbot.default_category'))
             self.env.cr.execute("""
                 SELECT
                     id
@@ -230,7 +230,7 @@ class Bundle(models.Model):
 
     def consistency_warning(self):
         if self.defined_base_id:
-            return [('info', 'This bundle has a manualy defined base: %s' % self.defined_base_id.name)]
+            return [('info', 'This bundle has a forced base: %s' % self.defined_base_id.name)]
         warnings = []
         for branch in self.branch_ids:
             if branch.is_pr and branch.target_branch_name != self.base_id.name:
@@ -283,11 +283,7 @@ class Batch(models.Model):
                 batch.buildage_age = 0
 
     def get_formated_age(self):
-        return format_timedelta(
-            datetime.timedelta(seconds=-self.age),
-            threshold=2.1,
-            add_direction=True, locale='en'
-        )
+        return s2human_long(self.age)
 
     def _url(self):
         self.ensure_one()

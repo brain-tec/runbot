@@ -5,11 +5,11 @@
     </record>
     <record model="runbot.trigger.category" id="runbot.nightly_category">
         <field name="name">Nightly</field>
-        <field name="icon">stars</field>
+        <field name="icon">moon-o</field>
     </record>
     <record model="runbot.trigger.category" id="runbot.weekly_category">
         <field name="name">Weekly</field>
-        <field name="icon">calendar-week</field>
+        <field name="icon">tasks</field>
     </record>
 
     <record model="runbot.project" id="runbot.main_project">

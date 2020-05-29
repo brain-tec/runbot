@@ -48,9 +48,9 @@
                                 <td t-esc="batch.last_update" t-if="more"></td>
                                 <td t-esc="batch.state" t-if="more"></td>
                                 <td>
-                                    <t t-foreach="batch.commit_link_ids" t-as="bundle_commit">
-                                        <a t-attf-href="/runbot/commit/#{bundle_commit.commit_id.id}">
-                                            <span class="badge badge-info" t-esc="bundle_commit.commit_id.dname"/>
+                                    <t t-foreach="batch.commit_link_ids.sorted(lambda cl: (cl.commit_id.repo_id.sequence, cl.commit_id.repo_id.id))" t-as="commit_link">
+                                        <a t-attf-href="/runbot/commit/#{commit_link.commit_id.id}">
+                                            <samp class="badge badge-info" t-esc="commit_link.commit_id.dname"/>
                                         </a>
                                     </t>
                                 </td>
@@ -74,10 +74,11 @@
         <div class="table-responsive">
             <table class="table table-stripped">
                 <tr><td>Bundle</td><td><a t-esc="batch.bundle_id.name" t-attf-href="/runbot/bundle/{{batch.bundle_id.id}}"/></td></tr>
+                <tr t-if="batch.category_id.id != default_category"><td>Category</td><td t-esc="batch.category_id.name"><i t-attf-class="fa fa-{{batch.category_id.name}}"/></td></tr>
                 <tr><td>Version</td><td t-esc="batch.slot_ids[0].params_id.version_id.name if batch.slot_ids else batch.bundle_id.version_id.name"/></tr>
                 <tr><td>State</td><td t-esc="batch.state"/></tr>
                 <tr><td>Create date</td><td t-esc="batch.create_date"/></tr>
-                <tr><td>Last update</td><td><t t-esc="batch.last_update"/>(<t t-esc="batch.last_update - batch.create_date"/>)</td></tr>
+                <tr t-if="more"><td>Last update</td><td><t t-esc="batch.last_update"/>(<t t-esc="batch.last_update - batch.create_date"/>)</td></tr>
                 <tr t-att-class="'bg-info-light' if batch.state=='preparing' else 'bg-success-light' if not any(log.level != 'INFO' for log in batch.log_ids) else 'bg-warning-light'"><td>Commits</td><td>
                 <div t-foreach="batch.commit_link_ids.sorted(key=lambda lc: (lc.commit_id.repo_id.sequence, lc.commit_id.repo_id.id))" t-as="commit_link">
                     <t t-set="commit" t-value="commit_link.commit_id"/>
