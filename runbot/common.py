@@ -70,18 +70,22 @@ def rfind(filename, pattern):
                 return True
     return False
 
+def time_delta(time):
+    if isinstance(time, timedelta):
+        return time
+    return timedelta(seconds=-time)
 
 def s2human(time):
     """Convert a time in second into an human readable string"""
     return format_timedelta(
-        timedelta(seconds=time),
+        time_delta(time),
         format="narrow",
         threshold=2.1,
     )
 
 def s2human_long(time):
     return format_timedelta(
-        datetime.timedelta(seconds=-time),
+        time_delta(time),
         threshold=2.1,
         add_direction=True, locale='en'
     )

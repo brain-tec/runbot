@@ -12,7 +12,6 @@ from odoo.addons.http_routing.models.ir_http import slug
 from odoo.addons.website.controllers.main import QueryURL
 
 from odoo.http import Controller, request, route
-from ..common import uniq_list, flatten, fqdn
 from odoo.osv import expression
 
 from odoo.exceptions import UserError
@@ -170,7 +169,6 @@ class Runbot(Controller):
 
         context = {
             'build': build,
-            'fqdn': fqdn(),
             'more': more is not False,
             'projects': request.env['runbot.project'].search([]),
             'default_category': request.env['ir.model.data'].xmlid_to_res_id('runbot.default_category'),

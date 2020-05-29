@@ -78,7 +78,7 @@
                 <tr><td>Version</td><td t-esc="batch.slot_ids[0].params_id.version_id.name if batch.slot_ids else batch.bundle_id.version_id.name"/></tr>
                 <tr><td>State</td><td t-esc="batch.state"/></tr>
                 <tr><td>Create date</td><td t-esc="batch.create_date"/></tr>
-                <tr t-if="more"><td>Last update</td><td><t t-esc="batch.last_update"/>(<t t-esc="batch.last_update - batch.create_date"/>)</td></tr>
+                <tr t-if="more"><td>Last update</td><td><t t-esc="batch.last_update"/> <span class="badge badge-info" t-esc="s2human(batch.last_update - batch.create_date)"/></td></tr>
                 <tr t-att-class="'bg-info-light' if batch.state=='preparing' else 'bg-success-light' if not any(log.level != 'INFO' for log in batch.log_ids) else 'bg-warning-light'"><td>Commits</td><td>
                 <div t-foreach="batch.commit_link_ids.sorted(key=lambda lc: (lc.commit_id.repo_id.sequence, lc.commit_id.repo_id.id))" t-as="commit_link">
                     <t t-set="commit" t-value="commit_link.commit_id"/>
