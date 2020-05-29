@@ -2,11 +2,16 @@
 <odoo>
   <data>
     <template id="runbot.layout" inherit_id="website.layout" name="Custom website layout">
+        <xpath expr="//head/meta[last()]" position="after">
+          <t t-if="refresh">
+            <meta http-equiv="refresh" t-att-content="refresh"/>
+          </t>
+        </xpath>
       <xpath expr="//footer" position="replace">
       </xpath>
       <xpath expr="//nav[hasclass('navbar')]" position="replace">
         <nav class="navbar navbar-expand-md navbar-light bg-light">
-          <a t-if="project" t-attf-href="/runbot/{{slug(project)}}?search={{request.params.get('search', '')}}">
+          <a t-if="project" t-att-href="qu(search=search)">
             <b style="color:#777;">
               <t t-esc="project.name"/>
             </b>
@@ -18,14 +23,61 @@
             <ul class="nav navbar-nav ml-auto text-right" id="top_menu">
               <t t-if="projects">
                 <t t-foreach="projects" t-as="project">
-                  <li>
-                    <a t-attf-href="/runbot/{{slug(project)}}?search={{request.params.get('search', '')}}">
+                  <li class="nav-item">
+                    <a class="nav-link" t-att-href="qu('/runbot/%s' % slug(project), search=search)">
                       <t t-esc="project.name"/>
                     </a>
                   </li>
                 </t>
               </t>
-              <li class="nav-item divider" t-ignore="true" t-if="not user_id._is_public()"/>
+              <li class="nav-item divider"/>
+              <li class="nav-item dropdown">
+                <a href="#" class="nav-link dropdown-toggle" data-toggle="dropdown">
+                  <i class="fa fa-gear"/>
+                </a>
+                <div class="dropdown-menu" role="menu">
+                  <form class="px-4 py-3" method="post" action="/runbot/submit">
+                    <input type="hidden" name="save" value="1"></input>
+                    <input type="hidden" name="redirect" t-att-value="current_path"></input>
+                    <div class="text-nowrap">
+                      <input type="checkbox" name="more" t-att-checked="more"></input>
+                      <label for="more"> More info</label>
+                    </div>
+                    <div class="text-nowrap">
+                      <input type="checkbox" name="keep_search" t-att-checked="keep_search"></input>
+                      <label for="keep_search"> Persistent search</label>
+                    </div>
+                    <hr class="separator"/>
+                    <div class="text-nowrap">
+                      <label for="filter_mode"> Filter</label>
+                      <select class="form-control" name="filter_mode">
+                        <option value="all" t-att-selected="filter_mode=='all'">All</option>
+                        <option value="sticky" t-att-selected="filter_mode=='sticky'">Sticky only</option>
+                        <option value="nosticky" t-att-selected="filter_mode=='nosticky'">Dev only</option>
+                      </select>
+                    </div>
+                    <div t-if="categories" class="text-nowrap">
+                      <label for="category"> Category</label>
+                      <select class="form-control" name="category">
+                        <option t-foreach="categories" t-as="category" t-att-value="category.id" t-esc="category.name" t-att-selected="category.id==active_category_id"/>
+                      </select>
+                    </div>
+                    <hr class="separator"/>
+                    <t t-if="triggers">
+                      <input type="hidden" name="update_triggers" t-att-value="project.id"></input>
+                      <t t-foreach="triggers" t-as="trigger">
+                        <div class="text-nowrap">
+                          <input type="checkbox" t-attf-name="trigger_{{trigger.id}}" t-att-checked="trigger_display is None or trigger.id in trigger_display"></input>
+                          <label t-attf-for="trigger_{{trigger.id}}" t-esc="trigger.name"/>
+                        </div>
+                      </t>
+                    </t>
+
+                    <button type="submit" class="btn btn-primary">Save</button>
+                  </form>
+                </div>
+              </li>
+              <li class="nav-item divider" t-ignore="true"/>
               <li class="nav-item dropdown" t-ignore="true" t-if="not user_id._is_public()">
                 <a href="#" class="nav-link dropdown-toggle" data-toggle="dropdown">
                   <b>
@@ -33,8 +85,12 @@
                   </b>
                 </a>
                 <div class="dropdown-menu js_usermenu" role="menu">
-                  <a id="o_logout" class="dropdown-item" t-attf-href="/web/session/logout?redirect=/" role="menuitem">Logout</a>
+                  <a class="dropdown-item" role="menuitem" t-attf-href="/web/session/logout?redirect=/">Logout</a>
+                  <a class="dropdown-item" role="menuitem" t-attf-href="/web">Web</a>
                 </div>
+              </li>
+              <li class="nav-item dropdown" t-ignore="true" t-else="">
+                <b><a class="nav-link" t-attf-href="/web/login?redirect=/">Login</a></b>
               </li>
             </ul>
             <t t-raw="nav_form or ''">
@@ -110,11 +166,6 @@
 
     <template id="runbot.bundles">
       <t t-call='web.frontend_layout'>
-        <t t-set="head">
-          <t t-if="refresh">
-            <meta http-equiv="refresh" t-att-content="refresh"/>
-          </t>
-        </t>
         <t t-set="nav_form">
           <form class="form-inline my-2 my-lg-0" role="search" t-att-action="qu(search='')" method="get">
             <div class="input-group md-form form-sm form-2 pl-0">
@@ -175,7 +226,10 @@
                             <div class="badge badge-light" t-esc="batch.get_formated_age()"/>
                           </div>
                           <t t-foreach="batch.slot_ids" t-as="slot">
-                            <t t-if="slot.build_id and not slot.trigger_id.hide" t-call="runbot.slot_button"/>
+                            <t t-if="slot.build_id">
+                              <t t-if="(not slot.trigger_id.hide and trigger_display is None) or (trigger_display and slot.trigger_id.id in trigger_display)" 
+                                  t-call="runbot.slot_button"/>
+                            </t>
                           </t>
                           <div t-if="more">
                             <small>

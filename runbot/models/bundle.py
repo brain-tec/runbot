@@ -145,9 +145,11 @@ class Bundle(models.Model):
                     bundle.previous_version_base_id = False
                     bundle.intermediate_version_base_ids = False
 
+    @api.depends_context('category_id')
     def _compute_last_batchs(self):
         if self:
             batch_ids = defaultdict(list)
+            category_id = self.env.context.get('category_id', self.env['ir.model.data'].xmlid_to_res_id('runbot.default_category'))
             self.env.cr.execute("""
                 SELECT
                     id
@@ -164,7 +166,7 @@ class Bundle(models.Model):
                 WHERE
                     row <= 4
                 ORDER BY row, id desc
-                """, [tuple(self.ids), self.env.ref('runbot.runbot_build_config_default').id] # TODO use context ?  make context dependant
+                """, [tuple(self.ids), category_id] # TODO use context ?  make context dependant
             )
             batchs = self.env['runbot.batch'].browse([r[0] for r in self.env.cr.fetchall()])
             for batch in batchs:

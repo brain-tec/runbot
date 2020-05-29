@@ -159,7 +159,7 @@ class Branch(models.Model):
             head = self.head
         super().write(values)
         if 'head' in values and head != self.head:
-            self.env['runbot.ref.log'].create({'commit_id': head.id, 'branch_id': self.id})
+            self.env['runbot.ref.log'].create({'commit_id': head.id, 'branch_id': self.id})  # TODO not working
 
     def _get_pull_info(self):
         self.ensure_one()

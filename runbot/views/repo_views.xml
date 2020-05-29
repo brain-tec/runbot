@@ -1,7 +1,7 @@
 <odoo>
   <data>
       <record id="repo_trigger_form" model="ir.ui.view">
-        <field name="name">runbot.repo.trigger.form</field>
+        <field name="name">runbot.trigger.form</field>
         <field name="model">runbot.trigger</field>
         <field name="arch" type="xml">
           <form>
@@ -23,7 +23,7 @@
       </record>
 
       <record id="repo_trigger_catgory_form" model="ir.ui.view">
-        <field name="name">runbot.repo.trigger.category.form</field>
+        <field name="name">runbot.trigger.category.form</field>
         <field name="model">runbot.trigger.category</field>
         <field name="arch" type="xml">
           <form>
@@ -164,5 +164,24 @@
         sequence="40"
         action="runbot_triggers_category_action"
       />
+
+      <menuitem
+        name="Technical"
+        id="runbot_menu_technical"
+        parent="runbot_menu_root"
+        sequence="1000"
+        />
+
+        <menuitem id="runbot_menu_ir_cron_act" action="base.ir_cron_act" parent="runbot_menu_technical"/>
+        <menuitem id="runbot_menu_base_automation_act" action="base_automation.base_automation_act" parent="runbot_menu_technical"/>
+        <menuitem id="runbot_menu_action_ui_view" action="base.action_ui_view" parent="runbot_menu_technical"/>
+
+      <menuitem
+        name="▶"
+        id="runbot_menu_website"
+        parent="runbot_menu_root"
+        sequence="1001"
+        action="website.action_website"
+        />
   </data>
 </odoo>
