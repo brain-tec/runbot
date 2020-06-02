@@ -25,12 +25,15 @@ def route(routes, **kw):
         @functools.wraps(f)
         def response_wrap(*args, **kwargs):
             projects = request.env['runbot.project'].search([])
-            kwargs['projects'] = projects
-            response = f(*args, **kwargs)
-
+            more = request.httprequest.cookies.get('more', False) == '1'
             keep_search = request.httprequest.cookies.get('keep_search', False) == '1'
-            response.qcontext['keep_search'] = keep_search
             cookie_search = request.httprequest.cookies.get('search', '')
+            refresh = kwargs.get('refresh', False)
+
+            kwargs['more'] = more
+            kwargs['projects'] = projects
+
+            response = f(*args, **kwargs)
 
             if keep_search and cookie_search and 'search' not in kwargs:
                 search = cookie_search
@@ -38,10 +41,14 @@ def route(routes, **kw):
                 search = kwargs.get('search', '')
             if keep_search and cookie_search != search:
                 response.set_cookie('search', search)
+
+            project = response.qcontext.get('project') or projects[0]
+
+            response.qcontext['projects'] = projects
+            response.qcontext['more'] = more
+            response.qcontext['keep_search'] = keep_search
             response.qcontext['search'] = search
             response.qcontext['current_path'] = request.httprequest.full_path
-            refresh = kwargs.get('refresh', False)
-            project = response.qcontext.get('project') or projects[0]
             response.qcontext['refresh'] = refresh
             response.qcontext['qu'] = QueryURL('/runbot/%s' % (slug(project)), path_args=['search'], search=search, refresh=refresh)
 
@@ -77,6 +84,8 @@ class Runbot(Controller):
                     enabled_triggers.append(key.replace('trigger_', ''))
 
             key = 'trigger_display_%s' % project_id
+
+            # filter triggers on category?
             if len(request.env['runbot.trigger'].search([('project_id', '=', project_id)])) == len(enabled_triggers):
                 response.delete_cookie(key)
             else:
