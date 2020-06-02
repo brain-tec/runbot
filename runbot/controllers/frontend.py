@@ -84,8 +84,6 @@ class Runbot(Controller):
                     enabled_triggers.append(key.replace('trigger_', ''))
 
             key = 'trigger_display_%s' % project_id
-
-            # filter triggers on category?
             if len(request.env['runbot.trigger'].search([('project_id', '=', project_id)])) == len(enabled_triggers):
                 response.delete_cookie(key)
             else:
@@ -146,7 +144,6 @@ class Runbot(Controller):
             trigger_display = request.httprequest.cookies.get('trigger_display_%s' % project.id, None)
             if trigger_display is not None:
                 trigger_display = [int(td) for td in trigger_display.split('-') if td]
-            print(trigger_display)
             bundles = bundles.with_context(category_id=category_id)
 
             triggers = env['runbot.trigger'].search([('project_id', '=', project.id)])

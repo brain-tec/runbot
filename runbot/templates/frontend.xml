@@ -22,10 +22,10 @@
           <div class="collapse navbar-collapse" id="top_menu_collapse">
             <ul class="nav navbar-nav ml-auto text-right" id="top_menu">
               <t t-if="projects">
-                <t t-foreach="projects" t-as="project">
+                <t t-foreach="projects" t-as="l_project">
                   <li class="nav-item">
-                    <a class="nav-link" t-att-href="qu('/runbot/%s' % slug(project), search=search)">
-                      <t t-esc="project.name"/>
+                    <a class="nav-link" t-att-href="qu('/runbot/%s' % slug(l_project), search=search)">
+                      <t t-esc="l_project.name"/>
                     </a>
                   </li>
                 </t>
