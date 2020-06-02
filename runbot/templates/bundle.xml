@@ -50,7 +50,13 @@
                                 <td>
                                     <t t-foreach="batch.commit_link_ids.sorted(lambda cl: (cl.commit_id.repo_id.sequence, cl.commit_id.repo_id.id))" t-as="commit_link">
                                         <a t-attf-href="/runbot/commit/#{commit_link.commit_id.id}">
-                                            <samp class="badge badge-info" t-esc="commit_link.commit_id.dname"/>
+                                            <samp class="badge badge-info">
+                                              <i class="fa fa-fw fa-hashtag" t-if="commit_link.match_type == 'new'"/>
+                                                <i class="fa fa-fw fa-refresh" t-if="commit_link.match_type == 'head'"/>
+                                                <i class="fa fa-fw fa-clock-o" t-if="commit_link.match_type == 'base_match'"/>
+                                                <i class="fa fa-fw fa-code-fork" t-if="commit_link.match_type == 'base_head'"/>
+                                                <t t-esc="commit_link.commit_id.dname"/>
+                                            </samp>
                                         </a>
                                     </t>
                                 </td>
@@ -86,7 +92,7 @@
                     <a t-attf-href="/runbot/commit/#{commit.id}">
                         <i class="fa fa-fw fa-hashtag" t-if="commit_link.match_type == 'new'"/>
                         <i class="fa fa-fw fa-refresh" t-if="commit_link.match_type == 'head'"/>
-                        <i class="fa fa-fw fa-intersection" t-if="commit_link.match_type == 'base_match'"/>
+                        <i class="fa fa-fw fa-clock-o" t-if="commit_link.match_type == 'base_match'"/>
                         <i class="fa fa-fw fa-code-fork" t-if="commit_link.match_type == 'base_head'"/>
                         <span class="label" t-esc="commit.dname"/>
                     </a>
@@ -97,7 +103,7 @@
                         found in branch <span t-esc="commit_link.branch_id.name"/>
                         <t t-if="batch.state != 'preparing'">
                             <span t-esc="'+%s' % commit_link.diff_add" class="text-success"></span>
-                            <span t-esc="'+%s' % commit_link.diff_remove" class="text-danger"></span>
+                            <span t-esc="'-%s' % commit_link.diff_remove" class="text-danger"></span>
                             <span class="text-info">(<span t-esc="commit_link.file_changed"/> <i class="fa fa-file"/>)</span>
                         </t>
                         <br/>

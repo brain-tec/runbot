@@ -525,12 +525,14 @@ class Batch(models.Model):
                     self.warning('Commit for base head %s in %s was created', merge_base_sha, commit.repo_id.name)
                 link_commit.merge_base_commit_id = merge_base_commit.id
 
-                if merge_base_sha == commit.name:
-                    continue
+
                 ahead, behind = commit.repo_id._git(['rev-list', '--left-right', '--count', '%s...%s' % (commit.name, base_head.name)]).strip().split('\t')
 
                 link_commit.base_ahead = int(ahead)
                 link_commit.base_behind = int(behind)
+
+                if merge_base_sha == commit.name:
+                    continue
 
                 # diff. Iter on --numstat, easier to parse than --shortstat summary
                 diff = commit.repo_id._git(['diff', '--numstat', merge_base_sha, commit.name]).strip()
