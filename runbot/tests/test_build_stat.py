@@ -12,26 +12,19 @@ class TestBuildStatRegex(RunbotCase):
         self.StatRegex = self.env["runbot.build.stat.regex"]
         self.ConfigStep = self.env["runbot.build.config.step"]
         self.BuildStat = self.env["runbot.build.stat"]
-
-        self.repo = self.Repo.create(
-            {
-                "name": "bla@example.com:foo/bar",
-                "server_files": "server.py",
-                "addons_paths": "addons,core/addons",
-            }
-        )
-        self.branch = self.Branch.create(
-            {"repo_id": self.repo.id, "name": "refs/heads/master"}
-        )
-
         self.Build = self.env["runbot.build"]
 
-        self.build = self.create_build(
+        params = self.BuildParameters.create({
+            'version_id': self.version_13.id,
+            'project_id': self.project.id,
+            'config_id': self.default_config.id,
+            'config_data': {'make_stats': True}
+        })
+
+        self.build = self.Build.create(
             {
-                "branch_id": self.branch.id,
-                "name": "d0d0caca0000ffffffffffffffffffffffffffff",
+                "params_id": params.id,
                 "port": "1234",
-                "config_data": {"make_stats": True},
             }
         )
 
