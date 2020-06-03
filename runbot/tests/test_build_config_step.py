@@ -224,10 +224,11 @@ class TestBuildConfigStep(RunbotCase):
         config_step._run_odoo_install(self.parent_build, 'dev/null/logpath')
 
         assert_db_name = 'custom_build'
-        self.parent_build.params_id.config_data = {'db_name': 'custom_build'}
-        config_step._run_odoo_install(self.parent_build, 'dev/null/logpath')
+        parent_build_params = self.parent_build.params_id.clone({'config_data' = {'db_name': 'custom_build'}})
+        parent_build = self.parent_build.clone({'params_id': parent_build_params.id})
+        config_step._run_odoo_install(parent_build, 'dev/null/logpath')
 
-        config_step._run_odoo_run(self.parent_build, 'dev/null/logpath')
+        config_step._run_odoo_run(parent_build, 'dev/null/logpath')
 
         self.assertEqual(call_count, 3)
 
