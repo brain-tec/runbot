@@ -4,12 +4,11 @@ import logging
 import re
 import shlex
 import time
-from ..common import now, grep, time2str, rfind, Commit, s2human, os
+from ..common import now, grep, time2str, rfind, s2human, os, RunbotException
 from ..container import docker_run, docker_get_gateway_ip, Command
 from odoo import models, fields, api
 from odoo.exceptions import UserError, ValidationError
 from odoo.tools.safe_eval import safe_eval, test_python_expr
-from odoo.addons.runbot.models.repo import RunbotException
 
 _logger = logging.getLogger(__name__)
 
@@ -31,7 +30,16 @@ class Config(models.Model):
     protected = fields.Boolean('Protected', default=False, track_visibility='onchange')
     group = fields.Many2one('runbot.build.config', 'Configuration group', help="Group of config's and config steps")
     group_name = fields.Char('Group name', related='group.name')
-    monitoring_view_id = fields.Many2one('ir.ui.view', 'Monitoring view')
+    build_refs_descriptors_ids = fields.One2many('runbot.build.reference.descriptor', compute='_compute_build_refs_descriptors_ids')
+    # todo compute step_ids ?
+
+    def _compute_build_refs_descriptors_ids(self):
+        for config in self:
+            build_refs_descriptors_ids = self.env['runbot.build.reference.descriptor']
+            for step in config.step_ids():
+                build_refs_descriptors_ids |= step.build_refs_descriptors_ids
+                for sub_config in step.create_config_ids:
+                    build_refs_descriptors_ids |= sub_config.build_refs_descriptors_ids
 
     @api.model_create_single
     def create(self, values):
@@ -70,7 +78,7 @@ class Config(models.Model):
                     raise UserError('Jobs of type run_odoo should be preceded by a job of type install_odoo')
         self._check_recustion()
 
-    def _check_recustion(self, visited=None):  # todo test
+    def _check_recustion(self, visited=None):
         visited = visited or []
         recursion = False
         if self in visited:
@@ -83,6 +91,16 @@ class Config(models.Model):
                 for create_config in step.create_config_ids:
                     create_config._check_recustion(visited[:])
 
+class ConfigStepBuildRef(models.Model):
+    _name = 'runbot.build.reference.descriptor'
+    _description = 'Extra dependency build that will be used by step'
+
+    config_step_id = fields.Many2one('runbot.build.config.step')
+    key = fields.Char('Key')
+    domain = fields.Char('Domain')
+    #  need_database = fields.Boolean
+
+    # todo: for python step, check that needed config ids are always in config_ids list
 
 class ConfigStep(models.Model):
     _name = 'runbot.build.config.step'
@@ -126,10 +144,11 @@ class ConfigStep(models.Model):
     # create_build
     create_config_ids = fields.Many2many('runbot.build.config', 'runbot_build_config_step_ids_create_config_ids_rel', string='New Build Configs', track_visibility='onchange', index=True)
     number_builds = fields.Integer('Number of build to create', default=1, track_visibility='onchange')
-    hide_build = fields.Boolean('Hide created build in frontend', default=True, track_visibility='onchange')
-    force_build = fields.Boolean("As a forced rebuild, don't use duplicate detection", default=False, track_visibility='onchange')
+
     force_host = fields.Boolean('Use same host as parent for children', default=False, track_visibility='onchange')  # future
     make_orphan = fields.Boolean('No effect on the parent result', help='Created build result will not affect parent build result', default=False, track_visibility='onchange')
+
+    build_refs_descriptors_ids = fields.One2many('runbot.build.reference.descriptor', 'config_step_id')
 
     @api.constrains('python_code')
     def _check_python_code(self):
@@ -144,13 +163,6 @@ class ConfigStep(models.Model):
             msg = test_python_expr(expr=step[field_name].strip(), mode="exec")
             if msg:
                 raise ValidationError(msg)
-
-    @api.onchange('number_builds')
-    def _onchange_number_builds(self):
-        if self.number_builds > 1:
-            self.force_build = True
-        else:
-            self.force_build = False
 
     @api.onchange('sub_command')
     def _onchange_number_builds(self):
@@ -207,7 +219,7 @@ class ConfigStep(models.Model):
     def _run(self, build):
         log_path = build._path('logs', '%s.txt' % self.name)
         build.write({'job_start': now(), 'job_end': False})  # state, ...
-        build._log('run', 'Starting step **%s** from config **%s**' % (self.name, build.config_id.name), log_type='markdown', level='SEPARATOR')
+        build._log('run', 'Starting step **%s** from config **%s**' % (self.name, build.params_id.config_id.name), log_type='markdown', level='SEPARATOR')
         return self._run_step(build, log_path)
 
     def _run_step(self, build, log_path):
@@ -223,9 +235,6 @@ class ConfigStep(models.Model):
 
     def _create_build(self, build, log_path):
         Build = self.env['runbot.build']
-        if self.force_build:
-            Build = Build.with_context(force_rebuild=True)
-
         count = 0
         for create_config in self.create_config_ids:
             for _ in range(self.number_builds):
@@ -234,19 +243,9 @@ class ConfigStep(models.Model):
                     build._logger('Too much build created')
                     break
                 children = Build.create({
-                    'dependency_ids': build._copy_dependency_ids(),
-                    'config_id': create_config.id,
+                    'params_id': build.params_id.copy({'config_id': create_config.id}).id,
                     'parent_id': build.id,
-                    'branch_id': build.branch_id.id,
-                    'name': build.name,
                     'build_type': build.build_type,
-                    'date': build.date,
-                    'author': build.author,
-                    'author_email': build.author_email,
-                    'committer': build.committer,
-                    'committer_email': build.committer_email,
-                    'subject': build.subject,
-                    'hidden': self.hide_build,
                     'orphan_result': self.make_orphan,
                 })
                 build._log('create_build', 'created with config %s' % create_config.name, log_type='subbuild', path=str(children.id))
@@ -262,7 +261,6 @@ class ConfigStep(models.Model):
             'log_path': build._path('logs', '%s.txt' % self.name),
             'glob': glob.glob,
             'Command': Command,
-            'Commit': Commit,
             'base64': base64,
             're': re,
             'time': time,
@@ -307,15 +305,17 @@ class ConfigStep(models.Model):
             # not sure, to avoid old server to check other dbs
             cmd += ["--max-cron-threads", "0"]
 
-        db_name = build.config_data.get('db_name') or [step.db_name for step in build.config_id.step_ids() if step.job_type == 'install_odoo'][-1]
+        db_name = build.params_id.config_data.get('db_name') or [step.db_name for step in build.params_id.config_id.step_ids() if step.job_type == 'install_odoo'][-1]
         # we need to have at least one job of type install_odoo to run odoo, take the last one for db_name.
         cmd += ['-d', '%s-%s' % (build.dest, db_name)]
 
-        if grep(build._server("tools/config.py"), "proxy-mode") and build.repo_id.nginx:
+        icp = self.env['ir.config_parameter'].sudo()
+        nginx = icp.get_param('runbot.runbot_nginx', True)
+        if grep(build._server("tools/config.py"), "proxy-mode") and nginx:
             cmd += ["--proxy-mode"]
 
         if grep(build._server("tools/config.py"), "db-filter"):
-            if build.repo_id.nginx:
+            if nginx:
                 cmd += ['--db-filter', '%d.*$']
             else:
                 cmd += ['--db-filter', '%s.*$' % build.dest]
@@ -329,7 +329,7 @@ class ConfigStep(models.Model):
         self.env.cr.commit()  # commit before docker run to be 100% sure that db state is consistent with dockers
         self.invalidate_cache()
         res = docker_run(cmd, log_path, build_path, docker_name, exposed_ports=[build_port, build_port + 1], ro_volumes=exports)
-        build.repo_id._reload_nginx()
+        self.env['runbot.runbot']._reload_nginx()
         return res
 
     def _run_odoo_install(self, build, log_path):
@@ -349,13 +349,13 @@ class ConfigStep(models.Model):
             python_params = ['-m', 'flamegraph', '-o', self._perfs_data_path()]
         cmd = build._cmd(python_params, py_version, sub_command=self.sub_command)
         # create db if needed
-        db_suffix = build.config_data.get('db_name') or self.db_name
+        db_suffix = build.params_id.config_data.get('db_name') or self.db_name
         db_name = "%s-%s" % (build.dest, db_suffix)
         if self.create_db:
             build._local_pg_createdb(db_name)
         cmd += ['-d', db_name]
         # list module to install
-        extra_params = build.extra_params or self.extra_params or ''
+        extra_params = build.params_id.extra_params or self.extra_params or ''
         if mods and '-i' not in extra_params:
             cmd += ['-i', mods]
         config_path = build._server("tools/config.py")
@@ -402,7 +402,7 @@ class ConfigStep(models.Model):
         cmd.finals.append(['pg_dump', db_name, '>', sql_dest])
         cmd.finals.append(['cp', '-r', filestore_path, filestore_dest])
         cmd.finals.append(['cd', dump_dir, '&&', 'zip', '-rmq9', zip_path, '*'])
-        infos = '{\n    "db_name": "%s",\n    "build_id": %s,\n    "shas": [%s]\n}' % (db_name, build.id, ', '.join(['"%s"' % commit for commit in build._get_all_commit()]))
+        infos = '{\n    "db_name": "%s",\n    "build_id": %s,\n    "shas": [%s]\n}' % (db_name, build.id, ', '.join(['"%s"' % build_commit.commit_id.dname for build_commit in build.params_id.commit_link_ids]))
         build.write_file('logs/%s/info.json' % db_name, infos)
 
         if self.flamegraph:
@@ -421,7 +421,7 @@ class ConfigStep(models.Model):
         kwargs = dict(message='Step %s finished in %s' % (self.name, s2human(build.job_time)))
         if self.job_type == 'install_odoo':
             kwargs['message'] += ' $$fa-download$$'
-            db_suffix = build.config_data.get('db_name') or self.db_name
+            db_suffix = build.params_id.config_data.get('db_name') or self.db_name
             kwargs['path'] = '%s%s-%s.zip' % (build.http_log_url(), build.dest, db_suffix)
             kwargs['log_type'] = 'link'
         build._log('', **kwargs)
@@ -461,11 +461,11 @@ class ConfigStep(models.Model):
 
     def _coverage_params(self, build, modules_to_install):
         pattern_to_omit = set()
-        for commit in build._get_all_commit():
+        for commit in build.params_id.commit_link_ids.mapped('commit_id'):
             docker_source_folder = build._docker_source_folder(commit)
-            for manifest_file in commit.repo.manifest_files.split(','):
+            for manifest_file in commit.repo_id.manifest_files.split(','):
                 pattern_to_omit.add('*%s' % manifest_file)
-            for (addons_path, module, _) in build._get_available_modules(commit):
+            for (addons_path, module, _) in commit._get_available_modules():
                 if module not in modules_to_install:
                     # we want to omit docker_source_folder/[addons/path/]module/*
                     module_path_in_docker = os.path.join(docker_source_folder, addons_path, module)
@@ -577,7 +577,7 @@ class ConfigStep(models.Model):
         return build_values
 
     def _make_stats(self, build):
-        if not ((build.branch_id.make_stats or build.config_data.get('make_stats')) and self.make_stats):
+        if not self.make_stats:  # TODO garbage collect non sticky stat
             return
         build._log('make_stats', 'Getting stats from log file')
         log_path = build._path('logs', '%s.txt' % self.name)

@@ -21,23 +21,15 @@ class TestBuildError(RunbotCase):
 
     def create_test_build(self, vals):
         create_vals = {
-            'branch_id': self.branch.id,
-            'name': 'deadbeaf0000ffffffffffffffffffffffffffff',
+            'params_id': self.base_params.id,
             'port': '1234',
             'local_result': 'ok'
         }
         create_vals.update(vals)
-        return self.create_build(create_vals)
-
+        return self.Build.create(create_vals)
 
     def setUp(self):
         super(TestBuildError, self).setUp()
-        repo = self.env['runbot.repo'].create({'name': 'bla@example.com:foo/bar'})
-        self.branch = self.env['runbot.branch'].create({
-            'repo_id': repo.id,
-            'name': 'refs/heads/master'
-        })
-
         self.BuildError = self.env['runbot.build.error']
 
     def test_build_scan(self):

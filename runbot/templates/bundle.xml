@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+<data>
+<template id="runbot.bundle">
+    <t t-call='website.layout'>
+        <div class="container-fluid">
+            <div class="row">
+                <div class='col-md-12'>
+                    <div class="navbar navbar-default">
+                        <span class="text-center" style="font-size: 18px;">
+                            <t t-esc="bundle.name"/> <i t-if="bundle.sticky" class="fa fa-star" style="color: #f0ad4e" />
+                        </span>
+                        <span class="pull-right"><t t-call="website.pager" /></span>
+                    </div>
+                    <div>
+                        <table class="table table-condensed table-responsive table-stripped">
+                            <tr><td>Version</td><td t-esc="bundle.version_id.name"/></tr>
+                            <tr><td>Branches</td><td>
+                                <div t-foreach="bundle.branch_ids.sorted(key=lambda b: (b.remote_id.repo_id.sequence, b.remote_id.repo_id.id, b.is_pr))" t-as="branch"><small>
+                                    <a t-att-href="branch.branch_url" t-esc="branch.dname"/>
+                                    <a t-if="more" class="fa fa-cog" t-attf-href="/web/#id={{branch.id}}&amp;view_type=form&amp;model=runbot.branch" target="new"/>
+                                </small></div>
+                            </td></tr>
+
+                            <tr t-if="more"><td>Category</td><td t-esc="bundle.project_id.name"/></tr>
+                            <tr t-if="more"><td>New build enabled</td><td><i t-attf-class="fa fa-{{'times' if bundle.no_build else 'check'}}"/></td></tr>
+                            <tr t-if="more"><td>Modules</td><td t-esc="bundle.modules or '/'"/></tr>
+                        </table>
+                    </div>
+                    <div t-foreach="bundle.consistency_warning()" t-as="warning" t-esc="warning[1]" t-attf-class="alert alert-{{warning[0]}}"/>
+                    <table class="table table-condensed table-stripped" style="table-layout: initial;">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th t-if="more">Create date</th>
+                                <th t-if="more">Last update</th>
+                                <th t-if="more">state</th>
+                                <th>Commits</th>
+                                <th>Builds</th>
+                            </tr>
+                        </thead>
+                        <t t-foreach="batchs" t-as="batch">
+                            <tr>
+                                <td><a t-attf-href="/runbot/batch/#{batch.id}">
+                                    <span class="badge badge-light" t-esc="batch.get_formated_age()"/>
+                                </a></td>
+                                <td t-if="more" t-esc="batch.create_date"></td>
+                                <td t-esc="batch.last_update" t-if="more"></td>
+                                <td t-esc="batch.state" t-if="more"></td>
+                                <td>
+                                    <t t-foreach="batch.commit_link_ids.sorted(lambda cl: (cl.commit_id.repo_id.sequence, cl.commit_id.repo_id.id))" t-as="commit_link">
+                                        <a t-attf-href="/runbot/commit/#{commit_link.commit_id.id}">
+                                            <samp class="badge badge-info">
+                                              <i class="fa fa-fw fa-hashtag" t-if="commit_link.match_type == 'new'"/>
+                                                <i class="fa fa-fw fa-refresh" t-if="commit_link.match_type == 'head'"/>
+                                                <i class="fa fa-fw fa-clock-o" t-if="commit_link.match_type == 'base_match'"/>
+                                                <i class="fa fa-fw fa-code-fork" t-if="commit_link.match_type == 'base_head'"/>
+                                                <t t-esc="commit_link.commit_id.dname"/>
+                                            </samp>
+                                        </a>
+                                    </t>
+                                </td>
+                                <t t-if="batch.state=='preparing'"><t t-set="klass">default</t></t>
+                                <t t-if="batch.state=='ready'"><t t-set="klass">success</t></t>
+                                <td t-attf-class="bg-{{klass}}-light">
+                                    <t t-foreach="batch.slot_ids" t-as="slot">
+                                        <t t-call="runbot.slot_button"/>
+                                    </t>
+                                </td>
+                            </tr>
+                        </t>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </t>
+</template>
+<template id="runbot.batch">
+   <t t-call='website.layout'>
+        <div class="table-responsive">
+            <table class="table table-stripped">
+                <tr><td>Bundle</td><td><a t-esc="batch.bundle_id.name" t-attf-href="/runbot/bundle/{{batch.bundle_id.id}}"/></td></tr>
+                <tr t-if="batch.category_id.id != default_category"><td>Category</td><td t-esc="batch.category_id.name"><i t-attf-class="fa fa-{{batch.category_id.name}}"/></td></tr>
+                <tr><td>Version</td><td t-esc="batch.slot_ids[0].params_id.version_id.name if batch.slot_ids else batch.bundle_id.version_id.name"/></tr>
+                <tr><td>State</td><td t-esc="batch.state"/></tr>
+                <tr><td>Create date</td><td t-esc="batch.create_date"/></tr>
+                <tr t-if="more"><td>Last update</td><td><t t-esc="batch.last_update"/> <span class="badge badge-info" t-esc="s2human(batch.last_update - batch.create_date)"/></td></tr>
+                <tr t-att-class="'bg-info-light' if batch.state=='preparing' else 'bg-success-light' if not any(log.level != 'INFO' for log in batch.log_ids) else 'bg-warning-light'"><td>Commits</td><td>
+                <div t-foreach="batch.commit_link_ids.sorted(key=lambda lc: (lc.commit_id.repo_id.sequence, lc.commit_id.repo_id.id))" t-as="commit_link">
+                    <t t-set="commit" t-value="commit_link.commit_id"/>
+                    <span></span>
+                    <a t-attf-href="/runbot/commit/#{commit.id}">
+                        <i class="fa fa-fw fa-hashtag" t-if="commit_link.match_type == 'new'"/>
+                        <i class="fa fa-fw fa-refresh" t-if="commit_link.match_type == 'head'"/>
+                        <i class="fa fa-fw fa-clock-o" t-if="commit_link.match_type == 'base_match'"/>
+                        <i class="fa fa-fw fa-code-fork" t-if="commit_link.match_type == 'base_head'"/>
+                        <span class="label" t-esc="commit.dname"/>
+                    </a>
+                    <small t-if="commit_link.match_type and commit_link.match_type.startswith('base')">
+                        from base: <span t-esc="commit_link.branch_id.name"/><br/>
+                    </small>
+                    <small t-else="">
+                        found in branch <span t-esc="commit_link.branch_id.name"/>
+                        <t t-if="batch.state != 'preparing'">
+                            <span t-esc="'+%s' % commit_link.diff_add" class="text-success"></span>
+                            <span t-esc="'-%s' % commit_link.diff_remove" class="text-danger"></span>
+                            <span class="text-info">(<span t-esc="commit_link.file_changed"/> <i class="fa fa-file"/>)</span>
+                        </t>
+                        <br/>
+                        <t t-if="more">
+                            Base head: <span t-esc="commit_link.base_commit_id.name"/><br/>
+                            Merge base: <span t-esc="commit_link.merge_base_commit_id.name"/>
+                            (<span t-esc="'%s ahead' % commit_link.base_ahead" class="text-success"></span>,
+                            <span t-esc="'%s behind' % commit_link.base_behind" class="text-danger"></span>)<br/>
+                        </t>
+                    </small>
+                    <t t-if="more or not (commit_link.match_type and commit_link.match_type.startswith('base'))">
+                        Subject:  <span t-esc="commit.subject"/><br/>
+                        Author: <span t-esc="commit.author"/> (<span t-esc="commit.author_email"/>)<br/>
+                        <t t-if="commit.author != commit.committer">
+                            Committer: <span t-esc="commit.committer"/>(<span t-esc="commit.author_email"/>)<br/>
+                        </t>
+                        Commit date: <span t-esc="commit.date"/><br/>
+                    </t>
+                    <hr/>
+                </div>
+                </td></tr>
+                <tr><td>Builds</td><td>
+                    <t t-foreach="batch.slot_ids" t-as="slot">
+                        <t t-call="runbot.slot_button"/>
+                    </t>
+                </td></tr>
+            </table>
+        </div>
+        <div>TODO: Links, rebuild, wizard, launch empty slots, ...</div>
+        <t t-foreach="batch.log_ids" t-as="log">
+            <t t-set="logclass" t-value="dict(ERROR='danger', WARNING='warning', INFO='info').get(log.level, 'warning')"/>
+            <div t-attf-class="alert alert-{{logclass}}"><b t-esc="log.level"/> -- <span t-esc="log.message"/></div>
+        </t>
+    </t>
+</template>
+</data>
+</odoo>

@@ -1,0 +1,25 @@
+
+<odoo>
+<data>
+<template id="runbot.commit">
+   <t t-call='website.layout'>
+            <table class="table table-stripped">
+                <tr><td>Name</td><td><a t-att-href="'' if not reflogs else 'https://%s/commit/%s' % (reflogs[0].branch_id.remote_id.base_url, commit.name)" t-esc="commit.name"/></td></tr>
+                <tr><td>Repo</td><td t-esc="commit.repo_id.name"/></tr>
+                <tr><td>Subject</td><td t-esc="commit.subject"/></tr>
+                <tr><td>Date</td><td t-esc="commit.date"/></tr>
+                <tr><td>Author</td><td><t t-esc="commit.author"/> <small t-esc="commit.author_email"/></td></tr>
+                <tr t-if="commit.author != commit.committer"><td>Commiter</td><td><t t-esc="commit.committer"/> <small t-esc="commit.committer_email"/></td></tr>
+            </table>
+            <h3>Branch presence history</h3>
+            <table class="table table-stripped">
+                <tr t-foreach='reflogs' t-as='reflog'>
+                    <td t-esc="reflog.date"/>
+                    <td t-esc="reflog.branch_id.remote_id.short_name"/>
+                    <td t-esc="reflog.branch_id.name"/>
+                </tr>
+            </table>
+    </t>
+</template>
+</data>
+</odoo>
