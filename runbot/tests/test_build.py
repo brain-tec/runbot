@@ -338,7 +338,7 @@ class TestBuildResult(RunbotCase):
         bundle_a.last_batch._prepare()
 
         # now we should have a build in pending state in the bundle
-        self.assertEqual(len(bundle_a.last_batch.slot_ids), 1)
+        self.assertEqual(len(bundle_a.last_batch.slot_ids), 2)
         build_a = bundle_a.last_batch.slot_ids[0].build_id
         self.assertEqual(build_a.global_state, 'pending')
 

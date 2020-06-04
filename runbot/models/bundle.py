@@ -65,7 +65,7 @@ class Bundle(models.Model):
     last_batchs = fields.Many2many('runbot.batch', 'Last batchs', compute='_compute_last_batchs')
     last_done_batch = fields.Many2many('runbot.batch', 'Last batchs', compute='_compute_last_done_batch')
 
-    sticky = fields.Boolean('Sticky', index=True)
+    sticky = fields.Boolean('Sticky', compute='_compute_sticky', store=True, index=True)
     is_base = fields.Boolean('Is base', index=True)
     defined_base_id = fields.Many2one('runbot.bundle', 'Forced base bundle', domain="[('project_id', '=', project_id), ('is_base', '=', True)]")
     base_id = fields.Many2one('runbot.bundle', 'Base bundle', compute='_compute_base_id', store=True)
@@ -85,6 +85,11 @@ class Bundle(models.Model):
         for bundle in self:
             bundle.make_stats = bundle.sticky
 
+    @api.depends('is_base')
+    def _compute_sticky(self):
+        for bundle in self:
+            bundle.sticky = bundle.is_base
+
     @api.depends('name', 'is_base', 'defined_base_id', 'base_id.is_base', 'project_id')
     def _compute_base_id(self):
         bases_by_project = {}
@@ -101,13 +106,15 @@ class Bundle(models.Model):
             else:
                 base_bundles = self.search([('is_base', '=', True), ('project_id', '=', project_id)])
                 bases_by_project[project_id] = base_bundles
-
+            master_base = False
             for candidate in base_bundles:
                 if bundle.name.startswith(candidate.name):
                     bundle.base_id = candidate
                     break
+                elif candidate.name == 'master':
+                    master_base = candidate
             else:
-                bundle.base_id = self.env['ir.model.data'].xmlid_to_res_id('runbot.bundle_master')
+                bundle.base_id = master_base
 
     @api.depends('is_base', 'base_id.version_id')
     def _compute_version_id(self):
@@ -205,17 +212,10 @@ class Bundle(models.Model):
                 batch.bundle_id.last_done_batch = batch
 
     def create(self, values_list):
-        # self.flush() # TODO check that
         return super().create(values_list)
-        #if any(values.get('is_base') for values in values_list):
-        #    (self.search([
-        #        ('project_id', 'in', self.mapped('project_id').ids),
-        #        ('is_base', '=', True)
-        #    ]) + self)._compute_previous_version_base_id()
 
     def write(self, values):
         super().write(values)
-        # self.flush() # TODO check that
 
     def _force(self):
         self.ensure_one()
@@ -379,6 +379,7 @@ class Batch(models.Model):
                         # add warning if bundle has warnings
 
         bundle = self.bundle_id
+
         # CHECK branch heads consistency
         branch_per_repo = {}
         for branch in bundle.branch_ids.sorted('is_pr', reverse=True):

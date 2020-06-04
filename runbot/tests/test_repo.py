@@ -53,8 +53,8 @@ class TestRepo(RunbotCase):
         are created and new builds are created in pending state
         """
 
-        max_bundle_id = self.env['runbot.bundle'].search([], order ='id desc', limit=1).id or 0
-
+        self.minimal_setup()
+        max_bundle_id = self.env['runbot.bundle'].search([], order='id desc', limit=1).id or 0
 
         branch_name = 'master-test'
         def counter():
@@ -145,7 +145,7 @@ class TestRepo(RunbotCase):
         # Create Batches
         repos._update_batches()
 
-        pull_request = self.env['runbot.branch'].search([('remote_id', '=', self.remote_server.id)])
+        pull_request = self.env['runbot.branch'].search([('remote_id', '=', self.remote_server.id), ('id', '!=', self.branch_server.id)])
         self.assertEqual(pull_request.bundle_id, bundle)
 
         self.assertEqual(dev_branch.head_name, 'd0d0caca')
@@ -153,7 +153,6 @@ class TestRepo(RunbotCase):
         self.assertEqual(addons_dev_branch.head_name, 'deadbeef')
 
         self.assertEqual(dev_branch, self.env['runbot.branch'].search([('remote_id', '=', self.remote_server_dev.id)]))
-        self.assertEqual(pull_request, self.env['runbot.branch'].search([('remote_id', '=', self.remote_server.id)]))
         self.assertEqual(addons_dev_branch, self.env['runbot.branch'].search([('remote_id', '=', self.remote_addons_dev.id)]))
 
         batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
@@ -188,7 +187,7 @@ class TestRepo(RunbotCase):
         repos._update_batches()
 
         self.assertEqual(dev_branch, self.env['runbot.branch'].search([('remote_id', '=', self.remote_server_dev.id)]))
-        self.assertEqual(pull_request, self.env['runbot.branch'].search([('remote_id', '=', self.remote_server.id)]))
+        self.assertEqual(pull_request + self.branch_server, self.env['runbot.branch'].search([('remote_id', '=', self.remote_server.id)]))
         self.assertEqual(addons_dev_branch, self.env['runbot.branch'].search([('remote_id', '=', self.remote_addons_dev.id)]))
 
         batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
@@ -332,9 +331,12 @@ class TestGithub(TransactionCase):
 
         #self.assertEqual(remote_server._github('/repos/:owner/:repo/statuses/abcdef', dict(), ignore_errors=True), None, 'A repo without token should return None')
         remote_server.token = 'abc'
-        with patch('odoo.addons.runbot.models.repo.requests.Session') as mock_session:
+
+        import requests
+        with patch('odoo.addons.runbot.models.repo.requests.Session') as mock_session, patch('time.sleep') as mock_sleep:
+            mock_sleep.return_value = None
             with self.assertRaises(Exception, msg='should raise an exception with ignore_errors=False'):
-                mock_session.return_value.post.side_effect = Exception('301: Bad gateway')
+                mock_session.return_value.post.side_effect = requests.HTTPError('301: Bad gateway')
                 remote_server._github('/repos/:owner/:repo/statuses/abcdef', {'foo': 'bar'}, ignore_errors=False)
 
             mock_session.return_value.post.reset_mock()
@@ -345,7 +347,7 @@ class TestGithub(TransactionCase):
             self.assertEqual(2, mock_session.return_value.post.call_count, "_github method should try two times by default")
 
             mock_session.return_value.post.reset_mock()
-            mock_session.return_value.post.side_effect = [Exception('301: Bad gateway'), Mock()]
+            mock_session.return_value.post.side_effect = [requests.HTTPError('301: Bad gateway'), Mock()]
             with self.assertLogs(logger='odoo.addons.runbot.models.repo') as assert_log:
                 remote_server._github('/repos/:owner/:repo/statuses/abcdef', {'foo': 'bar'}, ignore_errors=True)
                 self.assertIn('Success after 2 tries', assert_log.output[0])

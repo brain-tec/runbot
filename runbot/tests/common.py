@@ -43,7 +43,7 @@ class RunbotCase(TransactionCase):
     def minimal_setup(self):
         """Helper that setup a the repos with base branches and heads"""
 
-        self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_is_base_regex', r'^(master)|(saas-)?\d+\.\d+$')
+        self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_is_base_regex', r'^((master)|(saas-)?\d+\.\d+)$')
 
         initial_server_commit = self.Commit.create({
             'name': 'aaaaaaa',
@@ -54,64 +54,70 @@ class RunbotCase(TransactionCase):
             'author_email': 'puprly@somewhere.com'
         })
 
-        branch_server = self.Branch.create({
+        self.branch_server = self.Branch.create({
             'name': 'master',
             'remote_id': self.remote_server.id,
             'is_pr': False,
             'head': initial_server_commit.id,
         })
-        self.assertEqual(branch_server.bundle_id.name, 'master')
-
-        initial_server_dev_commit = self.Commit.create({
-            'name': 'bbbbbb',
-            'repo_id': self.repo_server.id,
-            'date': '2014-05-26',
-            'subject': 'Please use the right repo',
-            'author': 'oxo',
-            'author_email': 'oxo@somewhere.com'
-        })
-
-        branch_server_dev = self.Branch.create({
-            'name': 'master',
-            'remote_id': self.remote_server_dev.id,
-            'is_pr': False,
-            'head': initial_server_dev_commit.id
-        })
-        self.assertEqual(branch_server_dev.bundle_id.name, 'Dummy')
-
+        self.assertEqual(self.branch_server.bundle_id.name, 'master')
+        self.branch_server.bundle_id.is_base = True
         initial_addons_commit = self.Commit.create({
             'name': 'cccccc',
-            'repo_id': self.repo_server.id,
+            'repo_id': self.repo_addons.id,
             'date': '2015-03-12',
             'subject': 'Initial commit',
             'author': 'someone',
             'author_email': 'someone@somewhere.com'
         })
 
-        branch_addons = self.Branch.create({
+        self.branch_addons = self.Branch.create({
             'name': 'master',
             'remote_id': self.remote_addons.id,
             'is_pr': False,
             'head': initial_addons_commit.id,
         })
-        self.assertEqual(branch_addons.bundle_id.name, 'master')
+        self.assertEqual(self.branch_addons.bundle_id, self.branch_server.bundle_id)
+        triggers = self.env['runbot.trigger'].search([])
 
-        initial_addons_dev_commit = self.Commit.create({
-            'name': 'dddddd',
-            'repo_id': self.repo_addons.id,
-            'date': '2015-09-30',
-            'subject': 'Please use the right repo',
-            'author': 'oxo',
-            'author_email': 'oxo@somewhere.com'
-        })
+        self.assertEqual(triggers.repo_ids + triggers.dependency_ids, self.remote_addons.repo_id + self.remote_server.repo_id)
 
-        branch_addons_dev = self.Branch.create({
-            'name': 'master',
-            'remote_id': self.remote_addons_dev.id,
-            'is_pr': False,
-            'head': initial_addons_dev_commit.id
-        })
-        self.assertEqual(branch_addons_dev.bundle_id.name, 'Dummy')
+        self.branch_addons.bundle_id._force()
+
+        #initial_addons_dev_commit = self.Commit.create({
+        #    'name': 'dddddd',
+        #    'repo_id': self.repo_addons.id,
+        #    'date': '2015-09-30',
+        #    'subject': 'Please use the right repo',
+        #    'author': 'oxo',
+        #    'author_email': 'oxo@somewhere.com'
+        #})
+#
+        #branch_addons_dev = self.Branch.create({
+        #    'name': 'master',
+        #    'remote_id': self.remote_addons_dev.id,
+        #    'is_pr': False,
+        #    'head': initial_addons_dev_commit.id
+        #})
+        #self.assertEqual(branch_addons_dev.bundle_id.name, 'Dummy')
+
+
+        #initial_server_dev_commit = self.Commit.create({
+        #    'name': 'bbbbbb',
+        #    'repo_id': self.repo_server.id,
+        #    'date': '2014-05-26',
+        #    'subject': 'Please use the right repo',
+        #    'author': 'oxo',
+        #    'author_email': 'oxo@somewhere.com'
+        #})
+
+        #branch_server_dev = self.Branch.create({
+        #    'name': 'master',
+        #    'remote_id': self.remote_server_dev.id,
+        #    'is_pr': False,
+        #    'head': initial_server_dev_commit.id
+        #})
+        #self.assertEqual(branch_server_dev.bundle_id.name, 'Dummy')
 
     def setUp(self):
         super(RunbotCase, self).setUp()
@@ -211,6 +217,8 @@ class RunbotCase(TransactionCase):
         self.start_patcher('set_psql_conn_count', 'odoo.addons.runbot.models.host.RunbotHost.set_psql_conn_count', None)
 
         self.start_patcher('reload_nginx', 'odoo.addons.runbot.models.runbot.Runbot._reload_nginx', None)
+
+        self.start_patcher('reload_nginx', 'odoo.addons.runbot.models.bundle.Batch._update_commits_infos', None)
 
     def start_patcher(self, patcher_name, patcher_path, return_value=DEFAULT, side_effect=DEFAULT, new=DEFAULT):
 

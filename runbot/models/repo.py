@@ -170,6 +170,7 @@ class Remote(models.Model):
                             else:
                                 if ignore_errors:
                                     _logger.exception('Ignored github error %s %r (try %s/%s)', url, payload, try_count, nb_tries)
+                                    url = False
                                 else:
                                     raise
 

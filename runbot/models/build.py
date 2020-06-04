@@ -26,22 +26,10 @@ result_order = ['ok', 'warn', 'ko', 'skipped', 'killed', 'manually_killed']
 state_order = ['pending', 'testing', 'waiting', 'running', 'done']
 
 COPY_WHITELIST = [
-    "branch_id",
-    "repo_id",
-    "name",
+    "params_id",
     "description",
-    "date",
-    "author",
-    "author_email",
-    "committer",
-    "committer_email",
-    "subject",
-    "config_data",
-    "extra_params",
     "build_type",
     "parent_id",
-    "commit_link_ids",
-    "config_id",
     "orphan_result",
 ]
 
@@ -140,8 +128,6 @@ class BuildResult(models.Model):
     global_result = fields.Selection(make_selection(result_order), string='Result', compute='_compute_global_result', store=True)
     local_result = fields.Selection(make_selection(result_order), string='Build Result')
     triggered_result = fields.Selection(make_selection(result_order), string='Triggered Result')  # triggered by db only
-
-    last_github_state = fields.Char('Last github status', readonly=True)
 
     requested_action = fields.Selection([('wake_up', 'To wake up'), ('deathrow', 'To kill')], string='Action requested', index=True)
     # web infos
@@ -288,7 +274,7 @@ class BuildResult(models.Model):
 
     def copy_data(self, default=None):
         values = super().copy_data(default)[0]
-        values = {key: value for key, value in values.items() if key in COPY_WHITELIST}
+        values = {key: value for key, value in values.items() if (key in COPY_WHITELIST or key in default)}
         values.update({
             'host': 'PAUSED', # hack to keep the build in pending waiting for a manual update. Todo: add a paused state instead
             'local_state': 'pending',
@@ -302,8 +288,6 @@ class BuildResult(models.Model):
             build._github_status()
         return builds
 
-    def copy(self, default=None):
-        return super().copy(default)
 
     def write(self, values):
         # some validation to ensure db consistency

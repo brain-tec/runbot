@@ -168,9 +168,10 @@ class TestBranchIsBase(RunbotCase):
                 'name': 'saas-13.4',
                 'is_pr': False,
             })
-        self.assertTrue(branch.bundle_id.sticky, "A branch matching the is_base_regex parameter should create sticky bundle")
         self.assertTrue(branch.bundle_id.is_base, "A branch matching the is_base_regex parameter should create is_base bundle")
+        self.assertTrue(branch.bundle_id.sticky, "A branch matching the is_base_regex parameter should create sticky bundle")
 
+    @mute_logger("odoo.addons.runbot.models.branch")
     def test_is_base_regex_on_dev_remote(self):
         dummy_bundle = self.env.ref('runbot.bundle_dummy')
         branch = self.Branch.create({

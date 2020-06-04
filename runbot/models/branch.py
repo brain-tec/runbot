@@ -34,6 +34,9 @@ class Branch(models.Model):
     # alive = fields.Boolean('Alive', default=True)
     # TODO branch exist or not, pr is open or not. Should replace old _is_on_remote behaviour
 
+
+    # TODO add constrains head.repo_id == branch.remote_id.repo_id
+
     @api.depends('name', 'remote_id.short_name')
     def _compute_dname(self):
         for branch in self:
@@ -133,12 +136,24 @@ class Branch(models.Model):
             project = branch.remote_id.repo_id.project_id
             project.ensure_one()
             bundle = self.env['runbot.bundle'].search([('name', '=', name), ('project_id', '=', project.id)])
-            forbidden = branch.remote_id.repo_id._is_branch_forbidden(name)
-            if not bundle and not forbidden:
+            need_new_base = not bundle and branch.match_is_base(name)
+            if (bundle.is_base or need_new_base) and branch.remote_id != branch.remote_id.repo_id.main_remote_id:
+                _logger.warning('Trying to add a dev branch to base bundle, falling back on dummy bundle')
+                bundle = dummy
+            elif branch.remote_id.repo_id._is_branch_forbidden(name):
+                _logger.warning('Trying to add a forbidden branch, falling back on dummy bundle')
+                bundle = dummy
+            elif bundle.is_base and branch.is_pr:
+                _logger.warning('Trying to add pr to base bundle, falling back on dummy bundle')
+                bundle = dummy
+            elif not bundle:
                 values = {
                     'name': name,
                     'project_id': project.id,
                 }
+                if need_new_base:
+                    values['is_base'] = True
+
                 if branch.is_pr and branch.target_branch_name:  # most likely external_pr, use target as version
                     base = self.env['runbot.bundle'].search([
                         ('name', '=', branch.target_branch_name),
@@ -148,21 +163,7 @@ class Branch(models.Model):
                     if base:
                         values['defined_base_id'] = base.id
                 bundle = self.env['runbot.bundle'].create(values)
-            elif bundle.is_base and branch.is_pr:
-                _logger.warning('Trying to add pr to base_project, falling back on dummy bundle')
-                bundle = dummy
-            elif forbidden:
-                _logger.warning('Trying to add a forbidden branch, falling back on dummy bundle')
-                bundle = dummy
 
-            if self.match_is_base(name) and bundle != dummy:
-                if branch.remote_id == branch.remote_id.repo_id.main_remote_id:
-                    bundle.write({
-                        'is_base': True,
-                        'sticky': True
-                    })
-                else:
-                    bundle = dummy
             branch.bundle_id = bundle
 
     def create(self, value_list):
