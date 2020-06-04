@@ -48,6 +48,7 @@
             <tree string="Bundle">
                 <field name="project_id"/>
                 <field name="name"/>
+                <field name="version_number"/>
                 <field name="is_base"/>
                 <field name="sticky"/>
                 <field name="no_build"/>
@@ -92,6 +93,16 @@
         </field>
     </record>
 
+    <record id="view_runbot_version_tree" model="ir.ui.view">
+        <field name="model">runbot.version</field>
+        <field name="arch" type="xml">
+            <tree string="Version">
+                <field name="name"/>
+                <field name="number"/>
+                <field name="is_major"/>
+            </tree>
+        </field>
+    </record>
 
     <record id="action_bundle" model="ir.actions.act_window">
         <field name="name">Bundles</field>

@@ -23,14 +23,15 @@
       </record>
 
       <record id="repo_trigger_catgory_form" model="ir.ui.view">
-        <field name="name">runbot.trigger.category.form</field>
-        <field name="model">runbot.trigger.category</field>
+        <field name="name">runbot.category.form</field>
+        <field name="model">runbot.category</field>
         <field name="arch" type="xml">
           <form>
             <sheet>
               <group name="category_group">
                 <field name="name"/>
                 <field name="icon"/>
+                <field name="view_id"/>
               </group>
             </sheet>
           </form>
@@ -135,7 +136,7 @@
 
     <record id="runbot_triggers_category_action" model="ir.actions.act_window">
         <field name="name">Trigger Categories</field>
-        <field name="res_model">runbot.trigger.category</field>
+        <field name="res_model">runbot.category</field>
         <field name="view_mode">tree,form</field>
     </record>
 

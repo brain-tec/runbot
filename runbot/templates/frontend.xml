@@ -204,11 +204,17 @@
                         <b t-esc="bundle.name"/>
                       </a>
                       <br/>
-                      <t t-if="bundle.sticky" t-foreach="categories" t-as="category">
-                        <a t-if="active_category_id != category.id"
-                          t-attf-href="/runbot/batch/{{bundle.with_context(category_id=category.id).last_done_batch.id}}"
-                          t-attf-class="fa fa-{{category.icon}}"
-                          />
+                      <t t-foreach="categories" t-as="category">
+                        <t t-if="active_category_id != category.id">
+                          <t t-set="last_category_batch" t-value="bundle.with_context(category_id=category.id).last_done_batch"/>
+                          <t t-if="last_category_batch">
+                            <t t-if="category.view_id" t-call="{{category.view_id.key}}"/>
+                            <a t-else=""
+                              t-attf-href="/runbot/batch/{{last_category_batch.id}}"
+                              t-attf-class="fa fa-{{category.icon}}"
+                              />
+                          </t>
+                        </t>
                       </t>
                     </div>
                   </div>

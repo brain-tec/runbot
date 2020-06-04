@@ -21,8 +21,8 @@ def _sanitize(name):
     return name
 
 
-#  TODO access rights. 
-# -- Trigger group: filter displayed build slots. 
+#  TODO access rights.
+# -- Trigger group: filter displayed build slots.
 # -- Project group: forbid acces to all related ressources (commit, build, bundle, batch, ...)
 
 
@@ -41,18 +41,19 @@ class RepoTrigger(models.Model):
     dependency_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_dependencies', string="Dependencies")
     config_id = fields.Many2one('runbot.build.config', string="Config", required=True)
     ci_context = fields.Char("Ci context", default='ci/runbot')
-    category_id = fields.Many2one('runbot.trigger.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
+    category_id = fields.Many2one('runbot.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
     version_ids = fields.Many2many('runbot.version', string="Allowed version ids", help="Only allow for versions, leave empty fo all")
     group_ids = fields.Many2many('res.groups', string='Limited to groups')
     hide = fields.Boolean('Hide batch on main page')
 
 
 class Category(models.Model):
-    _name = 'runbot.trigger.category'
+    _name = 'runbot.category'
     _description = 'Trigger category'
 
     name = fields.Char("Name")
     icon = fields.Char("Font awesome icon")
+    view_id = fields.Many2one('ir.ui.view', "Link template")
 
 
 class Remote(models.Model):
@@ -120,7 +121,7 @@ class Remote(models.Model):
         return res
 
     def _github(self, url, payload=None, ignore_errors=False, nb_tries=2, recursive=False):
-        generator = self._github_generator(url, payload=payload, ignore_errors=ignore_errors, nb_tries=2, recursive=recursive)
+        generator = self._github_generator(url, payload=payload, ignore_errors=ignore_errors, nb_tries=nb_tries, recursive=recursive)
         if recursive:
             return generator
         result = list(generator)
@@ -171,7 +172,6 @@ class Remote(models.Model):
                                     _logger.exception('Ignored github error %s %r (try %s/%s)', url, payload, try_count, nb_tries)
                                 else:
                                     raise
-
 
 
 class Repo(models.Model):

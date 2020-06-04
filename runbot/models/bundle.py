@@ -17,7 +17,7 @@ class Version(models.Model):
     _description = "Version"
 
     name = fields.Char('Version name')
-    number = fields.Char('Comparable version number', compute='_compute_version_number', store=True)
+    number = fields.Char('Version number', compute='_compute_version_number', store=True, help="Usefull to sort by version")
     is_major = fields.Char('Is major version', compute='_compute_version_number', store=True)
 
     @api.depends('name')
@@ -272,7 +272,7 @@ class Batch(models.Model):
     state = fields.Selection([('preparing', 'Preparing'), ('ready', 'Ready'), ('done', 'Done')])
     hidden = fields.Boolean('Hidden', default=False)
     age = fields.Integer(compute='_compute_age', string='Build age')
-    category_id = fields.Many2one('runbot.trigger.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
+    category_id = fields.Many2one('runbot.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
     log_ids = fields.One2many('runbot.batch.log', 'batch_id')
 
     @api.depends('create_date')

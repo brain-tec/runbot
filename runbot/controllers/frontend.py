@@ -51,6 +51,8 @@ def route(routes, **kw):
             response.qcontext['current_path'] = request.httprequest.full_path
             response.qcontext['refresh'] = refresh
             response.qcontext['qu'] = QueryURL('/runbot/%s' % (slug(project)), path_args=['search'], search=search, refresh=refresh)
+            if 'title' not in response.qcontext:
+                response.qcontext['title'] = 'Runbot %s' % project.name or ''
 
             return response
         return response_wrap
@@ -97,7 +99,7 @@ class Runbot(Controller):
     def bundles(self, project=None, search='', projects=False, refresh=False, **kwargs):
         search = search if len(search) < 60 else search[:60]
         env = request.env
-        categories = env['runbot.trigger.category'].search([])
+        categories = env['runbot.category'].search([])
         if not project and projects:
             project = projects[0]
 
@@ -179,7 +181,8 @@ class Runbot(Controller):
             'bundle': bundle,
             'batchs': batchs,
             'pager': pager,
-            'project': bundle.project_id
+            'project': bundle.project_id,
+            'title': 'Bundle %s' % bundle.name
             }
 
         return request.render('runbot.bundle', context)
@@ -198,6 +201,7 @@ class Runbot(Controller):
         context = {
             'batch': batch,
             'project': batch.bundle_id.project_id,
+            'title': 'Batch %s (%s)' % (batch.id, batch.bundle_id.name)
         }
         return request.render('runbot.batch', context)
 
@@ -206,7 +210,8 @@ class Runbot(Controller):
         context = {
             'commit': commit,
             'project': commit.repo_id.project_id,
-            'reflogs': request.env['runbot.ref.log'].search([('commit_id', '=', commit.id)])
+            'reflogs': request.env['runbot.ref.log'].search([('commit_id', '=', commit.id)]),
+            'title': 'Commit %s' % commit.name[:8]
         }
         return request.render('runbot.commit', context)
 
@@ -238,6 +243,7 @@ class Runbot(Controller):
             'build': build,
             'default_category': request.env['ir.model.data'].xmlid_to_res_id('runbot.default_category'),
             'project': build.params_id.trigger_id.project_id,
+            'title': 'Build %s' % build.id
         }
         return request.render("runbot.build", context)
 
@@ -249,6 +255,7 @@ class Runbot(Controller):
             'pending_total': pending[0],
             'pending_level': pending[1],
             'bundles': bundles,
+            'title': 'Glances'
         }
         return request.render("runbot.glances", qctx)
 
@@ -259,12 +266,12 @@ class Runbot(Controller):
         pending = self._pending()
         hosts_data = request.env['runbot.host'].search([])
         if category_id:
-            category = request.env['runbot.trigger.category'].browse(category_id)
+            category = request.env['runbot.category'].browse(category_id)
             assert category.exists()
         else:
             category = request.env.ref('runbot.nightly_category')
             category_id = category.id
-        bundles = request.env['runbot.bundle'].search([('sticky', '=', True)]) # NOTE we dont filter on project
+        bundles = request.env['runbot.bundle'].search([('sticky', '=', True)])  # NOTE we dont filter on project
         qctx = {
             'category': category,
             'pending_total': pending[0],
@@ -274,36 +281,7 @@ class Runbot(Controller):
             'hosts_data': hosts_data,
             'auto_tags': request.env['runbot.build.error'].disabling_tags(),
             'build_errors': request.env['runbot.build.error'].search([('random', '=', True)]),
-            'kwargs': kwargs
+            'kwargs': kwargs,
+            'title': 'monitoring'
         }
         return request.render(view_id if view_id else "runbot.monitoring", qctx)
-
-    @route(['/runbot/config/<int:config_id>',
-            '/runbot/config/<config_name>'], type='http', auth="public", website=True)
-    def config(self, config_id=None, config_name=None, **kwargs):
-
-        if config_id:
-            monitored_config_id = config_id
-        else:
-            config = request.env['runbot.build.config'].search([('name', '=', config_name)], limit=1)
-            if config:
-                monitored_config_id = config.id
-            else:
-                raise UserError('Config name not found')
-
-        readable_repos = request.env['runbot.repo'].search([])
-        request.env.cr.execute("""SELECT DISTINCT ON (branch_id) branch_id, id FROM runbot_build
-                                WHERE config_id = %s
-                                AND global_state in ('running', 'done')
-                                AND branch_id in (SELECT id FROM runbot_branch where sticky='t' and repo_id in %s)
-                                AND local_state != 'duplicate'
-                                ORDER BY branch_id ASC, id DESC""", [int(monitored_config_id), tuple(readable_repos.ids)])
-        last_monitored = request.env['runbot.build'].browse([r[1] for r in request.env.cr.fetchall()])
-
-        config = request.env['runbot.build.config'].browse(monitored_config_id)
-        qctx = {
-            'config': config,
-            'last_monitored': last_monitored,  # nightly
-            'kwargs': kwargs
-        }
-        return request.render(config.monitoring_view_id.id or "runbot.config_monitoring", qctx)
