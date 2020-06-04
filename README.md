@@ -72,6 +72,7 @@ Then, launch runbot
 
 ```
 python3 odoo/odoo-bin -d runbot_database --addons-path odoo/addons,runbot --limit-memory-soft 4294967296 --limit-memory-hard 4311744512 --limit-time-real-cron=1800
+```
 
 Note:
 - --limit-time-real-cron is important to ensure that cron have enough time to build docker images and clone repos the first time. It may be reduced to a lower value later (600 is adviced).

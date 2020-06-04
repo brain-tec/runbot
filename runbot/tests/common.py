@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import datetime
+
 from odoo.tests.common import TransactionCase
 from unittest.mock import patch, DEFAULT
 
@@ -20,6 +22,96 @@ class RunbotCase(TransactionCase):
             else:
                 print('Unsupported mock command %s' % cmd)
         return mock_git
+
+    def push_commit(self, remote, branch_name, subject, sha=None, tstamp=None, committer=None, author=None):
+        """Helper to simulate a commit pushed"""
+
+        committer = committer or "Marc Bidule"
+        commiter_email = '%s@somewhere.com' % committer.lower().replace(' ', '_')
+        author = author or committer
+        author_email = '%s@somewhere.com' % author.lower().replace(' ', '_')
+        self.commit_list[self.repo_server.id] = [(
+            'refs/%s/heads/%s' % (remote.remote_name, branch_name),
+            sha or 'd0d0caca',
+            tstamp or datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
+            committer,
+            commiter_email,
+            subject,
+            author,
+            author_email)]
+
+    def minimal_setup(self):
+        """Helper that setup a the repos with base branches and heads"""
+
+        self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_is_base_regex', r'^(master)|(saas-)?\d+\.\d+$')
+
+        initial_server_commit = self.Commit.create({
+            'name': 'aaaaaaa',
+            'repo_id': self.repo_server.id,
+            'date': '2006-12-07',
+            'subject': 'New trunk',
+            'author': 'purply',
+            'author_email': 'puprly@somewhere.com'
+        })
+
+        branch_server = self.Branch.create({
+            'name': 'master',
+            'remote_id': self.remote_server.id,
+            'is_pr': False,
+            'head': initial_server_commit.id,
+        })
+        self.assertEqual(branch_server.bundle_id.name, 'master')
+
+        initial_server_dev_commit = self.Commit.create({
+            'name': 'bbbbbb',
+            'repo_id': self.repo_server.id,
+            'date': '2014-05-26',
+            'subject': 'Please use the right repo',
+            'author': 'oxo',
+            'author_email': 'oxo@somewhere.com'
+        })
+
+        branch_server_dev = self.Branch.create({
+            'name': 'master',
+            'remote_id': self.remote_server_dev.id,
+            'is_pr': False,
+            'head': initial_server_dev_commit.id
+        })
+        self.assertEqual(branch_server_dev.bundle_id.name, 'Dummy')
+
+        initial_addons_commit = self.Commit.create({
+            'name': 'cccccc',
+            'repo_id': self.repo_server.id,
+            'date': '2015-03-12',
+            'subject': 'Initial commit',
+            'author': 'someone',
+            'author_email': 'someone@somewhere.com'
+        })
+
+        branch_addons = self.Branch.create({
+            'name': 'master',
+            'remote_id': self.remote_addons.id,
+            'is_pr': False,
+            'head': initial_addons_commit.id,
+        })
+        self.assertEqual(branch_addons.bundle_id.name, 'master')
+
+        initial_addons_dev_commit = self.Commit.create({
+            'name': 'dddddd',
+            'repo_id': self.repo_addons.id,
+            'date': '2015-09-30',
+            'subject': 'Please use the right repo',
+            'author': 'oxo',
+            'author_email': 'oxo@somewhere.com'
+        })
+
+        branch_addons_dev = self.Branch.create({
+            'name': 'master',
+            'remote_id': self.remote_addons_dev.id,
+            'is_pr': False,
+            'head': initial_addons_dev_commit.id
+        })
+        self.assertEqual(branch_addons_dev.bundle_id.name, 'Dummy')
 
     def setUp(self):
         super(RunbotCase, self).setUp()
