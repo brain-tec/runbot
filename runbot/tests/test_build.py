@@ -75,8 +75,8 @@ class TestBuildParams(RunbotCaseMinimalSetup):
         })
         self.assertNotEqual(copied_params.id, params.id)
 
-    def test_default_build_config(self):
-        """Test that a build gets the Default build config"""
+    def test_trigger_build_config(self):
+        """Test that a build gets the build config from the trigger"""
         self.minimal_setup()
         self.start_patchers()
 
@@ -88,31 +88,38 @@ class TestBuildParams(RunbotCaseMinimalSetup):
         self.repo_server._update_batches()
 
         # prepare last_batch
-        bundle_a = self.env['runbot.bundle'].search([('name', '=', branch_a_name)])
-        bundle_a.last_batch._prepare()
-        default_config = self.env.ref('runbot.runbot_build_config_default')
-        self.assertEqual(bundle_a.last_batch.slot_ids[0].build_id.params_id.config_id, default_config)
+        bundle = self.env['runbot.bundle'].search([('name', '=', branch_a_name), ('project_id', '=', self.project.id)])
+        bundle.last_batch._prepare()
+        build_slot = bundle.last_batch.slot_ids.filtered(lambda rec: rec.trigger_id == self.trigger_server)
+        self.assertEqual(build_slot.build_id.params_id.config_id, self.trigger_server.config_id)
 
-    # TODO move to TestBuildParams
-    # def test_build_config_from_branch_testing(self):
-    #     """test build config_id is computed from branch"""
-    #     self.branch.config_id = self.env.ref('runbot.runbot_build_config_default_no_run')
-    #     build = self.Build.create({
-    #         'branch_id': self.branch.id,
-    #         'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-    #     })
-    #     self.assertEqual(build.config_id, self.branch.config_id, "config_id should be the same as the branch")
+    def test_custom_trigger_config(self):
+        """Test that a bundle with a custom trigger creates a build with approrioate config"""
+        self.minimal_setup()
+        self.start_patchers()
 
-    # TODO move to TestBuildParams
-    # def test_build_config_can_be_set(self):
-    #     """test build config_id can be set to something different than the one on the branch"""
-    #     self.branch.config_id = self.env.ref('runbot.runbot_build_config_default')
-    #     build = self.Build.create({
-    #         'branch_id': self.branch.id,
-    #         'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-    #         'config_id': self.env.ref('runbot.runbot_build_config_default_no_run').id
-    #     })
-    #     self.assertEqual(build.config_id, self.env.ref('runbot.runbot_build_config_default_no_run'), "config_id should be the one set on the build")
+        # A commit is found on the dev remote
+        branch_a_name = '10.0-test-something'
+        self.push_commit(self.remote_server_dev, branch_a_name, 'nice subject', sha='d0d0caca')
+        # batch preparation
+        self.repo_server._update_batches()
+
+        # create a custom config and a new trigger
+        custom_config = self.env['runbot.build.config'].create({'name': 'A Custom Config'})
+
+        # create a custom trigger for the bundle
+        bundle = self.Bundle.search([('name', '=', branch_a_name), ('project_id', '=', self.project.id)])
+
+        # create a custom trigger with the custom config linked to the bundle
+        self.env['runbot.trigger.custom'].create({
+            'trigger_id': self.trigger_server.id,
+            'bundle_id': bundle.id,
+            'config_id': custom_config.id
+        })
+
+        bundle.last_batch._prepare()
+        build_slot = bundle.last_batch.slot_ids.filtered(lambda rec: rec.trigger_id == self.trigger_server)
+        self.assertEqual(build_slot.build_id.params_id.config_id, custom_config)
 
 
 class TestBuildResult(RunbotCase):

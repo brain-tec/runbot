@@ -48,6 +48,7 @@ class RunbotCase(TransactionCase):
         self.Repo = self.env['runbot.repo']
         self.Remote = self.env['runbot.remote']
         self.Branch = self.env['runbot.branch']
+        self.Bundle = self.env['runbot.bundle']
         self.Version = self.env['runbot.version']
         self.Config = self.env['runbot.build.config']
         self.Commit = self.env['runbot.commit']
