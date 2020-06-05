@@ -159,8 +159,7 @@ class TestBranchIsBase(RunbotCase):
 
     def setUp(self):
         super(TestBranchIsBase, self).setUp()
-        icp = self.env['ir.config_parameter'].sudo()
-        icp.set_param('runbot.runbot_is_base_regex', r'^(saas-)?\d+\.\d+$')
+        self.minimal_setup()
 
     def test_is_base_regex_on_main_remote(self):
         branch = self.Branch.create({
@@ -173,10 +172,59 @@ class TestBranchIsBase(RunbotCase):
 
     @mute_logger("odoo.addons.runbot.models.branch")
     def test_is_base_regex_on_dev_remote(self):
+        """Test that a branch matching the is_base regex on a secondary remote goes to the dummy bundles."""
         dummy_bundle = self.env.ref('runbot.bundle_dummy')
-        branch = self.Branch.create({
-                'remote_id': self.remote_server_dev.id,
-                'name': 'saas-13.4',
-                'is_pr': False,
-            })
-        self.assertEqual(branch.bundle_id.id, dummy_bundle.id, "A branch matching the is_base_regex should on a secondary repo should goes in dummy bundle")
+
+        # master branch on dev remote
+        initial_addons_dev_commit = self.Commit.create({
+            'name': 'dddddd',
+            'repo_id': self.repo_addons.id,
+            'date': '2015-09-30',
+            'subject': 'Please use the right repo',
+            'author': 'oxo',
+            'author_email': 'oxo@somewhere.com'
+        })
+
+        branch_addons_dev = self.Branch.create({
+            'name': 'master',
+            'remote_id': self.remote_addons_dev.id,
+            'is_pr': False,
+            'head': initial_addons_dev_commit.id
+        })
+        self.assertEqual(branch_addons_dev.bundle_id, dummy_bundle, "A branch matching the is_base_regex should on a secondary repo should goes in dummy bundle")
+
+        # saas-12.3 branch on dev remote
+        initial_server_dev_commit = self.Commit.create({
+            'name': 'bbbbbb',
+            'repo_id': self.repo_server.id,
+            'date': '2014-05-26',
+            'subject': 'Please use the right repo',
+            'author': 'oxo',
+            'author_email': 'oxo@somewhere.com'
+        })
+
+        branch_server_dev = self.Branch.create({
+            'name': 'saas-12.3',
+            'remote_id': self.remote_server_dev.id,
+            'is_pr': False,
+            'head': initial_server_dev_commit.id
+        })
+        self.assertEqual(branch_server_dev.bundle_id, dummy_bundle, "A branch matching the is_base_regex should on a secondary repo should goes in dummy bundle")
+
+        # 12.0 branch on dev remote
+        mistaken_commit = self.Commit.create({
+            'name': 'eeeeee',
+            'repo_id': self.repo_server.id,
+            'date': '2015-06-27',
+            'subject': 'dummy commit',
+            'author': 'brol',
+            'author_email': 'brol@somewhere.com'
+        })
+
+        branch_mistake_dev = self.Branch.create({
+            'name': '12.0',
+            'remote_id': self.remote_server_dev.id,
+            'is_pr': False,
+            'head': mistaken_commit.id
+        })
+        self.assertEqual(branch_mistake_dev.bundle_id, dummy_bundle, "A branch matching the is_base_regex should on a secondary repo should goes in dummy bundle")

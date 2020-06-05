@@ -84,41 +84,6 @@ class RunbotCase(TransactionCase):
 
         self.branch_addons.bundle_id._force()
 
-        #initial_addons_dev_commit = self.Commit.create({
-        #    'name': 'dddddd',
-        #    'repo_id': self.repo_addons.id,
-        #    'date': '2015-09-30',
-        #    'subject': 'Please use the right repo',
-        #    'author': 'oxo',
-        #    'author_email': 'oxo@somewhere.com'
-        #})
-#
-        #branch_addons_dev = self.Branch.create({
-        #    'name': 'master',
-        #    'remote_id': self.remote_addons_dev.id,
-        #    'is_pr': False,
-        #    'head': initial_addons_dev_commit.id
-        #})
-        #self.assertEqual(branch_addons_dev.bundle_id.name, 'Dummy')
-
-
-        #initial_server_dev_commit = self.Commit.create({
-        #    'name': 'bbbbbb',
-        #    'repo_id': self.repo_server.id,
-        #    'date': '2014-05-26',
-        #    'subject': 'Please use the right repo',
-        #    'author': 'oxo',
-        #    'author_email': 'oxo@somewhere.com'
-        #})
-
-        #branch_server_dev = self.Branch.create({
-        #    'name': 'master',
-        #    'remote_id': self.remote_server_dev.id,
-        #    'is_pr': False,
-        #    'head': initial_server_dev_commit.id
-        #})
-        #self.assertEqual(branch_server_dev.bundle_id.name, 'Dummy')
-
     def setUp(self):
         super(RunbotCase, self).setUp()
         self.Project = self.env['runbot.project']
