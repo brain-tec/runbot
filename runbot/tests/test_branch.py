@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from odoo.tools import mute_logger
-from .common import RunbotCase
+from .common import RunbotCase, RunbotCaseMinimalSetup
+
 
 class TestBranch(RunbotCase):
 
@@ -154,7 +155,7 @@ class TestBranchForbidden(RunbotCase):
             self.assertEqual(branch.bundle_id.id, dummy_bundle.id, "A forbidden branch should goes in dummy bundle")
 
 
-class TestBranchIsBase(RunbotCase):
+class TestBranchIsBase(RunbotCaseMinimalSetup):
     """Test that a branch matching the is_base_regex goes in the right bundle"""
 
     def setUp(self):

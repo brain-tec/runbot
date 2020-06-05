@@ -40,50 +40,6 @@ class RunbotCase(TransactionCase):
             author,
             author_email)]
 
-    def minimal_setup(self):
-        """Helper that setup a the repos with base branches and heads"""
-
-        self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_is_base_regex', r'^((master)|(saas-)?\d+\.\d+)$')
-
-        initial_server_commit = self.Commit.create({
-            'name': 'aaaaaaa',
-            'repo_id': self.repo_server.id,
-            'date': '2006-12-07',
-            'subject': 'New trunk',
-            'author': 'purply',
-            'author_email': 'puprly@somewhere.com'
-        })
-
-        self.branch_server = self.Branch.create({
-            'name': 'master',
-            'remote_id': self.remote_server.id,
-            'is_pr': False,
-            'head': initial_server_commit.id,
-        })
-        self.assertEqual(self.branch_server.bundle_id.name, 'master')
-        self.branch_server.bundle_id.is_base = True
-        initial_addons_commit = self.Commit.create({
-            'name': 'cccccc',
-            'repo_id': self.repo_addons.id,
-            'date': '2015-03-12',
-            'subject': 'Initial commit',
-            'author': 'someone',
-            'author_email': 'someone@somewhere.com'
-        })
-
-        self.branch_addons = self.Branch.create({
-            'name': 'master',
-            'remote_id': self.remote_addons.id,
-            'is_pr': False,
-            'head': initial_addons_commit.id,
-        })
-        self.assertEqual(self.branch_addons.bundle_id, self.branch_server.bundle_id)
-        triggers = self.env['runbot.trigger'].search([])
-
-        self.assertEqual(triggers.repo_ids + triggers.dependency_ids, self.remote_addons.repo_id + self.remote_server.repo_id)
-
-        self.branch_addons.bundle_id._force()
-
     def setUp(self):
         super(RunbotCase, self).setUp()
         self.Project = self.env['runbot.project']
@@ -205,3 +161,64 @@ class RunbotCase(TransactionCase):
         if patcher_name in self.patcher_objects:
             self.patcher_objects[patcher_name].stop()
             del self.patcher_objects[patcher_name]
+
+
+class RunbotCaseMinimalSetup(RunbotCase):
+
+    def minimal_setup(self):
+        """Helper that setup a the repos with base branches and heads"""
+
+        self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_is_base_regex', r'^((master)|(saas-)?\d+\.\d+)$')
+
+        initial_server_commit = self.Commit.create({
+            'name': 'aaaaaaa',
+            'repo_id': self.repo_server.id,
+            'date': '2006-12-07',
+            'subject': 'New trunk',
+            'author': 'purply',
+            'author_email': 'puprly@somewhere.com'
+        })
+
+        self.branch_server = self.Branch.create({
+            'name': 'master',
+            'remote_id': self.remote_server.id,
+            'is_pr': False,
+            'head': initial_server_commit.id,
+        })
+        self.assertEqual(self.branch_server.bundle_id.name, 'master')
+        self.branch_server.bundle_id.is_base = True
+        initial_addons_commit = self.Commit.create({
+            'name': 'cccccc',
+            'repo_id': self.repo_addons.id,
+            'date': '2015-03-12',
+            'subject': 'Initial commit',
+            'author': 'someone',
+            'author_email': 'someone@somewhere.com'
+        })
+
+        self.branch_addons = self.Branch.create({
+            'name': 'master',
+            'remote_id': self.remote_addons.id,
+            'is_pr': False,
+            'head': initial_addons_commit.id,
+        })
+        self.assertEqual(self.branch_addons.bundle_id, self.branch_server.bundle_id)
+        triggers = self.env['runbot.trigger'].search([])
+
+        self.assertEqual(triggers.repo_ids + triggers.dependency_ids, self.remote_addons.repo_id + self.remote_server.repo_id)
+
+        self.branch_addons.bundle_id._force()
+
+    def start_patchers(self):
+        """Start necessary patchers for tests that use repo__update_batch() and batch._prepare()"""
+        def counter():
+            i = 100000
+            while True:
+                i += 1
+                yield i
+
+        # start patchers
+        self.start_patcher('repo_get_fetch_head_time_patcher', 'odoo.addons.runbot.models.repo.Repo._get_fetch_head_time')
+        self.patchers['repo_get_fetch_head_time_patcher'].side_effect = counter()
+        self.start_patcher('repo_update_patcher', 'odoo.addons.runbot.models.repo.Repo._update')
+        self.start_patcher('batch_update_commits_infos', 'odoo.addons.runbot.models.bundle.Batch._update_commits_infos')

@@ -9,12 +9,12 @@ import logging
 import odoo
 import time
 
-from .common import RunbotCase
+from .common import RunbotCase, RunbotCaseMinimalSetup
 
 _logger = logging.getLogger(__name__)
 
 
-class TestRepo(RunbotCase):
+class TestRepo(RunbotCaseMinimalSetup):
 
     def setUp(self):
         super(TestRepo, self).setUp()
@@ -46,30 +46,23 @@ class TestRepo(RunbotCase):
         self.assertEqual(remote.repo_name, 'bar')
 
 
-    @patch('odoo.addons.runbot.models.repo.Repo._get_fetch_head_time')
-    @patch('odoo.addons.runbot.models.repo.Repo._update')
-    def test_repo_update_batches(self, mock_update, mock_fetch_head_time):
+    def test_repo_update_batches(self):
         """ Test that when finding new refs in a repo, the missing branches
         are created and new builds are created in pending state
         """
 
         self.minimal_setup()
+        self.start_patchers()
         max_bundle_id = self.env['runbot.bundle'].search([], order='id desc', limit=1).id or 0
 
         branch_name = 'master-test'
-        def counter():
-            i = 100000
-            while True:
-                i += 1
-                yield i
-
 
         def github(url, ignore_errors):
             self.assertEqual(ignore_errors, False)
             self.assertEqual(url, '/repos/:owner/:repo/pulls/123')
             return {
-                'base' : {'ref': 'master'},
-                'head' : {'label': 'dev:%s' % branch_name, 'repo': {'full_name': 'dev/server'}},
+                'base': {'ref': 'master'},
+                'head': {'label': 'dev:%s' % branch_name, 'repo': {'full_name': 'dev/server'}},
             }
 
         repos = self.repo_addons|self.repo_server
@@ -86,8 +79,6 @@ class TestRepo(RunbotCase):
 
         self.commit_list[self.repo_server.id] = first_commit
 
-
-        mock_fetch_head_time.side_effect = counter()
         self.patchers['github_patcher'].side_effect = github
         repos._update_batches()
 

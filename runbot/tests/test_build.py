@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from odoo import fields
 from odoo.exceptions import UserError
-from .common import RunbotCase
+from .common import RunbotCase, RunbotCaseMinimalSetup
 
 
 def rev_parse(repo, branch_name):
@@ -18,7 +18,7 @@ def rev_parse(repo, branch_name):
     return head_hash
 
 
-class TestBuildParams(RunbotCase):
+class TestBuildParams(RunbotCaseMinimalSetup):
 
     def setUp(self):
         super(TestBuildParams, self).setUp()
@@ -74,6 +74,45 @@ class TestBuildParams(RunbotCase):
             ]
         })
         self.assertNotEqual(copied_params.id, params.id)
+
+    def test_default_build_config(self):
+        """Test that a build gets the Default build config"""
+        self.minimal_setup()
+        self.start_patchers()
+
+        # A commit is found on the dev remote
+        branch_a_name = '10.0-test-something'
+        self.push_commit(self.remote_server_dev, branch_a_name, 'nice subject', sha='d0d0caca')
+
+        # batch preparation
+        self.repo_server._update_batches()
+
+        # prepare last_batch
+        bundle_a = self.env['runbot.bundle'].search([('name', '=', branch_a_name)])
+        bundle_a.last_batch._prepare()
+        default_config = self.env.ref('runbot.runbot_build_config_default')
+        self.assertEqual(bundle_a.last_batch.slot_ids[0].build_id.params_id.config_id, default_config)
+
+    # TODO move to TestBuildParams
+    # def test_build_config_from_branch_testing(self):
+    #     """test build config_id is computed from branch"""
+    #     self.branch.config_id = self.env.ref('runbot.runbot_build_config_default_no_run')
+    #     build = self.Build.create({
+    #         'branch_id': self.branch.id,
+    #         'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+    #     })
+    #     self.assertEqual(build.config_id, self.branch.config_id, "config_id should be the same as the branch")
+
+    # TODO move to TestBuildParams
+    # def test_build_config_can_be_set(self):
+    #     """test build config_id can be set to something different than the one on the branch"""
+    #     self.branch.config_id = self.env.ref('runbot.runbot_build_config_default')
+    #     build = self.Build.create({
+    #         'branch_id': self.branch.id,
+    #         'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
+    #         'config_id': self.env.ref('runbot.runbot_build_config_default_no_run').id
+    #     })
+    #     self.assertEqual(build.config_id, self.env.ref('runbot.runbot_build_config_default_no_run'), "config_id should be the one set on the build")
 
 
 class TestBuildResult(RunbotCase):
@@ -237,36 +276,6 @@ class TestBuildResult(RunbotCase):
         self.assertEqual('server/server.py', cmd[1])
         self.assertEqual('python3', cmd[0])
 
-    # TODO move to TestBuildParams
-    # def test_build_config_from_branch_default(self):
-    #     """test build config_id is computed from branch default config_id"""
-    #     build = self.Build.create({
-    #         'branch_id': self.branch.id,
-    #         'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-    #     })
-    #     self.assertEqual(build.config_id, self.env.ref('runbot.runbot_build_config_default'))
-
-    # TODO move to TestBuildParams
-    # def test_build_config_from_branch_testing(self):
-    #     """test build config_id is computed from branch"""
-    #     self.branch.config_id = self.env.ref('runbot.runbot_build_config_default_no_run')
-    #     build = self.Build.create({
-    #         'branch_id': self.branch.id,
-    #         'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-    #     })
-    #     self.assertEqual(build.config_id, self.branch.config_id, "config_id should be the same as the branch")
-
-    # TODO move to TestBuildParams
-    # def test_build_config_can_be_set(self):
-    #     """test build config_id can be set to something different than the one on the branch"""
-    #     self.branch.config_id = self.env.ref('runbot.runbot_build_config_default')
-    #     build = self.Build.create({
-    #         'branch_id': self.branch.id,
-    #         'name': 'd0d0caca0000ffffffffffffffffffffffffffff',
-    #         'config_id': self.env.ref('runbot.runbot_build_config_default_no_run').id
-    #     })
-    #     self.assertEqual(build.config_id, self.env.ref('runbot.runbot_build_config_default_no_run'), "config_id should be the one set on the build")
-
     def test_build_gc_date(self):
         """ test build gc date and gc_delay"""
         build = self.Build.create({
@@ -303,99 +312,6 @@ class TestBuildResult(RunbotCase):
         build.job_end = datetime.datetime.now() - datetime.timedelta(days=31)
         build._local_cleanup()
         self.patchers['_local_pg_dropdb_patcher'].assert_called_with(dbname)
-
-    def test_repo_gc_testing(self):
-        """ test that builds are killed when room is needed on a host """
-
-        def counter():
-            i = 100000
-            while True:
-                i += 1
-                yield i
-
-        host = self.env['runbot.host'].create({
-            'name': 'runbot_xxx',
-            'nb_worker': 2
-        })
-
-        self.minimal_setup()
-
-        # start patchers
-        self.start_patcher('repo_get_fetch_head_time_patcher', 'odoo.addons.runbot.models.repo.Repo._get_fetch_head_time')
-        self.patchers['repo_get_fetch_head_time_patcher'].side_effect = counter()
-        self.start_patcher('repo_update_patcher', 'odoo.addons.runbot.models.repo.Repo._update')
-        self.start_patcher('batch_update_commits_infos', 'odoo.addons.runbot.models.bundle.Batch._update_commits_infos')
-
-        # A commit is found on the dev remote
-        branch_a_name = '10.0-test-something'
-        self.push_commit(self.remote_server_dev, branch_a_name, 'nice subject', sha='d0d0caca')
-
-        # batch preparation
-        self.repo_server._update_batches()
-
-        # prepare last_batch
-        bundle_a = self.env['runbot.bundle'].search([('name', '=', branch_a_name)])
-        bundle_a.last_batch._prepare()
-
-        # now we should have a build in pending state in the bundle
-        self.assertEqual(len(bundle_a.last_batch.slot_ids), 2)
-        build_a = bundle_a.last_batch.slot_ids[0].build_id
-        self.assertEqual(build_a.global_state, 'pending')
-
-        # now another commit is found in another branch
-        branch_b_name = '11.0-test-other-thing'
-        self.push_commit(self.remote_server_dev, branch_b_name, 'other subject', sha='cacad0d0')
-        self.repo_server._update_batches()
-        bundle_b = self.env['runbot.bundle'].search([('name', '=', branch_b_name)])
-        bundle_b.last_batch._prepare()
-
-        build_b = bundle_b.last_batch.slot_ids[0].build_id
-
-        # the two builds are starting tests on two different hosts
-        build_a.write({'local_state': 'testing', 'host': host.name})
-        build_b.write({'local_state': 'testing', 'host': 'runbot_yyy'})
-
-        # no room needed, verify that nobody got killed
-        self.Runbot._gc_testing(host)
-        self.assertFalse(build_a.requested_action)
-        self.assertFalse(build_b.requested_action)
-
-        # a new commit is pushed on branch_a
-        self.push_commit(self.remote_server_dev, branch_a_name, 'new subject', sha='d0cad0ca')
-        self.repo_server._update_batches()
-        bundle_a = self.env['runbot.bundle'].search([('name', '=', branch_a_name)])
-        bundle_a.last_batch._prepare()
-        build_a_last = bundle_a.last_batch.slot_ids[0].build_id
-        self.assertEqual(build_a_last.local_state, 'pending')
-        self.assertTrue(build_a.killable, 'The previous build in the batch should be killable')
-
-        # the build_b create a child build
-        children_b = self.Build.create({
-            'params_id': build_b.params_id.copy().id,
-            'parent_id': build_b.id,
-            'build_type': build_b.build_type,
-        })
-
-        # no room needed, verify that nobody got killed
-        self.Runbot._gc_testing(host)
-        self.assertFalse(build_a.requested_action)
-        self.assertFalse(build_b.requested_action)
-        self.assertFalse(build_a_last.requested_action)
-        self.assertFalse(children_b.requested_action)
-
-        # now children_b starts on runbot_xxx
-        children_b.write({'local_state': 'testing', 'host': host.name})
-
-        # we are  now in a situation where there is no more room on runbot_xxx
-        # and there is a pending build: build_a_last
-        # so we need to make room
-        self.Runbot._gc_testing(host)
-
-        # the killable build should have been marked to be killed
-        self.assertEqual(build_a.requested_action, 'deathrow')
-        self.assertFalse(build_b.requested_action)
-        self.assertFalse(build_a_last.requested_action)
-        self.assertFalse(children_b.requested_action)
 
     @patch('odoo.addons.runbot.models.build._logger')
     def test_build_skip(self, mock_logger):
@@ -521,6 +437,93 @@ class TestBuildResult(RunbotCase):
         assert_state('done', build1_2)
         assert_state('done', build1_1_1)
         assert_state('done', build1_1_2)
+
+
+class TestGc(RunbotCaseMinimalSetup):
+
+    def test_repo_gc_testing(self):
+        """ test that builds are killed when room is needed on a host """
+
+        self.minimal_setup()
+
+        self.start_patchers()
+
+        host = self.env['runbot.host'].create({
+            'name': 'runbot_xxx',
+            'nb_worker': 2
+        })
+
+        # A commit is found on the dev remote
+        branch_a_name = '10.0-test-something'
+        self.push_commit(self.remote_server_dev, branch_a_name, 'nice subject', sha='d0d0caca')
+
+        # batch preparation
+        self.repo_server._update_batches()
+
+        # prepare last_batch
+        bundle_a = self.env['runbot.bundle'].search([('name', '=', branch_a_name)])
+        bundle_a.last_batch._prepare()
+
+        # now we should have a build in pending state in the bundle
+        self.assertEqual(len(bundle_a.last_batch.slot_ids), 2)
+        build_a = bundle_a.last_batch.slot_ids[0].build_id
+        self.assertEqual(build_a.global_state, 'pending')
+
+        # now another commit is found in another branch
+        branch_b_name = '11.0-test-other-thing'
+        self.push_commit(self.remote_server_dev, branch_b_name, 'other subject', sha='cacad0d0')
+        self.repo_server._update_batches()
+        bundle_b = self.env['runbot.bundle'].search([('name', '=', branch_b_name)])
+        bundle_b.last_batch._prepare()
+
+        build_b = bundle_b.last_batch.slot_ids[0].build_id
+
+        # the two builds are starting tests on two different hosts
+        build_a.write({'local_state': 'testing', 'host': host.name})
+        build_b.write({'local_state': 'testing', 'host': 'runbot_yyy'})
+
+        # no room needed, verify that nobody got killed
+        self.Runbot._gc_testing(host)
+        self.assertFalse(build_a.requested_action)
+        self.assertFalse(build_b.requested_action)
+
+        # a new commit is pushed on branch_a
+        self.push_commit(self.remote_server_dev, branch_a_name, 'new subject', sha='d0cad0ca')
+        self.repo_server._update_batches()
+        bundle_a = self.env['runbot.bundle'].search([('name', '=', branch_a_name)])
+        bundle_a.last_batch._prepare()
+        build_a_last = bundle_a.last_batch.slot_ids[0].build_id
+        self.assertEqual(build_a_last.local_state, 'pending')
+        self.assertTrue(build_a.killable, 'The previous build in the batch should be killable')
+
+        # the build_b create a child build
+        children_b = self.Build.create({
+            'params_id': build_b.params_id.copy().id,
+            'parent_id': build_b.id,
+            'build_type': build_b.build_type,
+        })
+
+        # no room needed, verify that nobody got killed
+        self.Runbot._gc_testing(host)
+        self.assertFalse(build_a.requested_action)
+        self.assertFalse(build_b.requested_action)
+        self.assertFalse(build_a_last.requested_action)
+        self.assertFalse(children_b.requested_action)
+
+        # now children_b starts on runbot_xxx
+        children_b.write({'local_state': 'testing', 'host': host.name})
+
+        # we are  now in a situation where there is no more room on runbot_xxx
+        # and there is a pending build: build_a_last
+        # so we need to make room
+        self.Runbot._gc_testing(host)
+
+        # the killable build should have been marked to be killed
+        self.assertEqual(build_a.requested_action, 'deathrow')
+        self.assertFalse(build_b.requested_action)
+        self.assertFalse(build_a_last.requested_action)
+        self.assertFalse(children_b.requested_action)
+
 
 class TestClosestBranch(RunbotCase):
 
