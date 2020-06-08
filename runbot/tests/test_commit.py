@@ -23,8 +23,8 @@ class TestCommitStatus(HttpCase):
             'repo_id': self.repo_server.id
         })
 
-        self.simple_user = new_test_user(self.env, login='simple', name='simple', password='simple')
-        self.runbot_admin = new_test_user(self.env, groups='runbot.group_runbot_admin,base.group_user', login='runbot_admin', name='runbot_admin', password='admin')
+        self.simple_user = new_test_user(self.env, login='simple', name='simple', password='simple', context={'no_reset_password': True})
+        self.runbot_admin = new_test_user(self.env, groups='runbot.group_runbot_admin,base.group_user', login='runbot_admin', name='runbot_admin', password='admin', context={'no_reset_password': True})
 
     def test_commit_status_resend(self):
         """test commit status resend"""
