@@ -25,7 +25,7 @@ class TestBuildParams(RunbotCaseMinimalSetup):
 
     def test_params(self):
 
-        server_commit = self.Commit.create ({
+        server_commit = self.Commit.create({
             'name': 'dfdfcfcf0000ffffffffffffffffffffffffffff',
             'repo_id': self.repo_server.id
         })

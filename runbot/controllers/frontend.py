@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-import operator
+import datetime
 import werkzeug
 import logging
 import functools
 
-from collections import OrderedDict
-
 import werkzeug.utils
 import werkzeug.urls
+
+from werkzeug.exceptions import NotFound
 
 from odoo.addons.http_routing.models.ir_http import slug
 from odoo.addons.website.controllers.main import QueryURL
@@ -15,9 +15,8 @@ from odoo.addons.website.controllers.main import QueryURL
 from odoo.http import Controller, request, route as o_route
 from odoo.osv import expression
 
-from odoo.exceptions import UserError
-
 _logger = logging.getLogger(__name__)
+
 
 def route(routes, **kw):
     def decorator(f):
@@ -57,6 +56,7 @@ def route(routes, **kw):
             return response
         return response_wrap
     return decorator
+
 
 class Runbot(Controller):
 
@@ -166,7 +166,6 @@ class Runbot(Controller):
         '/runbot/bundle/<model("runbot.bundle"):bundle>/page/<int:page>'
         ], website=True, auth='public', type='http')
     def bundle(self, bundle=None, page=1, limit=50, **kwargs):
-        env = request.env
         domain = [('bundle_id', '=', bundle.id), ('hidden', '=', False)]
         batch_count = request.env['runbot.batch'].search_count(domain)
         pager = request.website.pager(
@@ -191,7 +190,7 @@ class Runbot(Controller):
         '/runbot/bundle/<model("runbot.bundle"):bundle>/force',
     ], type='http', auth="user", methods=['GET', 'POST'], csrf=False)
     def force_bundle(self, bundle, **post):
-        _logger.info('user %s forcing bundle %s', request.env.user.name, bundle.name) # user must be able to read bundle
+        _logger.info('user %s forcing bundle %s', request.env.user.name, bundle.name)  # user must be able to read bundle
         batch = bundle.sudo()._force()
         return werkzeug.utils.redirect('/runbot/batch/%s' % batch.id)
 
@@ -211,9 +210,24 @@ class Runbot(Controller):
             'commit': commit,
             'project': commit.repo_id.project_id,
             'reflogs': request.env['runbot.ref.log'].search([('commit_id', '=', commit.id)]),
+            'status_list': request.env['runbot.commit.status'].search([('commit_id', '=', commit.id)]),
             'title': 'Commit %s' % commit.name[:8]
         }
         return request.render('runbot.commit', context)
+
+    @o_route(['/runbot/commit/resend/<int:status_id>'], website=True, auth='user', type='http')
+    def resend_status(self, status_id=None, **kwargs):
+        CommitStatus = request.env['runbot.commit.status']
+        status = CommitStatus.browse(status_id)
+        if not status.exists():
+            raise NotFound()
+        last_status = CommitStatus.search([('commit_id', '=', status.commit_id.id)], order='id desc', limit=1)
+        if (datetime.datetime.now() - last_status.create_date).seconds > 60:  # ensure at least 60sec between two resend
+            new_status = status.copy()
+            new_status.description = 'Status resent by %s' % request.env.user.name
+            new_status._send()
+            _logger.info('github status %s resent by %s', status_id, request.env.user.name)
+        return werkzeug.utils.redirect('/runbot/commit/%s' % status.commit_id.id)
 
     @o_route([
         '/runbot/build/<int:build_id>/<operation>',

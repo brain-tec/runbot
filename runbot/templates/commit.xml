@@ -2,15 +2,37 @@
 <odoo>
 <data>
 <template id="runbot.commit">
-   <t t-call='website.layout'>
-            <table class="table table-stripped">
-                <tr><td>Name</td><td><a t-att-href="'' if not reflogs else 'https://%s/commit/%s' % (reflogs[0].branch_id.remote_id.base_url, commit.name)" t-esc="commit.name"/></td></tr>
-                <tr><td>Repo</td><td t-esc="commit.repo_id.name"/></tr>
-                <tr><td>Subject</td><td t-esc="commit.subject"/></tr>
-                <tr><td>Date</td><td t-esc="commit.date"/></tr>
-                <tr><td>Author</td><td><t t-esc="commit.author"/> <small t-esc="commit.author_email"/></td></tr>
-                <tr t-if="commit.author != commit.committer"><td>Commiter</td><td><t t-esc="commit.committer"/> <small t-esc="commit.committer_email"/></td></tr>
-            </table>
+  <t t-call='website.layout'>
+    <div class="row" >
+      <!-- Commit base informations -->
+      <div class="col-md-6">
+        <table class="table table-stripped">
+          <tr><td>Name</td><td><a t-att-href="'' if not reflogs else 'https://%s/commit/%s' % (reflogs[0].branch_id.remote_id.base_url, commit.name)" t-esc="commit.name"/></td></tr>
+          <tr><td>Repo</td><td t-esc="commit.repo_id.name"/></tr>
+          <tr><td>Subject</td><td t-esc="commit.subject"/></tr>
+          <tr><td>Date</td><td t-esc="commit.date"/></tr>
+          <tr><td>Author</td><td><t t-esc="commit.author"/> <small t-esc="commit.author_email"/></td></tr>
+          <tr t-if="commit.author != commit.committer"><td>Commiter</td><td><t t-esc="commit.committer"/> <small t-esc="commit.committer_email"/></td></tr>
+        </table>
+      </div>
+      <!-- Status -->
+      <div class="col-md-4">
+        <h3>Sent Status</h3>
+        <table class="table table-sm table-borderless">
+          <tr t-foreach='status_list' t-as='status'>
+            <td t-esc="status.create_date.strftime('%Y-%m-%d %H:%M:%S')"></td>
+            <td t-esc="status.context"></td>
+            <td t-esc="status.state"></td>
+            <td><a t-att-href="status.target_url">build <t t-esc="status.target_url.split('/')[-1]" /></a></td>
+            <td groups="runbot.group_runbot_admin">
+              <a t-attf-href="/runbot/commit/resend/{{status.id}}" title="Resend github status">
+                <i class="fa fa-repeat"/>
+              </a>
+            </td>
+          </tr>
+        </table>
+      </div>
+    </div>
             <h3>Branch presence history</h3>
             <table class="table table-stripped">
                 <tr t-foreach='reflogs' t-as='reflog'>

@@ -1028,7 +1028,6 @@ class BuildResult(models.Model):
         if self.global_result in ('killed', 'manually_killed'):
             return 'killed'
 
-
     def _github_status(self):
         """Notify github of failed/successful builds"""
         for build in self:
@@ -1051,7 +1050,6 @@ class BuildResult(models.Model):
                     continue
 
                 desc = " (runtime %ss)" % (build.job_time,)
-                context = "ci/runbot"
                 runbot_domain = self.env['runbot.runbot']._domain()
                 target_url = "http://%s/runbot/build/%s" % (runbot_domain, build.id)
 
@@ -1060,8 +1058,7 @@ class BuildResult(models.Model):
                     for build_commit in self.params_id.commit_link_ids:
                         commit = build_commit.commit_id
                         if build_commit.match_type != 'default' and commit.repo_id in trigger.repo_ids:
-                            commit._github_status(trigger.ci_context, 'state', target_url)
-
+                            commit._github_status(trigger.ci_context, state, target_url, desc)
 
 
 class BuildReference(models.Model):

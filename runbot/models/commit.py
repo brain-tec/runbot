@@ -6,6 +6,7 @@ import logging
 
 _logger = logging.getLogger(__name__)
 
+
 class Commit(models.Model):
     _name = "runbot.commit"
     _description = "Commit"
@@ -70,12 +71,13 @@ class Commit(models.Model):
             'target_url': target_url,
             'description': description or context,
         })
-        last_status.send()
+        last_status._send()
 
 
 class CommitStatus(models.Model):
     _name = 'runbot.commit.status'
     _description = 'Commit status'
+    _order = 'id desc'
 
     commit_id = fields.Many2one('runbot.commit', string='Commit', required=True, index=True)
     context = fields.Char('Context', required=True)
@@ -83,7 +85,7 @@ class CommitStatus(models.Model):
     target_url = fields.Char('Url')
     description = fields.Char('Description')
 
-    def send(self, force=False):
+    def _send(self, force=False):
         user_id = self.env.user.id
         _dbname = self.env.cr.dbname
         _context = self.env.context
