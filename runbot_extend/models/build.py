@@ -25,7 +25,7 @@ class runbot_build(models.Model):
 
     def create(self, vals):
         build_id = super(runbot_build, self).create(vals)
-        if build_id.repo_id.is_restore:
+        if build_id.repo_id.is_restore and build_id.local_state != 'duplicate':
             build_id.write({'db_to_restore': True})
         return build_id
 
