@@ -7,7 +7,7 @@ import functools
 import werkzeug.utils
 import werkzeug.urls
 
-from werkzeug.exceptions import NotFound
+from werkzeug.exceptions import NotFound, Forbidden
 
 from odoo.addons.http_routing.models.ir_http import slug
 from odoo.addons.website.controllers.main import QueryURL
@@ -206,11 +206,18 @@ class Runbot(Controller):
 
     @route(['/runbot/commit/<model("runbot.commit"):commit>'], website=True, auth='public', type='http')
     def commit(self, commit=None, **kwargs):
+        status_list = request.env['runbot.commit.status'].search([('commit_id', '=', commit.id)], order='id desc')
+        last_status_by_context = dict()
+        for status in status_list:
+            if status.context in last_status_by_context:
+                continue
+            last_status_by_context[status.context] = status
         context = {
             'commit': commit,
             'project': commit.repo_id.project_id,
             'reflogs': request.env['runbot.ref.log'].search([('commit_id', '=', commit.id)]),
-            'status_list': request.env['runbot.commit.status'].search([('commit_id', '=', commit.id)]),
+            'status_list': status_list,
+            'last_status_by_context': last_status_by_context,
             'title': 'Commit %s' % commit.name[:8]
         }
         return request.render('runbot.commit', context)
@@ -221,8 +228,10 @@ class Runbot(Controller):
         status = CommitStatus.browse(status_id)
         if not status.exists():
             raise NotFound()
-        last_status = CommitStatus.search([('commit_id', '=', status.commit_id.id)], order='id desc', limit=1)
-        if (datetime.datetime.now() - last_status.create_date).seconds > 60:  # ensure at least 60sec between two resend
+        last_status = CommitStatus.search([('commit_id', '=', status.commit_id.id), ('context', '=', status.context)], order='id desc', limit=1)
+        if status != last_status:
+            raise Forbidden("Only the last status can be resent")
+        if last_status.sent_date and (datetime.datetime.now() - last_status.sent_date).seconds > 60:  # ensure at least 60sec between two resend
             new_status = status.copy()
             new_status.description = 'Status resent by %s' % request.env.user.name
             new_status._send()

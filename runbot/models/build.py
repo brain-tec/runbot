@@ -1036,7 +1036,7 @@ class BuildResult(models.Model):
                     _logger.debug('Skipping result for orphan build %s', self.id)
                 else:
                     build.parent_id._github_status()
-            elif build.params_id.config_id.update_github_state:
+            elif build.params_id.config_id == build.params_id.trigger_id.config_id:
                 if build.global_result in ('ko', 'warn'):
                     state = 'failure'
                 elif build.global_state == 'testing':

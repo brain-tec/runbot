@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
+import datetime
 from unittest.mock import patch
 from werkzeug.urls import url_parse
 
-from odoo.tests.common import HttpCase, new_test_user
+from odoo.tests.common import HttpCase, new_test_user, tagged
 from odoo.tools import mute_logger
 
 
+@tagged('post_install', '-at_install')
 class TestCommitStatus(HttpCase):
 
     def setUp(self):
@@ -35,8 +37,7 @@ class TestCommitStatus(HttpCase):
             'context': 'ci/test',
             'state': 'failure',
             'target_url': 'https://www.somewhere.com',
-            'description': 'test status',
-            'create_date': '2020-01-01 15:00:00'
+            'description': 'test status'
         })
 
         # 1. test that unauthenticated users are redirected to the login page
@@ -63,6 +64,8 @@ class TestCommitStatus(HttpCase):
 
         # 4. Finally test that a new status is created on resend and that the _send method is called
         with patch('odoo.addons.runbot.models.commit.CommitStatus._send') as send_patcher:
+            a_minute_ago = datetime.datetime.now() - datetime.timedelta(seconds=65)
+            commit_status.sent_date = a_minute_ago
             response = self.url_open('/runbot/commit/resend/%s' % commit_status.id)
             self.assertEqual(response.status_code, 200)
             send_patcher.assert_called()
@@ -70,8 +73,14 @@ class TestCommitStatus(HttpCase):
         last_commit_status = self.env['runbot.commit.status'].search([], order='id desc', limit=1)
         self.assertEqual(last_commit_status.description, 'Status resent by runbot_admin')
 
-        # 5. try to immediately resend the commit should fail to avoid spamming github
-        with patch('odoo.addons.runbot.models.commit.CommitStatus._send') as send_patcher:
+        # 5. Now that the a new status was created, status is not the last one and thus, cannot be resent
+        with mute_logger('odoo.addons.http_routing.models.ir_http'):
             response = self.url_open('/runbot/commit/resend/%s' % commit_status.id)
+        self.assertEqual(response.status_code, 403)
+
+        # 6. try to immediately resend the commit should fail to avoid spamming github
+        last_commit_status.sent_date = datetime.datetime.now()  # as _send is mocked, the sent_date is not set
+        with patch('odoo.addons.runbot.models.commit.CommitStatus._send') as send_patcher:
+            response = self.url_open('/runbot/commit/resend/%s' % last_commit_status.id)
             self.assertEqual(response.status_code, 200)
             send_patcher.assert_not_called()

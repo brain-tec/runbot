@@ -1,6 +1,12 @@
 
 <odoo>
 <data>
+<template id="runbot.commit_status_state_td">
+  <!-- Must be called with a `state` variable !-->
+  <td t-if="state=='pending'"><i class="fa fa-circle text-warning"></i>&amp;nbsp;<t t-esc="state"></t></td>
+  <td t-if="state=='success'"><i class="fa fa-check text-success"></i>&amp;nbsp;<t t-esc="state"></t></td>
+  <td t-if="state=='failure'"><i class="fa fa-times text-danger"></i>&amp;nbsp;<t t-esc="state"></t></td>
+</template>
 <template id="runbot.commit">
   <t t-call='website.layout'>
     <div class="row" >
@@ -17,15 +23,15 @@
       </div>
       <!-- Status -->
       <div class="col-md-4">
-        <h3>Sent Status</h3>
+        <h3>Last Status</h3>
         <table class="table table-sm table-borderless">
-          <tr t-foreach='status_list' t-as='status'>
-            <td t-esc="status.create_date.strftime('%Y-%m-%d %H:%M:%S')"></td>
-            <td t-esc="status.context"></td>
-            <td t-esc="status.state"></td>
-            <td><a t-att-href="status.target_url">build <t t-esc="status.target_url.split('/')[-1]" /></a></td>
+          <tr t-foreach='last_status_by_context' t-as='context'>
+            <td t-esc="last_status_by_context[context].sent_date and last_status_by_context[context].sent_date.strftime('%Y-%m-%d %H:%M:%S') or '—'"></td>
+            <td t-esc="context"></td>
+            <t t-call="runbot.commit_status_state_td"><t t-set="state" t-value="last_status_by_context[context].state"/></t>
+            <td><a t-att-href="last_status_by_context[context].target_url">build <t t-esc="last_status_by_context[context].target_url.split('/')[-1]" /></a></td>
             <td groups="runbot.group_runbot_admin">
-              <a t-attf-href="/runbot/commit/resend/{{status.id}}" title="Resend github status">
+              <a t-attf-href="/runbot/commit/resend/{{last_status_by_context[context].id}}" title="Resend github status">
                 <i class="fa fa-repeat"/>
               </a>
             </td>
@@ -33,15 +39,30 @@
         </table>
       </div>
     </div>
-            <h3>Branch presence history</h3>
-            <table class="table table-stripped">
-                <tr t-foreach='reflogs' t-as='reflog'>
-                    <td t-esc="reflog.date"/>
-                    <td t-esc="reflog.branch_id.remote_id.short_name"/>
-                    <td t-esc="reflog.branch_id.name"/>
-                </tr>
-            </table>
-    </t>
+    <div class="row">
+      <div class="col-md-6">
+        <h3>Branch presence history</h3>
+        <table class="table table-stripped">
+            <tr t-foreach='reflogs' t-as='reflog'>
+                <td t-esc="reflog.date"/>
+                <td t-esc="reflog.branch_id.remote_id.short_name"/>
+                <td t-esc="reflog.branch_id.name"/>
+            </tr>
+        </table>
+      </div>
+      <div class="col-md-6">
+        <h3>Status history</h3>
+        <table class="table table-stripped">
+          <tr t-foreach='status_list' t-as='status'>
+            <td t-esc="status.sent_date and status.sent_date.strftime('%Y-%m-%d %H:%M:%S') or '—'"></td>
+            <td t-esc="status.context"></td>
+            <t t-call="runbot.commit_status_state_td"><t t-set="state" t-value="status.state"></t></t>
+            <td><a t-att-href="status.target_url">build <t t-esc="status.target_url.split('/')[-1]" /></a></td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </t>
 </template>
 </data>
 </odoo>

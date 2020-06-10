@@ -27,7 +27,6 @@
 
     <record id="runbot_build_config_default" model="runbot.build.config">
         <field name="name">Default</field>
-        <field name="update_github_state" eval="True"/>
         <field name="step_order_ids" eval="[(5,0,0),
         (0, 0, {'step_id': ref('runbot_build_config_step_test_base')}),
         (0, 0, {'step_id': ref('runbot_build_config_step_test_all')}),
@@ -37,7 +36,6 @@
 
     <record id="runbot_build_config_default_no_run" model="runbot.build.config">
         <field name="name">Default no run</field>
-        <field name="update_github_state" eval="True"/>
         <field name="step_order_ids" eval="[(5,0,0),
         (0, 0, {'step_id': ref('runbot_build_config_step_test_base')}),
         (0, 0, {'step_id': ref('runbot_build_config_step_test_all')})]"/>

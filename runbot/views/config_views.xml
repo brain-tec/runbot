@@ -19,8 +19,6 @@
                                 <field name="sequence" widget="handle"/>
                             </tree>
                         </field>
-                        <field name="update_github_state" readonly='1'/>
-                        <field name="update_github_state" groups="base.group_no_one"/>
                         <field name="protected" groups="base.group_no_one"/>
                         <field name="group" groups="base.group_no_one"/>
                     </group>
@@ -98,7 +96,6 @@
         <tree string="Build Configs">
           <field name="name"/>
           <field name="description"/>
-          <field name="update_github_state"/>
         </tree>
       </field>
     </record>

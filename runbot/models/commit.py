@@ -84,6 +84,7 @@ class CommitStatus(models.Model):
     state = fields.Char('State', required=True)
     target_url = fields.Char('Url')
     description = fields.Char('Description')
+    sent_date = fields.Datetime('Sent Date')
 
     def _send(self, force=False):
         user_id = self.env.user.id
@@ -111,6 +112,7 @@ class CommitStatus(models.Model):
                                 "github updating %s status %s to %s in repo %s",
                                 status['context'], commit_name, status['state'], remote.name)
                             remote._github('/repos/:owner/:repo/statuses/%s' % commit_name, status, ignore_errors=True)
+                            self.sent_date = fields.Datetime.now()
                 except:
                     _logger.exception('Something went wrong sending notification for %s', commit_name)
 
