@@ -41,7 +41,8 @@ class TestCommitStatus(HttpCase):
         })
 
         # 1. test that unauthenticated users are redirected to the login page
-        response = self.url_open('/runbot/commit/resend/%s' % commit_status.id)
+        with mute_logger('odoo.addons.base.models.ir_attachment'):
+            response = self.url_open('/runbot/commit/resend/%s' % commit_status.id)
         parsed_response = url_parse(response.url)
         self.assertIn('redirect=', parsed_response.query)
         self.assertEqual(parsed_response.path, '/web/login')
