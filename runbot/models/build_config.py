@@ -266,6 +266,7 @@ class ConfigStep(models.Model):
             'grep': grep,
             'rfind': rfind,
         }
+
     def _run_python(self, build, log_path):  # TODO rework log_path after checking python steps, compute on build
         eval_ctx = self.make_python_ctx(build)
         try:
@@ -279,7 +280,6 @@ class ConfigStep(models.Model):
                 build._kill(result='ko')
             else:
                 raise
-
 
     def _is_docker_step(self):
         if not self:

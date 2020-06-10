@@ -115,7 +115,6 @@ class RunbotCase(TransactionCase):
         self.patcher_objects = {}
         self.commit_list = {}
 
-
         self.start_patcher('git_patcher', 'odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper())
         self.start_patcher('fqdn_patcher', 'odoo.addons.runbot.common.socket.getfqdn', 'host.runbot.com')
         self.start_patcher('github_patcher', 'odoo.addons.runbot.models.repo.Remote._github', {})
@@ -126,7 +125,7 @@ class RunbotCase(TransactionCase):
         self.start_patcher('isdir', 'odoo.addons.runbot.common.os.path.isdir', True)
         self.start_patcher('isfile', 'odoo.addons.runbot.common.os.path.isfile', True)
         self.start_patcher('docker_run', 'odoo.addons.runbot.models.build_config.docker_run')
-        self.start_patcher('docker_build', 'odoo.addons.runbot.models.build.docker_build')
+        self.start_patcher('docker_build', 'odoo.addons.runbot.models.host.docker_build')
         self.start_patcher('docker_ps', 'odoo.addons.runbot.models.runbot.docker_ps', [])
         self.start_patcher('docker_stop', 'odoo.addons.runbot.models.runbot.docker_stop')
         self.start_patcher('docker_get_gateway_ip', 'odoo.addons.runbot.models.build_config.docker_get_gateway_ip', None)

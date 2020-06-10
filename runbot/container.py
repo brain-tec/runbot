@@ -34,13 +34,15 @@ ENV COVERAGE_FILE /data/build/.coverage
 
 
 class Command():
-    def __init__(self, pres, cmd, posts, finals=None, config_tuples=None):
+
+    def __init__(self, pres, cmd, posts, finals=None, config_tuples=None, cmd_checker=None):
         """ Command object that represent commands to run in Docker container
         :param pres: list of pre-commands
         :param cmd: list of main command only run if the pres commands succeed (&&)
         :param posts: list of post commands posts only run if the cmd command succedd (&&)
         :param finals: list of finals commands always executed
         :param config_tuples: list of key,value tuples to write in config file
+        :param cmd_checker: a checker object that must have a `_cmd_check` method that will be called at build
         returns a string of the full command line to run
         """
         self.pres = pres or []
@@ -48,6 +50,7 @@ class Command():
         self.posts = posts or []
         self.finals = finals or []
         self.config_tuples = config_tuples or []
+        self.cmd_checker = cmd_checker
 
     def __getattr__(self, name):
         return getattr(self.cmd, name)
@@ -56,7 +59,7 @@ class Command():
         return self.cmd[key]
 
     def __add__(self, l):
-        return Command(self.pres, self.cmd + l, self.posts, self.finals, self.config_tuples)
+        return Command(self.pres, self.cmd + l, self.posts, self.finals, self.config_tuples, self.cmd_checker)
 
     def __str__(self):
         return ' '.join(self)
@@ -65,6 +68,8 @@ class Command():
         return self.build().replace('&& ', '&&\n').replace('|| ', '||\n\t').replace(';', ';\n')
 
     def build(self):
+        if self.cmd_checker:
+            self.cmd_checker._cmd_check(self)
         cmd_chain = []
         cmd_chain += [' '.join(pre) for pre in self.pres if pre]
         cmd_chain.append(' '.join(self))

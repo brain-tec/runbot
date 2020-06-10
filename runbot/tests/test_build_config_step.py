@@ -4,6 +4,7 @@ from odoo.exceptions import UserError
 from odoo.addons.runbot.common import RunbotException
 from .common import RunbotCase
 
+
 class TestBuildConfigStep(RunbotCase):
 
     def setUp(self):
@@ -232,6 +233,28 @@ class TestBuildConfigStep(RunbotCase):
 
         self.assertEqual(call_count, 3)
 
+    @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
+    def test_run_python(self, mock_checkout):
+        """minimal test for python steps. Also test that `-d` in cmd creates a database"""
+        test_code = """cmd = build._cmd()
+cmd += ['-d', 'test_database']
+docker_run(cmd)
+        """
+        config_step = self.ConfigStep.create({
+            'name': 'default',
+            'job_type': 'python',
+            'python_code': test_code,
+        })
+
+        def docker_run(cmd, *args, **kwargs):
+            run_cmd = cmd.build()
+            self.assertIn('-d test_database', run_cmd)
+
+        self.patchers['docker_run'].side_effect = docker_run
+        config_step._run_python(self.parent_build, 'dev/null/logpath')
+        self.patchers['docker_run'].assert_called_once()
+        db = self.env['runbot.database'].search([('name', '=', 'test_database')])
+        self.assertEqual(db.build_id, self.parent_build)
 
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
     def test_sub_command(self, mock_checkout):

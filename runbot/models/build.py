@@ -10,9 +10,9 @@ import time
 import datetime
 import hashlib
 from ..common import dt2time, fqdn, now, grep, local_pgadmin_cursor, s2human, dest_reg, os, list_local_dbs, pseudo_markdown, RunbotException
-from ..container import docker_build, docker_stop, docker_state, Command
+from ..container import docker_stop, docker_state, Command
 from ..fields import JsonDictField
-from odoo import models, fields, api, registry
+from odoo import models, fields, api
 from odoo.exceptions import UserError, ValidationError
 from odoo.http import request
 from odoo.tools import appdirs
@@ -32,6 +32,7 @@ COPY_WHITELIST = [
     "parent_id",
     "orphan_result",
 ]
+
 
 def make_selection(array):
     def format(string):
@@ -91,7 +92,6 @@ class BuildParameters(models.Model):
 
     def write(self, vals):
         raise UserError('Params cannot be modified')
-
 
 
 class BuildResult(models.Model):
@@ -276,18 +276,16 @@ class BuildResult(models.Model):
         values = super().copy_data(default)[0]
         values = {key: value for key, value in values.items() if (key in COPY_WHITELIST or key in default)}
         values.update({
-            'host': 'PAUSED', # hack to keep the build in pending waiting for a manual update. Todo: add a paused state instead
+            'host': 'PAUSED',  # hack to keep the build in pending waiting for a manual update. Todo: add a paused state instead
             'local_state': 'pending',
         })
         return [values]
-
 
     def create(self, values_list):
         builds = super().create(values_list)
         for build in builds:
             build._github_status()
         return builds
-
 
     def write(self, values):
         # some validation to ensure db consistency
@@ -299,7 +297,7 @@ class BuildResult(models.Model):
         for build in self:
             assert not local_result or local_result == self._get_worst_result([build.local_result, local_result])  # dont write ok on a warn/error build
         res = super(BuildResult, self).write(values)
-        if 'log_counter' in values: # not 100% usefull but more correct ( see test_ir_logging)
+        if 'log_counter' in values:  # not 100% usefull but more correct ( see test_ir_logging)
             self.flush()
         return res
 
@@ -329,7 +327,7 @@ class BuildResult(models.Model):
 
         for build in self:
             if build.id:
-                nickname = build.params_id.version_id.name # TODO check that
+                nickname = build.params_id.version_id.name  # TODO check that
                 nickname = re.sub(r'"|\'|~|\:', '', nickname)
                 nickname = re.sub(r'_|/|\.', '-', nickname)
                 build.dest = ("%05d-%s" % (build.id or 0, nickname[:32])).lower()  # could be 38
@@ -424,12 +422,12 @@ class BuildResult(models.Model):
         new_build._log('rebuild', 'Rebuild initiated by %s%s' % (user.name, (' :%s' % message) if message else ''))
 
         if self.local_state not in ['running', 'done']:
-            self._ask_kill('Killed by rebuild requested by %s (%s) (new build:%s)', user.name, uid, new_build.id)
+            self._ask_kill('Killed by rebuild requested by %s (%s) (new build:%s)', user.name, user.id, new_build.id)
 
         if not self.parent_id:
             slots = self.env['runbot.batch.slot'].search([('build_id', '=', self.id)])
             for slot in slots:
-                if slot.link_type=='matched':
+                if slot.link_type == 'matched':
                     slot.build_id = new_build
                 else:
                     slot.active = False
@@ -797,6 +795,7 @@ class BuildResult(models.Model):
         _logger.debug("createdb %s", dbname)
         with local_pgadmin_cursor() as local_cr:
             local_cr.execute(sql.SQL("""CREATE DATABASE {} TEMPLATE %s LC_COLLATE 'C' ENCODING 'unicode'""").format(sql.Identifier(dbname)), (db_template,))
+        self.env['runbot.database'].create({'name': dbname, 'build_id': self.id})
 
     def _log(self, func, message, level='INFO', log_type='runbot', path='runbot'):
         self.ensure_one()
@@ -887,7 +886,7 @@ class BuildResult(models.Model):
         py_version = py_version if py_version is not None else build._get_py_version()
         pres = []
         for build_commit in self.params_id.commit_link_ids:
-            if os.path.isfile(build_commit.commit_id._source_path('requirements.txt')): # this is a change I think
+            if os.path.isfile(build_commit.commit_id._source_path('requirements.txt')):  # this is a change I think
                 repo_dir = self._docker_source_folder(build_commit.commit_id)
                 requirement_path = os.path.join(repo_dir, 'requirements.txt')
                 pres.append(['sudo', 'pip%s' % py_version, 'install', '-r', '%s' % requirement_path])
@@ -908,7 +907,7 @@ class BuildResult(models.Model):
         if grep(config_path, "no-netrpc"):
             cmd.append("--no-netrpc")
 
-        command = Command(pres, cmd, [])
+        command = Command(pres, cmd, [], cmd_checker=build)
 
         # use the username of the runbot host to connect to the databases
         command.add_config_tuple('db_user', '%s' % pwd.getpwuid(os.getuid()).pw_name)
@@ -935,6 +934,20 @@ class BuildResult(models.Model):
             command.add_config_tuple("data_dir", '/data/build/datadir')
 
         return command
+
+    def _cmd_check(self, cmd):
+        """
+        Check the cmd right before creating the build command line executed in
+        a Docker container. If a database creation is found in the cmd, a
+        'runbot.database' is created.
+        This method is intended to be called from cmd itself
+        """
+        if '-d' in cmd:
+            dbname = cmd[cmd.index('-d') + 1]
+            self.env['runbot.database'].create({
+                'name': dbname,
+                'build_id': self.id
+            })
 
     def _next_job_values(self):
         self.ensure_one()
