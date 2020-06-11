@@ -58,8 +58,14 @@ class BuildParameters(models.Model):
     config_data = JsonDictField('Config Data')
 
     build_ids = fields.One2many('runbot.build', 'params_id')
-    builds_reference_ids = fields.One2many('runbot.build.reference', 'params_id', copy=True)
+    builds_reference_ids = fields.Many2many('runbot.build', relation='runbot_build_params_references', copy=True)
     modules = fields.Char('Modules')
+
+    # todo 2 fingerprint ?, soft, complete. Complete for build-> params, soft for slot-> build
+    upgrade_to_build_id = fields.Many2one('runbot.build')  # use to define sources to use with upgrade script
+    upgrade_from_build_id = fields.Many2one('runbot.build')  # use to download db
+    upgrade_db_name = fields.Many2one('runbot.build')  # use to define db to download
+
     fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)
 
     #@api.depends('version_id', 'project_id', 'extra_params', 'config_id', 'config_data', 'modules', 'commit_link_ids', 'builds_reference_ids')
@@ -74,7 +80,10 @@ class BuildParameters(models.Model):
                 'config_data': param.config_data.dict,
                 'modules': param.modules or '',
                 'commit_link_ids': sorted(param.commit_link_ids.commit_id.ids),
-                'builds_reference_ids': sorted(param.builds_reference_ids.build_id.ids),
+                'builds_reference_ids': sorted(param.builds_reference_ids.ids),
+                'upgrade_from_build_id': param.upgrade_from_build_id.id,
+                'upgrade_to_build_id': param.upgrade_to_build_id.id,
+                'upgrade_db_name': param.upgrade_db_name,
             }
             param.fingerprint = hashlib.sha256(str(cleaned_vals).encode('utf8')).hexdigest()
 
@@ -301,6 +310,15 @@ class BuildResult(models.Model):
             self.flush()
         return res
 
+    def _add_child(self, param_values, orphan=False, description=False):
+        return self.create({
+            'params_id': self.params_id.copy(param_values).id,
+            'parent_id': self.id,
+            'build_type': self.build_type,
+            'description': description,
+            'orphan_result': orphan,
+        })
+
     def result_multi(self):
         if all(build.global_result == 'ok' or not build.global_result for build in self):
             return 'ok'
@@ -393,18 +411,18 @@ class BuildResult(models.Model):
                 params['dep'][result[0]] = result[1]
         return params
 
-    # TODO move to params copy helper
-    def _copy_dependency_ids(self):
-        return [(0, 0, {
-            'match_type': dep.match_type,
-            'dependency_hash': dep.dependency_hash,
-            'dependecy_repo_id': dep.dependecy_repo_id.id,
-        }) for dep in self.dependency_ids]
+    ## TODO move to params copy helper
+    #def _copy_dependency_ids(self):
+    #    return [(0, 0, {
+    #        'match_type': dep.match_type,
+    #        'dependency_hash': dep.dependency_hash,
+    #        'dependecy_repo_id': dep.dependecy_repo_id.id,
+    #    }) for dep in self.dependency_ids]
 
     def _rebuild(self, message=None):
         """Force a rebuild and return a recordset of builds"""
         self.ensure_one()
-        if self.local_result == 'ok':
+        if self.local_result == 'ok': # or global?
             return
         # TODO don't rebuild if there is a more recent build for this params?
         values = {
@@ -425,16 +443,17 @@ class BuildResult(models.Model):
             self._ask_kill('Killed by rebuild requested by %s (%s) (new build:%s)', user.name, user.id, new_build.id)
 
         if not self.parent_id:
+            # TODO CHECK SLOT BEHAVIOUR
             slots = self.env['runbot.batch.slot'].search([('build_id', '=', self.id)])
             for slot in slots:
                 if slot.link_type == 'matched':
                     slot.build_id = new_build
                 else:
-                    slot.active = False
                     slot.copy({
                         'build_id': new_build.id,
                         'link_type': 'rebuild',
                     })
+                    slot.active = False
         return new_build
 
     def _skip(self, reason=None):
@@ -1072,13 +1091,3 @@ class BuildResult(models.Model):
                         commit = build_commit.commit_id
                         if build_commit.match_type != 'default' and commit.repo_id in trigger.repo_ids:
                             commit._github_status(trigger.ci_context, state, target_url, desc)
-
-
-class BuildReference(models.Model):
-    _name = 'runbot.build.reference'
-    _description = 'build result used for dump or dependencies as reference for another build'
-
-    params_id = fields.Many2one('runbot.build.params', index=True)
-    build_id = fields.Many2one('runbot.build', index=True)
-    ref_config_descriptor = fields.Many2one('runbot.build.reference.descriptor')
-    key = fields.Char('key')

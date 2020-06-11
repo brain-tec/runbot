@@ -11,6 +11,7 @@ import requests
 
 from odoo import models, fields, api
 from ..common import os, RunbotException
+from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
@@ -40,11 +41,33 @@ class RepoTrigger(models.Model):
     repo_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_triggers', string="Triggers", domain="[('project_id', '=', project_id)]")
     dependency_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_dependencies', string="Dependencies")
     config_id = fields.Many2one('runbot.build.config', string="Config", required=True)
+
     ci_context = fields.Char("Ci context", default='ci/runbot')
     category_id = fields.Many2one('runbot.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
     version_ids = fields.Many2many('runbot.version', string="Allowed version ids", help="Only allow for versions, leave empty fo all")
-    group_ids = fields.Many2many('res.groups', string='Limited to groups')
-    hide = fields.Boolean('Hide batch on main page')
+    group_ids = fields.Many2many('res.groups', string='Limited to groups') #  TODO test
+    hide = fields.Boolean('Hide batch on main page') #  TODO test or remove
+
+    upgrade_dumps_trigger_id = fields.Many2one('runbot.trigger')
+    upgrade_step_id = fields.Many2one('runbot.build.config.step', compute="_compute_upgrade_step_id", store=True)
+
+    @api.depends('upgrade_dumps_trigger_id', 'config_id', 'config_id.step_order_ids.step_id.job_type')
+    def _compute_upgrade_step_id(self):
+        for trigger in self:
+            trigger.upgrade_step_id = False
+            if trigger.upgrade_dumps_trigger_id:
+                if len(trigger.config_id.step_order_ids) != 1 or trigger.config_id.step_order_ids[0].step_id.job_type != 'upgrade':
+                    raise UserError('Upgrade trigger should have a config with a single step of type upgrade')
+                trigger.upgrade_step_id = trigger.config_id.step_order_ids[0].step_id
+
+    def _reference_builds(self, bundle):
+        self.ensure_one()
+        if self.upgrade_step_id: # this is an upgrade trigger, add corresponding builds
+            refs_builds = self.upgrade_step_id._reference_builds(bundle, self.upgrade_dumps_trigger_id)
+            return [(4, b.id) for b in refs_builds]
+        return []
+
+
 
 
 class Category(models.Model):
@@ -386,13 +409,11 @@ class Repo(models.Model):
         """
 
         # FIXME WIP
-        _logger.info('Cheking %s refs for new branches', len(refs))
         names = [r[0].split('/')[-1] for r in refs]
         branches = self.env['runbot.branch'].search([('name', 'in', names), ('remote_id', 'in', self.remote_ids.ids)])
         ref_branches = {branch.ref(): branch for branch in branches}
         new_branch_values = []
         for ref_name, sha, date, author, author_email, subject, committer, committer_email in refs:
-            
             if not ref_branches.get(ref_name):
                 # format example:
                 # refs/ruodoo-dev/heads/12.0-must-fail
@@ -420,7 +441,6 @@ class Repo(models.Model):
                              described in _find_or_create_branches
         """
         self.ensure_one()
-        _logger.info('Cheking %s commits for new heads', len(refs))
 
         for ref_name, sha, date, author, author_email, subject, committer, committer_email in refs:
             branch = ref_branches[ref_name]
@@ -470,7 +490,6 @@ class Repo(models.Model):
                 ref = repo._get_refs(max_age)
                 ref_branches = repo._find_or_create_branches(ref)
                 repo._find_new_commits(ref, ref_branches)
-                _logger.info('</ new commit>')
                 updated = True
         return updated
 

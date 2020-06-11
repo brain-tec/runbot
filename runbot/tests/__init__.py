@@ -13,3 +13,4 @@ from . import test_build_stat
 from . import test_version
 from . import test_runbot
 from . import test_commit
+from . import test_upgrade

@@ -163,7 +163,6 @@ class Branch(models.Model):
                     if base:
                         values['defined_base_id'] = base.id
                 bundle = self.env['runbot.bundle'].create(values)
-
             branch.bundle_id = bundle
 
     def create(self, value_list):

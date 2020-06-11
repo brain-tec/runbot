@@ -16,9 +16,25 @@
                 <field name="dependency_ids"/>
                 <field name="config_id"/>
                 <field name="version_ids"/>
+                <field name="hide"/>
+                <field name="upgrade_dumps_trigger_id"/>
+                <field name="upgrade_step_id"/>
               </group>
             </sheet>
           </form>
+        </field>
+      </record>
+
+      <record id="trigger_view_tree" model="ir.ui.view">
+        <field name="name">runbot.trigger.tree</field>
+        <field name="model">runbot.trigger</field>
+        <field name="arch" type="xml">
+            <tree string="Repositories">
+                <field name="name"/>
+                <field name="category_id"/>
+                <field name="project_id"/>
+                <field name="config_id"/>
+            </tree>
         </field>
       </record>
 

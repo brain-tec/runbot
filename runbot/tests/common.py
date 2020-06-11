@@ -4,6 +4,10 @@ import datetime
 from odoo.tests.common import TransactionCase
 from unittest.mock import patch, DEFAULT
 
+import logging
+
+_logger = logging.getLogger(__name__)
+
 
 class RunbotCase(TransactionCase):
 
@@ -20,7 +24,7 @@ class RunbotCase(TransactionCase):
                 else:
                     return ''
             else:
-                print('Unsupported mock command %s' % cmd)
+                _logger.warning('Unsupported mock command %s' % cmd)
         return mock_git
 
     def push_commit(self, remote, branch_name, subject, sha=None, tstamp=None, committer=None, author=None):
@@ -87,7 +91,7 @@ class RunbotCase(TransactionCase):
             'token': '123',
         })
 
-        self.version_master = self.Version.create({'name': '13.0'})
+        self.version_master = self.Version.create({'name': '13.0'}) # TODO change fix master 13.0
         self.default_config = self.env.ref('runbot.runbot_build_config_default')
 
         self.base_params = self.BuildParameters.create({
@@ -106,7 +110,7 @@ class RunbotCase(TransactionCase):
         self.trigger_addons = self.env['runbot.trigger'].create({
             'name': 'Addons trigger',
             'repo_ids': [(4, self.repo_addons.id)],
-            'dependency_ids': [(4, self.repo_addons.id)],
+            'dependency_ids': [(4, self.repo_server.id)],
             'config_id': self.default_config.id,
             'project_id': self.project.id,
         })
@@ -170,7 +174,7 @@ class RunbotCaseMinimalSetup(RunbotCase):
 
         self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_is_base_regex', r'^((master)|(saas-)?\d+\.\d+)$')
 
-        initial_server_commit = self.Commit.create({
+        self.initial_server_commit = self.Commit.create({
             'name': 'aaaaaaa',
             'repo_id': self.repo_server.id,
             'date': '2006-12-07',
@@ -183,7 +187,7 @@ class RunbotCaseMinimalSetup(RunbotCase):
             'name': 'master',
             'remote_id': self.remote_server.id,
             'is_pr': False,
-            'head': initial_server_commit.id,
+            'head': self.initial_server_commit.id,
         })
         self.assertEqual(self.branch_server.bundle_id.name, 'master')
         self.branch_server.bundle_id.is_base = True

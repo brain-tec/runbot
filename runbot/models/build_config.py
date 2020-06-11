@@ -29,16 +29,7 @@ class Config(models.Model):
     protected = fields.Boolean('Protected', default=False, track_visibility='onchange')
     group = fields.Many2one('runbot.build.config', 'Configuration group', help="Group of config's and config steps")
     group_name = fields.Char('Group name', related='group.name')
-    build_refs_descriptors_ids = fields.One2many('runbot.build.reference.descriptor', compute='_compute_build_refs_descriptors_ids')
     # todo compute step_ids ?
-
-    def _compute_build_refs_descriptors_ids(self):
-        for config in self:
-            build_refs_descriptors_ids = self.env['runbot.build.reference.descriptor']
-            for step in config.step_ids():
-                build_refs_descriptors_ids |= step.build_refs_descriptors_ids
-                for sub_config in step.create_config_ids:
-                    build_refs_descriptors_ids |= sub_config.build_refs_descriptors_ids
 
     @api.model_create_single
     def create(self, values):
@@ -90,16 +81,15 @@ class Config(models.Model):
                 for create_config in step.create_config_ids:
                     create_config._check_recustion(visited[:])
 
-class ConfigStepBuildRef(models.Model):
-    _name = 'runbot.build.reference.descriptor'
-    _description = 'Extra dependency build that will be used by step'
 
-    config_step_id = fields.Many2one('runbot.build.config.step')
-    key = fields.Char('Key')
-    domain = fields.Char('Domain')
-    #  need_database = fields.Boolean
+class ConfigStepUpgradeDb(models.Model):
+    _name = 'runbot.config.step.upgrade.db'
+    _description = "Config Step Upgrade Db"
 
-    # todo: for python step, check that needed config ids are always in config_ids list
+    step_id = fields.Many2one('runbot.build.config.step', 'Step')
+    config_id = fields.Many2one('runbot.build.config', 'Config')
+    db_name = fields.Char('DbName')  # todo ad build_dbs and make it pattern
+
 
 class ConfigStep(models.Model):
     _name = 'runbot.build.config.step'
@@ -113,6 +103,7 @@ class ConfigStep(models.Model):
         ('run_odoo', 'Run odoo'),
         ('python', 'Python code'),
         ('create_build', 'Create build'),
+        ('upgrade', 'Upgrade'),
     ], default='install_odoo', required=True, track_visibility='onchange')
     protected = fields.Boolean('Protected', default=False, track_visibility='onchange')
     default_sequence = fields.Integer('Sequence', default=100, track_visibility='onchange')  # or run after? # or in many2many rel?
@@ -147,7 +138,22 @@ class ConfigStep(models.Model):
     force_host = fields.Boolean('Use same host as parent for children', default=False, track_visibility='onchange')  # future
     make_orphan = fields.Boolean('No effect on the parent result', help='Created build result will not affect parent build result', default=False, track_visibility='onchange')
 
-    build_refs_descriptors_ids = fields.One2many('runbot.build.reference.descriptor', 'config_step_id')
+    # upgrade
+    # 1. define target
+    upgrade_to_master = fields.Boolean() # upgrade niglty + (future migration? no, need last master, not nightly master)
+    upgrade_to_current = fields.Boolean() # upgrade_odoo case # TODO if checked, no other should be checked
+    upgrade_to_main_sticky = fields.Boolean() # upgrade (no master)
+    upgrade_to_all_sticky = fields.Boolean() # upgrade niglty (no master)
+
+    # 2. define source from target
+    #upgrade_from_current = fields.Boolean()  #usefull for future migration (13.0-dev/13.3-dev  -> master) AVOID TO USE THAT
+    upgrade_from_previous_version = fields.Boolean() # 13.0
+    upgrade_from_last_intermediate_version = fields.Boolean() # 13.3
+    upgrade_from_all_intermediate_version = fields.Boolean() # 13.2 # 13.1
+
+    upgrade_dbs = fields.One2many('runbot.config.step.upgrade.db', 'step_id', track_visibility='onchange')
+    master_reference_versions = fields.One2many('runbot.version', compute='_compute_master_reference_versions')
+
 
     @api.constrains('python_code')
     def _check_python_code(self):
@@ -169,6 +175,31 @@ class ConfigStep(models.Model):
             self.install_modules = '-*'
             self.test_enable = False
             self.create_db = False
+
+    # 1. define target
+    upgrade_to_master = fields.Boolean() # upgrade niglty + (future migration? no, need last master, not nightly master)
+    upgrade_to_current = fields.Boolean() # upgrade_odoo case # TODO if checked, no other should be checked
+    upgrade_to_main_sticky = fields.Boolean() # upgrade (no master)
+    upgrade_to_all_sticky = fields.Boolean() # upgrade niglty (no master)
+
+    # 2. define source from target
+    #upgrade_from_current = fields.Boolean()  #usefull for future migration (13.0-dev/13.3-dev  -> master) AVOID TO USE THAT
+    upgrade_from_previous_version = fields.Boolean() # 13.0
+    upgrade_from_last_intermediate_version = fields.Boolean() # 13.3
+    upgrade_from_all_intermediate_version = fields.Boolean() # 13.2 # 13.1
+
+    @api.depends('upgrade_to_master',
+                 'upgrade_to_current',
+                 'upgrade_to_main_sticky',
+                 'upgrade_to_all_sticky',
+                 'upgrade_from_previous_version',
+                 'upgrade_from_last_intermediate_version',
+                 'upgrade_from_all_intermediate_version')
+    def _compute_master_reference_versions(self):
+        for record in self:
+            record.master_reference_versions = self._reference_batches(
+                self.env.ref('runbot.bundle_master'), self.env.ref('runbot.default_category').id
+                ).mapped('bundle_id.version_id')
 
     @api.depends('name', 'custom_db_name')
     def _compute_db_name(self):
@@ -231,6 +262,8 @@ class ConfigStep(models.Model):
             return self._run_python(build, log_path)
         elif self.job_type == 'create_build':
             return self._create_build(build, log_path)
+        elif self.job_type == 'upgrade':
+            return self._run_upgrade(build, log_path)
 
     def _create_build(self, build, log_path):
         Build = self.env['runbot.build']
@@ -241,13 +274,8 @@ class ConfigStep(models.Model):
                 if count > 200:
                     build._logger('Too much build created')
                     break
-                children = Build.create({
-                    'params_id': build.params_id.copy({'config_id': create_config.id}).id,
-                    'parent_id': build.id,
-                    'build_type': build.build_type,
-                    'orphan_result': self.make_orphan,
-                })
-                build._log('create_build', 'created with config %s' % create_config.name, log_type='subbuild', path=str(children.id))
+                child = build._add_child({'config_id': create_config.id}, orphan=self.make_orphan)
+                build._log('create_build', 'created with config %s' % create_config.name, log_type='subbuild', path=str(child.id))
 
     def make_python_ctx(self, build):
         return {
@@ -286,6 +314,7 @@ class ConfigStep(models.Model):
             return False
         self.ensure_one()
         return self.job_type in ('install_odoo', 'run_odoo') or (self.job_type == 'python' and 'docker_run(' in self.python_code)
+
 
     def _run_odoo_run(self, build, log_path):
         exports = build._checkout()
@@ -411,6 +440,70 @@ class ConfigStep(models.Model):
         timeout = min(self.cpu_limit, max_timeout)
         env_variables = self.additionnal_env.split(',') if self.additionnal_env else []
         return docker_run(cmd, log_path, build._path(), build._get_docker_name(), cpu_limit=timeout, ro_volumes=exports, env_variables=env_variables)
+
+    def _run_upgrade(self, build, log_path):
+        values = {}
+        if not build.upgrade_to_build_id:
+            target_builds = build.browse()
+            if self.upgrade_to_current:
+                target_builds = build
+            else:
+                builds_reference_ids = build.params_id.builds_reference_ids
+                master_build = builds_reference_ids.filtered(lambda b: b.params_id.version_id.name == 'master')
+                base_builds = (builds_reference_ids - master_build)
+                # TODO we should filter on builds comming from sticky branches but we dont have the batch info.
+                # 1. maybe it's ok, all references are sticky build?
+                # 2. store batch instead of build. bad idea for duplicate detection
+                # 3. store more info than build in builds_reference_ids
+                if self.upgrade_to_master:
+                    target_builds = master_build
+                if self.upgrade_to_main_sticky:
+                    target_builds |= base_builds.filtered(lambda b: b.params_id.version_id.is_major)
+                elif self.upgrade_to_all_sticky:
+                    target_builds |= base_builds
+
+            build._log('', 'Defining target version %s' % ', '.join(target_builds.mapped('params_id.version_id.name')))
+
+
+        #self.upgrade_from_previous_version
+        #self.upgrade_from_last_intermediate_version
+        #self.upgrade_from_all_intermediate_version
+    #
+        #if not build.upgrade_db_name
+        #
+        ## need to create on subbuild per version
+        ## need to create on subbuild per version
+        #build.log('', 'Test')
+        ##return docker_run(cmd, log_path, build._path(), build._get_docker_name(), cpu_limit=timeout, ro_volumes=exports, env_variables=env_variables)
+    def _reference_builds(self, bundle, upgrade_dumps_trigger_id):
+        refs_batches = self._reference_batches(bundle, upgrade_dumps_trigger_id.category_id.id)
+        refs_builds = refs_batches.mapped('slot_ids').filtered(
+            lambda slot: slot.trigger_id == upgrade_dumps_trigger_id
+            ).mapped('build_id')
+        # should we filter on active? implicit. On match type? on skipped ?
+        # is last_"done"_batch enough?
+        return refs_builds
+
+    def _reference_batches(self, bundle, category_id):
+        refs_bundles = self.env['runbot.bundle']
+        sticky_domain = [('sticky', '=', True), ('project_id', '=', bundle.project_id.id)]
+        if self.upgrade_to_master:
+            refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('name', '=', 'master')])
+        if self.upgrade_to_all_sticky:
+            refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('name', '!=', 'master')])
+        elif self.upgrade_to_main_sticky:
+            refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('name', '!=', 'master'), ('version_id.is_major', '=', True)])
+
+        if self.upgrade_from_previous_version:
+            refs_bundles |= bundle.previous_version_base_id
+        if self.upgrade_from_all_intermediate_version:
+            refs_bundles |= bundle.intermediate_version_base_ids
+        elif self.upgrade_from_last_intermediate_version:
+            refs_bundles |= bundle.intermediate_version_base_ids[-1]
+
+        return refs_bundles.with_context(
+            category_id=category_id
+            ).mapped('last_done_batch')
 
     def log_end(self, build):
         if self.job_type == 'create_build':

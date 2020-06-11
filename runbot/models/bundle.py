@@ -146,7 +146,7 @@ class Bundle(models.Model):
                         ('version_number', '<', bundle.version_id.number),
                         ('is_base', '=', True),
                         ('project_id', '=', bundle.project_id.id)
-                    ])
+                    ], order='version_number asc')
 
                 else:
                     bundle.previous_version_base_id = False
@@ -185,6 +185,7 @@ class Bundle(models.Model):
     @api.depends_context('category_id')
     def _compute_last_done_batch(self):
         if self:
+            #self.env['runbot.batch'].flush()
             for bundle in self:
                 bundle.last_done_batch = False
             category_id = self.env.context.get('category_id', self.env['ir.model.data'].xmlid_to_res_id('runbot.default_category'))
@@ -217,15 +218,18 @@ class Bundle(models.Model):
     def write(self, values):
         super().write(values)
 
-    def _force(self):
+    def _force(self, category_id=None):
         self.ensure_one()
         if self.last_batch.state == 'preparing':
             return
-        new = self.env['runbot.batch'].create({
+        values = {
             'last_update': fields.Datetime.now(),
             'bundle_id': self.id,
             'state': 'preparing',
-        })
+        }
+        if category_id:
+            values['category_id'] = category_id
+        new = self.env['runbot.batch'].create(values)
         self.last_batch = new
         new.sudo()._prepare(force=True)
         return new
@@ -269,7 +273,7 @@ class Batch(models.Model):
     bundle_id = fields.Many2one('runbot.bundle', required=True, index=True, ondelete='cascade')
     commit_link_ids = fields.Many2many('runbot.commit.link')
     slot_ids = fields.One2many('runbot.batch.slot', 'batch_id')
-    state = fields.Selection([('preparing', 'Preparing'), ('ready', 'Ready'), ('done', 'Done')])
+    state = fields.Selection([('preparing', 'Preparing'), ('ready', 'Ready'), ('done', 'Done'), ('skipped', 'Skipped')])
     hidden = fields.Boolean('Hidden', default=False)
     age = fields.Integer(compute='_compute_age', string='Build age')
     category_id = fields.Many2one('runbot.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
@@ -316,7 +320,7 @@ class Batch(models.Model):
         for batch in self:
             if batch.bundle_id.is_base or batch.state == 'done':
                 continue
-            batch.state = 'done'
+            batch.state = 'skipped' #done?
             batch.log('Skipping batch')
             for slot in batch.slot_ids:
                 slot.skipped = True
@@ -345,7 +349,11 @@ class Batch(models.Model):
     def _prepare(self, force=False):
         self.state = 'ready'
         _logger.info('Preparing batch %s', self.id)
-        project = self.bundle_id.project_id
+
+        bundle = self.bundle_id
+        project = bundle.project_id
+        if not bundle.version_id:
+            _logger.error('No version found on bundle %s in project %s', bundle.name, project.name)
         triggers = self.env['runbot.trigger'].search([  # could be optimised for multiple batches. Ormcached method?
             ('project_id', '=', project.id),
             ('category_id', '=', self.category_id.id),
@@ -358,7 +366,9 @@ class Batch(models.Model):
         all_repos = triggers.mapped('repo_ids') | dependency_repos
         missing_repos = all_repos - pushed_repo
 
-        # find missing commits on bundle branches head
+        ######################################
+        # Find missing commits
+        ######################################
         def fill_missing(branch_commits, match_type):
             if branch_commits:
                 for branch, commit in branch_commits.items(): # branch first in case pr is closed.
@@ -378,7 +388,6 @@ class Batch(models.Model):
                         # add warning if different commit are found
                         # add warning if bundle has warnings
 
-        bundle = self.bundle_id
 
         # CHECK branch heads consistency
         branch_per_repo = {}
@@ -444,7 +453,9 @@ class Batch(models.Model):
         if missing_repos:
             _logger.warning('Missing repo %s for batch %s', missing_repos.mapped('name'), self.id)
 
-        # CREATE builds
+        ######################################
+        #  Generate build params
+        ######################################
         commit_link_by_repos = {commit_link.commit_id.repo_id.id: commit_link for commit_link in self.commit_link_ids}
         bundle_repos = bundle.branch_ids.mapped('remote_id.repo_id')
         version_id = self.bundle_id.version_id.id
@@ -468,9 +479,10 @@ class Batch(models.Model):
                 'trigger_id': trigger.id,  # for future reference and access rights
                 'config_data': {},
                 'commit_link_ids': [(6, 0, [commit_link_by_repos[repo.id].id for repo in trigger_repos])],
-                'builds_reference_ids': [],  # TODO
                 'modules': bundle.modules
             }
+            params_value['builds_reference_ids'] = trigger._reference_builds(bundle)
+
             params = self.env['runbot.build.params'].create(params_value)
             build = self.env['runbot.build']
             link_type = 'created'
@@ -493,7 +505,9 @@ class Batch(models.Model):
                 'link_type': link_type,
             })
 
+        ######################################
         # SKIP older batches
+        ######################################
         default_category = self.env.ref('runbot.default_category')
         if not bundle.sticky and self.category_id == default_category:
             skippable = self.env['runbot.batch'].search([

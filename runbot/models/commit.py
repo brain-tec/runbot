@@ -92,7 +92,12 @@ class CommitStatus(models.Model):
         _context = self.env.context
 
         commit = self.commit_id
-        remote_ids = commit.repo_id.remote_ids.filtered(lambda remote: remote.token).ids
+        all_remote = commit.repo_id.remote_ids
+        remotes = all_remote.filtered(lambda remote: remote.token)
+        no_token_remote = all_remote-remotes
+        if no_token_remote:
+            _logger.warning('No token on remote %s, skipping status', no_token_remote.mapped("name"))
+        remote_ids = remotes.ids
         commit_name = commit.name
 
         status = {

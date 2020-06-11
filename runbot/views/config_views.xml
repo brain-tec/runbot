@@ -80,6 +80,30 @@
                         <field name="number_builds"/>
                         <field name="make_orphan"/>
                     </group>
+                    <group string="Upgrade settings" attrs="{'invisible': [('job_type', 'not in', ('python', 'upgrade'))]}">
+
+                      <field name = "upgrade_to_master"/>
+                      <field name = "upgrade_to_current"/>
+                      <field name = "upgrade_to_main_sticky"/>
+                      <field name = "upgrade_to_all_sticky"/>
+
+                      <!-- field name = "upgrade_from_current"/-->
+                      <field name = "upgrade_from_previous_version"/>
+                      <field name = "upgrade_from_last_intermediate_version"/>
+                      <field name = "upgrade_from_all_intermediate_version"/>
+
+                      <field name="master_reference_versions"/>
+
+                      <field string="Db to upgrade" name="upgrade_dbs">
+                        <tree editable="bottom">
+                            <field name="config_id"/>
+                            <field name="db_name"/>
+                            <field name="db_name"/>
+                        </tree>
+                      </field>
+                    </group>
+
+
                 </sheet>
                 <div class="oe_chatter">
                     <field name="message_follower_ids" widget="mail_followers"/>

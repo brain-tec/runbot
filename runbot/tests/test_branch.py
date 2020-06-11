@@ -64,13 +64,13 @@ class TestBranchRelations(RunbotCase):
             })
         self.assertEqual(b.bundle_id.base_id.name, 'master')
         self.assertEqual(b.bundle_id.previous_version_base_id.name, '13.0')
-        self.assertEqual(sorted(b.bundle_id.intermediate_version_base_ids.mapped('name')), ['saas-13.1', 'saas-13.2'])
+        self.assertEqual(b.bundle_id.intermediate_version_base_ids.mapped('name'), ['saas-13.1', 'saas-13.2'])
 
     def test_relations_master(self):
         b = self.master
         self.assertEqual(b.bundle_id.base_id.name, 'master')
         self.assertEqual(b.bundle_id.previous_version_base_id.name, '13.0')
-        self.assertEqual(sorted(b.bundle_id.intermediate_version_base_ids.mapped('name')), ['saas-13.1', 'saas-13.2'])
+        self.assertEqual(b.bundle_id.intermediate_version_base_ids.mapped('name'), ['saas-13.1', 'saas-13.2'])
 
     def test_relations_no_intermediate(self):
         b = self.Branch.create({
@@ -80,7 +80,7 @@ class TestBranchRelations(RunbotCase):
             })
         self.assertEqual(b.bundle_id.base_id.name, 'saas-13.1')
         self.assertEqual(b.bundle_id.previous_version_base_id.name, '13.0')
-        self.assertEqual(sorted(b.bundle_id.intermediate_version_base_ids.mapped('name')), [])
+        self.assertEqual(b.bundle_id.intermediate_version_base_ids.mapped('name'), [])
 
     def test_relations_old_branch(self):
         b = self.Branch.create({
