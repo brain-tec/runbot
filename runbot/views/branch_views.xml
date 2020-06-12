@@ -14,6 +14,7 @@
                 <field name="remote_id"/>
                 <field name="name"/>
                 <field name="branch_url"/>
+                <field name="is_pr"/>
                 <field name="pull_head_name"/>
                 <field name="target_branch_name"/>
                 <field name="head"/>

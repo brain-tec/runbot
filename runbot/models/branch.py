@@ -133,14 +133,14 @@ class Branch(models.Model):
             if branch.bundle_id == dummy:
                 continue
             name = branch.reference_name
-            project = branch.remote_id.repo_id.project_id
+            project = branch.remote_id.repo_id.project_id or self.env.ref('runbot.main_project')
             project.ensure_one()
             bundle = self.env['runbot.bundle'].search([('name', '=', name), ('project_id', '=', project.id)])
             need_new_base = not bundle and branch.match_is_base(name)
             if (bundle.is_base or need_new_base) and branch.remote_id != branch.remote_id.repo_id.main_remote_id:
                 _logger.warning('Trying to add a dev branch to base bundle, falling back on dummy bundle')
                 bundle = dummy
-            elif branch.remote_id.repo_id._is_branch_forbidden(name):
+            elif name and branch.remote_id and branch.remote_id.repo_id._is_branch_forbidden(name):
                 _logger.warning('Trying to add a forbidden branch, falling back on dummy bundle')
                 bundle = dummy
             elif bundle.is_base and branch.is_pr:
@@ -162,9 +162,11 @@ class Branch(models.Model):
                     ])
                     if base:
                         values['defined_base_id'] = base.id
-                bundle = self.env['runbot.bundle'].create(values)
+                if name:
+                    bundle = self.env['runbot.bundle'].create(values)  # this prevent creating a branch in UI
             branch.bundle_id = bundle
 
+    @api.model_create_multi
     def create(self, value_list):
         branches = super().create(value_list)
         return branches
@@ -198,6 +200,8 @@ class Branch(models.Model):
     @api.model
     def match_is_base(self, name):
         """match against is_base_regex ir.config_parameter"""
+        if not name:
+            return False
         icp = self.env['ir.config_parameter'].sudo()
         regex = icp.get_param('runbot.runbot_is_base_regex', False)
         if regex:

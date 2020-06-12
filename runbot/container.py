@@ -338,6 +338,26 @@ def tests(args):
         docker_run(cmd.build(), logfile, args.build_dir, container_name, exposed_ports=[args.odoo_port, args.odoo_port + 1], cpu_limit=300)
 
 
+##############################################################################
+# Ugly monkey patch to set runbot in set runbot in testing mode
+# No Docker will be started, instead a fake docker_run function will be used
+##############################################################################
+if os.environ.get('RUNBOT_MODE') == 'test':
+
+    def fake_docker_run(run_cmd, log_path, build_dir, container_name, exposed_ports=None, cpu_limit=None, preexec_fn=None, ro_volumes=None, env_variables=None, *args, **kwargs):
+        _logger.info('Docker Fake Run: %s', run_cmd)
+        open(os.path.join(build_dir, 'start-%s' % container_name), 'w').write('fake start\n')
+        open(os.path.join(build_dir, 'end-%s' % container_name), 'w').write('fake end')
+        with open(log_path, 'w') as log_file:
+            log_file.write('Fake docker_run started\n')
+            log_file.write('run_cmd: %s\n' % run_cmd)
+            log_file.write('build_dir: %s\n' % container_name)
+            log_file.write('container_name: %s\n' % container_name)
+            log_file.write('Modules loaded.\n')
+
+    docker_run = fake_docker_run
+
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
     parser = argparse.ArgumentParser()

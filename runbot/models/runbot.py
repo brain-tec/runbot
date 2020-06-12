@@ -3,12 +3,11 @@ import logging
 import glob
 import random
 import re
+import signal
 import subprocess
 import shutil
 
-from datetime import timedelta
-
-from ..common import fqdn, dt2time, dest_reg, os
+from ..common import fqdn, dest_reg, os
 from ..container import docker_ps, docker_stop
 
 from odoo import models, fields
@@ -18,7 +17,8 @@ from odoo.modules.module import get_module_resource
 
 _logger = logging.getLogger(__name__)
 
- # after this point, not realy a repo buisness
+
+# after this point, not realy a repo buisness
 class Runbot(models.AbstractModel):
     _name = 'runbot.runbot'
     _description = 'Base runbot model'
@@ -318,7 +318,7 @@ class Runbot(models.AbstractModel):
     def _docker_cleanup(self):
         _logger.info('Docker cleaning')
         docker_ps_result = docker_ps()
-        containers = {int(dc.split('-', 1)[0]):dc for dc in docker_ps_result if dest_reg.match(dc)}
+        containers = {int(dc.split('-', 1)[0]): dc for dc in docker_ps_result if dest_reg.match(dc)}
         if containers:
             candidates = self.env['runbot.build'].search([('id', 'in', list(containers.keys())), ('local_state', '=', 'done')])
             for c in candidates:
