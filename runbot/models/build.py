@@ -64,7 +64,8 @@ class BuildParameters(models.Model):
     # todo 2 fingerprint ?, soft, complete. Complete for build-> params, soft for slot-> build
     upgrade_to_build_id = fields.Many2one('runbot.build')  # use to define sources to use with upgrade script
     upgrade_from_build_id = fields.Many2one('runbot.build')  # use to download db
-    upgrade_db_name = fields.Many2one('runbot.build')  # use to define db to download
+    dump_build_id = fields.Many2one('runbot.build')  # use as source download db
+    dump_db_name = fields.Char()  # use to define db to download
 
     fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)
 
@@ -83,7 +84,8 @@ class BuildParameters(models.Model):
                 'builds_reference_ids': sorted(param.builds_reference_ids.ids),
                 'upgrade_from_build_id': param.upgrade_from_build_id.id,
                 'upgrade_to_build_id': param.upgrade_to_build_id.id,
-                'upgrade_db_name': param.upgrade_db_name,
+                'dump_db_name': param.dump_db_name,
+                'dump_build_id': param.dump_db_name,
             }
             param.fingerprint = hashlib.sha256(str(cleaned_vals).encode('utf8')).hexdigest()
 
@@ -124,7 +126,7 @@ class BuildResult(models.Model):
     # -> commit corresponding to repo of trigger_id
     # -> display all?
 
-    params_id = fields.Many2one('runbot.build.params', required=True, index=True)
+    params_id = fields.Many2one('runbot.build.params', required=True, index=True, auto_join=True)
     # could be a default value, but possible to change it to allow duplicate accros branches
 
 
@@ -293,7 +295,8 @@ class BuildResult(models.Model):
     def create(self, values_list):
         builds = super().create(values_list)
         for build in builds:
-            build._github_status()
+            if not build.parent_id:  # avoid sending pending for child build (except for exact rebuild?)
+                build._github_status()
         return builds
 
     def write(self, values):

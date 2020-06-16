@@ -432,4 +432,5 @@ Initiating shutdown
         result = config_step._make_results(build)
         self.assertEqual(result, {'local_result': 'warning'})
 
+# TODO add generic test to copy_paste _run_* in a python step
 

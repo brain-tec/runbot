@@ -14,7 +14,7 @@ class TestSchedule(RunbotCase):
     def test_schedule_mark_done(self, mock_docker_state, mock_getmtime):
         """ Test that results are set even when job_30_run is skipped """
         job_end_time = datetime.datetime.now()
-        mock_getmtime.return_value = job_end_time.timestamp()
+        mock_getmtime.return_value = job_end_time.timestamp() # looks wrong
 
         params = self.BuildParameters.create({
             'version_id': self.version_master,

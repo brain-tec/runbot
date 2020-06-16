@@ -62,6 +62,8 @@ class Commit(models.Model):
         Status = self.env['runbot.commit.status']
         last_status = Status.search([('commit_id', '=', self.id), ('context', '=', context)], order='id desc', limit=1)
         if last_status and last_status.state == state:
+            import traceback
+            traceback.print_stack()
             _logger.info('Skipping already sent status %s:%s for %s', context, state, self.name)
             return
         last_status = Status.create({

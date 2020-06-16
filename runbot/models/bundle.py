@@ -16,9 +16,16 @@ class Version(models.Model):
     _name = "runbot.version"
     _description = "Version"
 
+    _order='number desc,id'
+
     name = fields.Char('Version name')
     number = fields.Char('Version number', compute='_compute_version_number', store=True, help="Usefull to sort by version")
     is_major = fields.Char('Is major version', compute='_compute_version_number', store=True)
+
+    base_bundle_id = fields.Many2one('runbot.bundle', compute='_compute_base_bundle_id')
+
+    previous_major_version_id = fields.Many2one('runbot.version', compute='_compute_version_relations')
+    intermediate_version_ids = fields.Many2many('runbot.version', compute='_compute_version_relations')
 
     @api.depends('name')
     def _compute_version_number(self):
@@ -39,6 +46,39 @@ class Version(models.Model):
             })
         return version
 
+    @api.depends('is_major', 'number')
+    def _compute_version_relations(self):
+        all_versions = self.search([], order='number')
+        for version in self:
+            version.previous_major_version_id = next(
+                (
+                    v
+                    for v in reversed(all_versions)
+                    if v.is_major and v.number < version.number
+                ), self.browse())
+            if version.previous_major_version_id:
+                version.intermediate_version_ids = all_versions.filtered(
+                    lambda v, current=version: v.number > current.previous_major_version_id.number and v.number < current.number
+                    )
+            else:
+                version.intermediate_version_ids = self.browse()
+
+    #@api.depends('base_bundle_id.is_base', 'base_bundle_id.version_id', 'base_bundle_id.project_id')
+    @api.depends_context('project_id')
+    def _compute_base_bundle_id(self):
+        project_id = self.env.context.get('project_id')
+        if not project_id:
+            _logger.warning("_compute_base_bundle_id: no project_id in context")
+            project_id = self.env.ref('runbot.main_project').id
+
+        bundles = self.env['runbot.bundle'].search([
+            ('version_id', 'in', self.ids),
+            ('is_base', '=', True),
+            ('project_id', '=', project_id)
+        ])
+        bundle_by_version = {bundle.version_id.id:bundle for bundle in bundles}
+        for version in self:
+            version.base_bundle_id = bundle_by_version.get(version.id)
 
 class Project(models.Model):
     _name = 'runbot.project'
@@ -73,8 +113,8 @@ class Bundle(models.Model):
     version_id = fields.Many2one('runbot.version', 'Version', compute='_compute_version_id', store=True)
     version_number = fields.Char(related='version_id.number', store=True, index=True)
 
-    previous_version_base_id = fields.Many2one('runbot.bundle', 'Previous base bundle', compute='_compute_previous_version_base_id')
-    intermediate_version_base_ids = fields.Many2many('runbot.bundle', 'Intermediate base bundles', compute='_compute_previous_version_base_id')
+    previous_major_version_base_id = fields.Many2one('runbot.bundle', 'Previous base bundle', compute='_compute_relations_base_id')
+    intermediate_version_base_ids = fields.Many2many('runbot.bundle', 'Intermediate base bundles', compute='_compute_relations_base_id')
 
     priority = fields.Boolean('Build priority', default=False)
 
@@ -124,33 +164,12 @@ class Bundle(models.Model):
                 continue
             bundle.version_id = self.env['runbot.version']._get(bundle.name)
 
-    @api.depends('is_base', 'base_id.previous_version_base_id')
-    def _compute_previous_version_base_id(self):
-        for bundle in self.sorted(key='is_base', reverse=True):
-            if not bundle.is_base:
-                bundle.previous_version_base_id = bundle.base_id.previous_version_base_id
-                bundle.intermediate_version_base_ids = bundle.base_id.intermediate_version_base_ids
-            else:
-                previous_version = self.env['runbot.version'].search([
-                    ('number', '<', bundle.version_id.number),
-                    ('is_major', '=', True)
-                ], order='number desc', limit=1)
-                if previous_version:
-                    bundle.previous_version_base_id = self.env['runbot.bundle'].search([
-                        ('version_id', '=', previous_version.id),
-                        ('is_base', '=', True),
-                        ('project_id', '=', bundle.project_id.id)
-                    ])
-                    bundle.intermediate_version_base_ids = self.env['runbot.bundle'].search([
-                        ('version_number', '>', previous_version.number),
-                        ('version_number', '<', bundle.version_id.number),
-                        ('is_base', '=', True),
-                        ('project_id', '=', bundle.project_id.id)
-                    ], order='version_number asc')
-
-                else:
-                    bundle.previous_version_base_id = False
-                    bundle.intermediate_version_base_ids = False
+    @api.depends('version_id')
+    def _compute_relations_base_id(self):
+        for bundle in self:
+            bundle = bundle.with_context(project_id=bundle.project_id.id)
+            bundle.previous_major_version_base_id = bundle.version_id.previous_major_version_id.base_bundle_id
+            bundle.intermediate_version_base_ids = bundle.version_id.intermediate_version_ids.mapped('base_bundle_id')
 
     @api.depends_context('category_id')
     def _compute_last_batchs(self):
