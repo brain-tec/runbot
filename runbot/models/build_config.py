@@ -1,6 +1,7 @@
 import base64
 import glob
 import logging
+import fnmatch
 import re
 import shlex
 import time
@@ -479,10 +480,10 @@ class ConfigStep(models.Model):
                     target_builds |= base_builds.filtered(lambda b: b.params_id.version_id.is_major)
                 elif self.upgrade_to_all_versions:
                     target_builds |= base_builds
-
+                target_builds = target_builds.sorted( lambda b: b.params_id.version_id.number)
             build._log('', 'Defining target version(s): %s' % ', '.join(target_builds.mapped('params_id.version_id.name')))
             if not target_builds:
-                build.log('_run_configure_upgrade', 'No target version found, skipping', level='ERROR')
+                build._log('_run_configure_upgrade', 'No target version found, skipping', level='ERROR')
                 end = True
             elif len(target_builds) > 1 and not self.upgrade_flat:
                 for target_build in target_builds:
@@ -501,11 +502,12 @@ class ConfigStep(models.Model):
                 if self.upgrade_from_previous_major_version:
                     from_builds |= builds_references_by_version_id.get(target_version.previous_major_version_id.id) or build.browse()
                 if self.upgrade_from_all_intermediate_version:
-                    for version in target_version.intermediate_version_ids.id:
+                    for version in target_version.intermediate_version_ids:
                         from_builds |= builds_references_by_version_id.get(version.id) or build.browse()
                 elif self.upgrade_from_last_intermediate_version:
                     if target_version.intermediate_version_ids:
                         from_builds |= builds_references_by_version_id.get(target_version.intermediate_version_ids[-1].id) or build.browse()
+                from_builds = from_builds.sorted(lambda b: b.params_id.version_id.number)
                 source_builds_by_target[target_build] = from_builds
                 build._log('', 'Defining source version(s) for %s: %s' % (target_build.params_id.version_id.name, ', '.join(source_builds_by_target[target_build].mapped('params_id.version_id.name'))))
                 if not from_builds:
@@ -518,7 +520,7 @@ class ConfigStep(models.Model):
         if end:
             return # replace this by a python job friendly solution
 
-        assert not param.dump_db_name
+        assert not param.dump_db
         if not self.upgrade_dbs:
             build._log('configure_upgrade', 'No upgrade dbs defined in step %s' % self.name, level='WARN')
         for target, sources in source_builds_by_target.items():
@@ -529,22 +531,23 @@ class ConfigStep(models.Model):
                         dump_builds = build.search([('id', 'child_of', source.id), ('params_id.config_id', '=', config_id.id)])
                         # this search is not optimal
                         if not dump_builds:
-                            build.log('_run_configure_upgrade', 'No dump build found', level='ERROR')
-                        for dump_build in dump_builds:
-                            child = build._add_child({
-                                'upgrade_to_build_id': target.id,
-                                'upgrade_from_build_id': source,
-                                'dump_build_id': dump_build.id,
-                                'dump_db_name': upgrade_db.db_name,
-                                'config_id': self.upgrade_config_id
-                            })
-                            child.description = 'Testing migration from %s  to %s using db [%s](%s) (%s)' % (
-                                source.params_id.version_id.name,
-                                target.params_id.version_id.name,
-                                upgrade_db.db_name,
-                                dump_build.build_url,
-                                config_id.name
-                            ) # TODO check markdown?
+                            build._log('_run_configure_upgrade', 'No dump build found', level='ERROR')
+                        dbs = dump_builds.database_ids.sorted('db_suffix')
+                        for db in dbs:
+                            if fnmatch.fnmatch(db.db_suffix, upgrade_db.db_name):
+                                child = build._add_child({
+                                    'upgrade_to_build_id': target.id,
+                                    'upgrade_from_build_id': source,
+                                    'dump_db': db.id,
+                                    'config_id': self.upgrade_config_id
+                                })
+                                child.description = 'Testing migration from %s to %s using db [%s](%s) (%s)' % (
+                                    source.params_id.version_id.name,
+                                    target.params_id.version_id.name,
+                                    db.name,
+                                    db.build_id.build_url,
+                                    config_id.name
+                                ) # TODO check markdown
 
     def _run_test_upgrade(self, build, log_path):
         upgrade_to_build_id = build.params_id.upgrade_to_build_id
@@ -556,14 +559,13 @@ class ConfigStep(models.Model):
                 if commit.repo_id not in repo_ids:
                     commit_ids |= commit
             build._log('Adding sources from build [%s](%s)' % (upgrade_to_build_id.id, upgrade_to_build_id.name), log_type='markdown')
-            
+
         exports = build._checkout(commit_ids)
-        # TODO FIX ME:
-        # add -> upgrade repo to commit
 
-        dump_db_name = build.params_id.dump_db_name  # only ok if restore does not force dbname
+        dump_db = build.params_id.dump_db
+        dump_db_name = dump_db.name  # only ok if restore does not force dbname
 
-        migrate_db_name = '%s-%s' % (build.dest, dump_db_name)
+        migrate_db_name = '%s-%s' % (build.dest, dump_db.name)
 
         migrate_cmd = build._cmd()
         migrate_cmd += ['-u all']
@@ -581,7 +583,7 @@ class ConfigStep(models.Model):
     def _run_restore(self, build, log_path):
         #exports = build._checkout()
 
-        download_db_name = self.dump_db_name or self.restore_download_db_name
+        download_db_name = self.dump_db.name or self.restore_download_db_name
         rename_db_name = self.restore_rename_db_name or download_db_name
 
         if 'dump_url' in build.config_data:
@@ -589,7 +591,7 @@ class ConfigStep(models.Model):
             zip_name = dump_url.split('/')[-1]
             build._log('test-migration', 'Restoring db $$%s$$' % (zip_name), log_type='link', path=dump_url) # TODO replace by markdown
         else:
-            dump_build = build.params_id.dump_build_id or build.parent_id
+            dump_build = build.params_id.dump_db.build_id or build.parent_id
             complete_download_db_name = '%s-%s' % (dump_build.dest, download_db_name)
             zip_name = '%s.zip' % complete_download_db_name
             dump_url = '%s%s' % (dump_build.http_log_url(), zip_name)
@@ -627,24 +629,32 @@ class ConfigStep(models.Model):
         return refs_builds
 
     def _reference_batches(self, bundle, category_id):
-        refs_bundles = self.env['runbot.bundle']
+        target_refs_bundles = self.env['runbot.bundle']
         sticky_domain = [('sticky', '=', True), ('project_id', '=', bundle.project_id.id)]
         if self.upgrade_to_master:
-            refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('name', '=', 'master')])
+            target_refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('name', '=', 'master')])
         if self.upgrade_to_all_versions:
-            refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('name', '!=', 'master')])
+            target_refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('name', '!=', 'master')])
         elif self.upgrade_to_major_versions:
-            refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('name', '!=', 'master'), ('version_id.is_major', '=', True)])
+            target_refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('name', '!=', 'master'), ('version_id.is_major', '=', True)])
 
-        if self.upgrade_from_previous_major_version:
-            refs_bundles |= bundle.previous_major_version_base_id
-        if self.upgrade_from_all_intermediate_version:
-            refs_bundles |= bundle.intermediate_version_base_ids
-        elif self.upgrade_from_last_intermediate_version:
-            if bundle.intermediate_version_base_ids:
-                refs_bundles |= bundle.intermediate_version_base_ids[-1]
+        source_refs_bundles = self.env['runbot.bundle']
+        def from_versions(f_bundle):
+            nonlocal source_refs_bundles
+            if self.upgrade_from_previous_major_version:
+                source_refs_bundles |= f_bundle.previous_major_version_base_id
+            if self.upgrade_from_all_intermediate_version:
+                source_refs_bundles |= f_bundle.intermediate_version_base_ids
+            elif self.upgrade_from_last_intermediate_version:
+                if f_bundle.intermediate_version_base_ids:
+                    source_refs_bundles |= f_bundle.intermediate_version_base_ids[-1]
 
-        return refs_bundles.with_context(
+        if self.upgrade_to_current:
+            from_versions(bundle)
+        for f_bundle in target_refs_bundles:
+            from_versions(f_bundle)
+
+        return (target_refs_bundles|source_refs_bundles).with_context(
             category_id=category_id
             ).mapped('last_done_batch')
 

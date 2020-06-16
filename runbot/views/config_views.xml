@@ -100,7 +100,6 @@
                         <tree editable="bottom">
                             <field name="config_id"/>
                             <field name="db_name"/>
-                            <field name="db_name"/>
                         </tree>
                       </field>
                     </group>

@@ -323,7 +323,7 @@ class Batch(models.Model):
             # case 1: a commit already exists for the repo (pr+branch, or fast push)
             if commit_link.commit_id.repo_id == commit.repo_id:
                 if commit_link.commit_id.id != commit.id:
-                    self.log('New head on branch %s during throttle phase: Replacing commit %s with %s', branch.name, commit_link.commit_id.name, commit.name)
+                    self._log('New head on branch %s during throttle phase: Replacing commit %s with %s', branch.name, commit_link.commit_id.name, commit.name)
                     commit_link.write({'commit_id': commit.id, 'branch_id': branch.id})
                 elif not commit_link.branch_id.is_pr and branch.is_pr:
                     commit_link.branch_id = branch  # Try to have a pr instead of branch on commit if possible ?
@@ -340,7 +340,7 @@ class Batch(models.Model):
             if batch.bundle_id.is_base or batch.state == 'done':
                 continue
             batch.state = 'skipped' #done?
-            batch.log('Skipping batch')
+            batch._log('Skipping batch')
             for slot in batch.slot_ids:
                 slot.skipped = True
                 build = slot.build_id
@@ -355,14 +355,14 @@ class Batch(models.Model):
                     _logger.info('Cannot skip build %s build is still in use in batches %s', build.id, batches.ids)
                     bundles = batches.mapped('bundle_id') - batch.bundle_id
                     if bundles:
-                        batch.log('Cannot kill or skip build %s, build is used in another bundle: %s', build.id, bundles.mapped('name'))
+                        batch._log('Cannot kill or skip build %s, build is used in another bundle: %s', build.id, bundles.mapped('name'))
 
     def _process(self):
         for batch in self:
             if batch.state == 'preparing' and batch.last_update < fields.Datetime.now() - datetime.timedelta(seconds=60):
                 batch._prepare()
             elif batch.state == 'ready' and all(slot.build_id.global_state in (False, 'running', 'done') for slot in batch.slot_ids):
-                batch.log('Batch done')
+                batch._log('Batch done')
                 batch.state = 'done'
 
     def _prepare(self, force=False):
@@ -445,7 +445,7 @@ class Batch(models.Model):
             if batches:
                 batches = batches.sorted(lambda b: (len(b.commit_link_ids.mapped('commit_id') & merge_base_commits), b.id), reverse=True)
                 batch = batches[0]
-                self.log('Using batch %s to define missing commits', batch.id)
+                self._log('Using batch %s to define missing commits', batch.id)
                 matched = batch.commit_link_ids.mapped('commit_id') & merge_base_commits
                 if len(matched) != len(merge_base_commits):
                     self.warning('Only %s out of %s merge base matched. You may want to rebase your branches to ensure compatibility', len(matched), len(merge_base_commits) )
@@ -454,14 +454,14 @@ class Batch(models.Model):
         # 3. FIND missing commit in base heads
         if missing_repos:
             if not bundle.is_base:
-                self.log('Not all commit found in bundle branches and base batch. Fallback on base branches heads.')
+                self._log('Not all commit found in bundle branches and base batch. Fallback on base branches heads.')
             fill_missing({branch: branch.head for branch in self.bundle_id.base_id.branch_ids}, 'base_head')
 
         # 4. FIND missing commit in foreign project
         if missing_repos:
             foreign_projects = dependency_repos.mapped('project_id') - project
             if foreign_projects:
-                self.log('Not all commit found. Fallback on foreign base branches heads.')
+                self._log('Not all commit found. Fallback on foreign base branches heads.')
                 foreign_bundles = bundle.search([('name', '=', bundle.name), ('project_id', 'in', foreign_projects.ids)])
                 fill_missing({branch: branch.head for branch in foreign_bundles.mapped('branch_ids').sorted('is_pr', reverse=True)}, 'head')
                 if missing_repos:
@@ -585,9 +585,9 @@ class Batch(models.Model):
 
     def warning(self, message, *args):
         _logger.warning('batch %s: ' + message, self.id, *args)
-        self.log(message, *args, level='WARNING')
+        self._log(message, *args, level='WARNING')
 
-    def log(self, message, *args, level='INFO'):
+    def _log(self, message, *args, level='INFO'):
         self.env['runbot.batch.log'].create({
             'batch_id': self.id,
             'message': message % args if args else message,

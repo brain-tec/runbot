@@ -64,8 +64,7 @@ class BuildParameters(models.Model):
     # todo 2 fingerprint ?, soft, complete. Complete for build-> params, soft for slot-> build
     upgrade_to_build_id = fields.Many2one('runbot.build')  # use to define sources to use with upgrade script
     upgrade_from_build_id = fields.Many2one('runbot.build')  # use to download db
-    dump_build_id = fields.Many2one('runbot.build')  # use as source download db
-    dump_db_name = fields.Char()  # use to define db to download
+    dump_db = fields.Many2one('runbot.database')  # use to define db to download
 
     fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)
 
@@ -84,8 +83,7 @@ class BuildParameters(models.Model):
                 'builds_reference_ids': sorted(param.builds_reference_ids.ids),
                 'upgrade_from_build_id': param.upgrade_from_build_id.id,
                 'upgrade_to_build_id': param.upgrade_to_build_id.id,
-                'dump_db_name': param.dump_db_name,
-                'dump_build_id': param.dump_db_name,
+                'dump_db': param.dump_db.id,
             }
             param.fingerprint = hashlib.sha256(str(cleaned_vals).encode('utf8')).hexdigest()
 
@@ -197,6 +195,8 @@ class BuildResult(models.Model):
 
     slot_ids = fields.One2many('runbot.batch.slot', 'build_id')
     killable = fields.Boolean('Killable')
+
+    database_ids = fields.One2many('runbot.database', 'build_id')
 
     @api.depends('params_id.config_id')
     def _compute_log_list(self):  # storing this field because it will be access trhoug repo viewn and keep track of the list at create
@@ -353,7 +353,7 @@ class BuildResult(models.Model):
                 nickname = re.sub(r'_|/|\.', '-', nickname)
                 build.dest = ("%05d-%s" % (build.id or 0, nickname[:32])).lower()  # could be 38
             # note, regex check for dest will be simplified making it dangerous especially for dropdb
-            # idea: add a database model to list them.
+            # TODO use runbot.database to list them.
 
     @api.depends('port', 'dest', 'host')
     def _compute_domain(self):
