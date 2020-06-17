@@ -50,8 +50,9 @@ class TestRepo(RunbotCaseMinimalSetup):
         """ Test that when finding new refs in a repo, the missing branches
         are created and new builds are created in pending state
         """
-
-        self.minimal_setup()
+        self.repo_addons = self.repo_addons  # lazy repo_addons fails on union
+        self.repo_server = self.repo_server  # lazy repo_addons fails on union
+        self.additionnal_setup()
         self.start_patchers()
         max_bundle_id = self.env['runbot.bundle'].search([], order='id desc', limit=1).id or 0
 
@@ -365,7 +366,8 @@ class TestFetch(RunbotCase):
                 return True
         return mock_git
 
-    def test_update_fetch_cmd(self):
+    @patch('time.sleep', return_value=None)
+    def test_update_fetch_cmd(self, mock_time):
         """ Test that git fetch is tried multiple times before disabling host """
 
         host = self.env['runbot.host']._get_current()

@@ -9,7 +9,7 @@ _logger = logging.getLogger(__name__)
 
 
 class Branch(models.Model):
-    _name = "runbot.branch"
+    _name = 'runbot.branch'
     _description = "Branch"
     _order = 'name'
     _sql_constraints = [('branch_repo_uniq', 'unique (name,remote_id)', 'The branch must be unique per repository !')]

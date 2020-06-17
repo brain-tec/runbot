@@ -8,7 +8,7 @@ _logger = logging.getLogger(__name__)
 
 
 class Commit(models.Model):
-    _name = "runbot.commit"
+    _name = 'runbot.commit'
     _description = "Commit"
 
     #  TODO access rights

@@ -162,7 +162,7 @@ class TestBranchIsBase(RunbotCaseMinimalSetup):
 
     def setUp(self):
         super(TestBranchIsBase, self).setUp()
-        self.minimal_setup()
+        self.additionnal_setup()
 
     def test_is_base_regex_on_main_remote(self):
         branch = self.Branch.create({

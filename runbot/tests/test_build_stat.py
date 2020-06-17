@@ -15,7 +15,7 @@ class TestBuildStatRegex(RunbotCase):
         self.Build = self.env["runbot.build"]
 
         params = self.BuildParameters.create({
-            'version_id': self.version_master.id,
+            'version_id': self.version_13.id,
             'project_id': self.project.id,
             'config_id': self.default_config.id,
             'config_data': {'make_stats': True}

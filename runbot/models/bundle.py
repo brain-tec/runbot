@@ -13,7 +13,7 @@ from ..common import dt2time, s2human_long
 _logger = logging.getLogger(__name__)
 
 class Version(models.Model):
-    _name = "runbot.version"
+    _name = 'runbot.version'
     _description = "Version"
 
     _order='number desc,id'
@@ -88,7 +88,7 @@ class Project(models.Model):
     trigger_ids = fields.One2many('runbot.trigger', 'project_id', string='Triggers', required=True, unique=True, help="Name of the base branch")
 
 class Bundle(models.Model):
-    _name = "runbot.bundle"
+    _name = 'runbot.bundle'
     _description = "Bundle"
 
     name = fields.Char('Bundle name', required=True, help="Name of the base branch")
@@ -285,18 +285,24 @@ class TriggerCustomisation(models.Model):
     ]
 
 class Batch(models.Model):
-    _name = "runbot.batch"
+    _name = 'runbot.batch'
     _description = "Bundle batch"
 
     last_update = fields.Datetime('Last ref update')
     bundle_id = fields.Many2one('runbot.bundle', required=True, index=True, ondelete='cascade')
     commit_link_ids = fields.Many2many('runbot.commit.link')
+    commit_ids = fields.Many2many('runbot.commit', compute='_compute_commit_ids')
     slot_ids = fields.One2many('runbot.batch.slot', 'batch_id')
     state = fields.Selection([('preparing', 'Preparing'), ('ready', 'Ready'), ('done', 'Done'), ('skipped', 'Skipped')])
     hidden = fields.Boolean('Hidden', default=False)
     age = fields.Integer(compute='_compute_age', string='Build age')
     category_id = fields.Many2one('runbot.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
     log_ids = fields.One2many('runbot.batch.log', 'batch_id')
+
+    @api.depends('commit_link_ids')
+    def _compute_commit_ids(self): # todo create mixin ?
+        for batch in self:
+            batch.commit_ids = batch.commit_link_ids.commit_id
 
     @api.depends('create_date')
     def _compute_age(self):
@@ -427,7 +433,7 @@ class Batch(models.Model):
         #  use last not preparing batch to define previous repos_heads instead of branches heads:
         #  Will allow to have a diff info on base bundle, compare with previous bundle
         last_base_batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.base_id.id), ('state', '!=', 'preparing'), ('id', '!=', self.id)], order='id desc', limit=1)
-        base_head_per_repo = {commit.repo_id.id: commit for commit in last_base_batch.commit_link_ids.mapped('commit_id')}
+        base_head_per_repo = {commit.repo_id.id: commit for commit in last_base_batch.commit_ids}
         self._update_commits_infos(base_head_per_repo)  # set base_commit, diff infos, ...
 
         # 2. FIND missing commit in a compatible base bundle
@@ -443,13 +449,16 @@ class Batch(models.Model):
                 ('state', '!=', 'preparing')
             ])
             if batches:
-                batches = batches.sorted(lambda b: (len(b.commit_link_ids.mapped('commit_id') & merge_base_commits), b.id), reverse=True)
+                batches = batches.sorted(lambda b: (len(b.commit_ids & merge_base_commits), b.id), reverse=True)
                 batch = batches[0]
                 self._log('Using batch %s to define missing commits', batch.id)
-                matched = batch.commit_link_ids.mapped('commit_id') & merge_base_commits
-                if len(matched) != len(merge_base_commits):
-                    self.warning('Only %s out of %s merge base matched. You may want to rebase your branches to ensure compatibility', len(matched), len(merge_base_commits) )
-                fill_missing({branch: branch.head for branch in batch.commit_link_ids.mapped('branch_id')}, 'base_match')
+                batch_exiting_commit = batch.commit_ids.filtered(lambda c: c.repo_id in merge_base_commits.repo_id)
+                not_matching = (batch_exiting_commit - merge_base_commits)
+                if not_matching:
+                    message = 'Only %s out of %s merge base matched. You may want to rebase your branches to ensure compatibility' % (len(merge_base_commits)-len(not_matching), len(merge_base_commits))
+                    suggestions = [('Tip: rebase %s to %s' % (commit.repo_id.name, commit.name)) for commit in not_matching]
+                    self.warning('%s\n%s' % (message, '\n'.join(suggestions)))
+                fill_missing({link.branch_id: link.commit_id for link in batch.commit_link_ids}, 'base_match')
 
         # 3. FIND missing commit in base heads
         if missing_repos:
@@ -599,7 +608,7 @@ class BatchLog(models.Model):
     _description = 'Batch log'
 
     batch_id = fields.Many2one('runbot.batch', index=True)
-    message = fields.Char('Message')
+    message = fields.Text('Message')
     level = fields.Char()
 
 
@@ -626,7 +635,7 @@ class BatchSlot(models.Model):
 
 
 class RunbotCommitLink(models.Model):
-    _name = "runbot.commit.link"
+    _name = 'runbot.commit.link'
     _description = "Build commit"
 
     commit_id = fields.Many2one('runbot.commit', 'Commit', required=True, index=True)

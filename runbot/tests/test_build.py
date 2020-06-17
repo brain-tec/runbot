@@ -8,6 +8,7 @@ from odoo.exceptions import UserError
 from .common import RunbotCase, RunbotCaseMinimalSetup
 
 
+
 def rev_parse(repo, branch_name):
     """
     simulate a rev parse by returning a fake hash of form
@@ -31,7 +32,7 @@ class TestBuildParams(RunbotCaseMinimalSetup):
         })
 
         params = self.BuildParameters.create({
-            'version_id': self.version_master.id,
+            'version_id': self.version_13.id,
             'project_id': self.project.id,
             'config_id': self.default_config.id,
             'commit_link_ids': [
@@ -42,7 +43,7 @@ class TestBuildParams(RunbotCaseMinimalSetup):
 
         # test that when the same params does not create a new record
         same_params = self.BuildParameters.create({
-            'version_id': self.version_master.id,
+            'version_id': self.version_13.id,
             'project_id': self.project.id,
             'config_id': self.default_config.id,
             'commit_link_ids': [
@@ -77,7 +78,7 @@ class TestBuildParams(RunbotCaseMinimalSetup):
 
     def test_trigger_build_config(self):
         """Test that a build gets the build config from the trigger"""
-        self.minimal_setup()
+        self.additionnal_setup()
         self.start_patchers()
 
         # A commit is found on the dev remote
@@ -95,7 +96,7 @@ class TestBuildParams(RunbotCaseMinimalSetup):
 
     def test_custom_trigger_config(self):
         """Test that a bundle with a custom trigger creates a build with approrioate config"""
-        self.minimal_setup()
+        self.additionnal_setup()
         self.start_patchers()
 
         # A commit is found on the dev remote
@@ -451,7 +452,7 @@ class TestGc(RunbotCaseMinimalSetup):
     def test_repo_gc_testing(self):
         """ test that builds are killed when room is needed on a host """
 
-        self.minimal_setup()
+        self.additionnal_setup()
 
         self.start_patchers()
 

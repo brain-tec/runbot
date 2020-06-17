@@ -379,7 +379,7 @@ def migrate(cr, version):
                     # to fix: nightly will be in the same batch of the previous normal one. If config_id is diffrent, create batch?
                     # possible fix: max create_date diff
                     batch = bundle.last_batch
-                    batch_commits = batch.commit_link_ids.mapped('commit_id')
+                    batch_commits = batch.commit_ids
                     batch_repos_ids = batch_commits.mapped('repo_id').ids
                     for commit in batch_commits:
                         repo_id = commit.repo_id.id

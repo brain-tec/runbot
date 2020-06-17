@@ -1,7 +1,10 @@
-from .common import RunbotCase, RunbotCaseMinimalSetup
-from odoo.tests.common import tagged
+from .common import  RunbotCase
+from odoo.tests.common import tagged, SingleTransactionCase
 from odoo.exceptions import UserError
 
+import logging
+
+_logger = logging.getLogger(__name__)
 
 class TestVersions(RunbotCase):
     def test_version_relations(self):
@@ -39,19 +42,24 @@ class TestVersions(RunbotCase):
         self.assertEqual(master.intermediate_version_ids, v133|v132|v131)
 
 
-class TestUpgrade(RunbotCaseMinimalSetup):
+class TestUpgradeFlow(RunbotCase):
 
     def setUp(self):
         super().setUp()
-        # TODO test trigger upgrade
-        self.minimal_setup()
+        self.upgrade_flow_setup()
 
+    def upgrade_flow_setup(self):
+        self.start_patcher('find_patcher', 'odoo.addons.runbot.common.find', 0)
+        self.additionnal_setup()
+
+        self.master_bundle = self.branch_server.bundle_id
         #################
         # upgrade branch
         #################
         self.repo_upgrade = self.env['runbot.repo'].create({
             'name': 'upgrade',
             'project_id': self.project.id,
+            'manifest_files': False,
         })
         self.remote_upgrade = self.env['runbot.remote'].create({
             'name': 'bla@example.com:base/upgrade',
@@ -67,10 +75,6 @@ class TestUpgrade(RunbotCaseMinimalSetup):
                 'repo_id': self.repo_upgrade.id,
             }).id,
         })
-        self.assertEqual(self.branch_server.bundle_id, self.branch_upgrade.bundle_id)
-        self.assertTrue(self.branch_upgrade.bundle_id.is_base)
-        self.assertTrue(self.branch_upgrade.bundle_id.version_id)
-        self.master_bundle = self.branch_server.bundle_id
 
         #######################
         # Basic upgrade config
@@ -78,16 +82,17 @@ class TestUpgrade(RunbotCaseMinimalSetup):
         self.step_restore = self.env['runbot.build.config.step'].create({
             'name': 'restore',
             'job_type': 'restore',
+            'restore_rename_db_suffix': False
         })
-        self.step_upgrade = self.env['runbot.build.config.step'].create({
+        self.step_test_upgrade = self.env['runbot.build.config.step'].create({
             'name': 'test_upgrade',
             'job_type': 'test_upgrade',
         })
-        self.upgrade_config = self.env['runbot.build.config'].create({
+        self.test_upgrade_config = self.env['runbot.build.config'].create({
             'name': 'Upgrade server',
             'step_order_ids':[
                 (0, 0, {'step_id': self.step_restore.id}),
-                (0, 0, {'step_id': self.step_upgrade.id})
+                (0, 0, {'step_id': self.step_test_upgrade.id})
             ]
         })
 
@@ -146,7 +151,7 @@ class TestUpgrade(RunbotCaseMinimalSetup):
             'upgrade_from_previous_major_version': True,
             'upgrade_from_last_intermediate_version': True,
             'upgrade_flat': True,
-            'upgrade_config_id': self.upgrade_config.id,
+            'upgrade_config_id': self.test_upgrade_config.id,
             'upgrade_dbs': [
                 (0, 0, {'config_id': self.config_all.id, 'db_name': 'all', 'min_target_version_id': master.id}),
                 (0, 0, {'config_id': self.config_all_no_demo.id, 'db_name': 'no-demo-all'})
@@ -164,8 +169,6 @@ class TestUpgrade(RunbotCaseMinimalSetup):
             'upgrade_dumps_trigger_id': self.trigger_server_nightly.id,
         })
 
-        self.assertEqual(self.trigger_upgrade_server.upgrade_step_id, self.step_upgrade_server)
-
         ########################################
         # Configure upgrades for previouses versions
         ########################################
@@ -175,7 +178,7 @@ class TestUpgrade(RunbotCaseMinimalSetup):
             'upgrade_to_major_versions': True,
             'upgrade_from_previous_major_version': True,
             'upgrade_flat': True,
-            'upgrade_config_id': self.upgrade_config.id,
+            'upgrade_config_id': self.test_upgrade_config.id,
             'upgrade_dbs': [
                 (0, 0, {'config_id': self.config_all.id, 'db_name': 'all', 'min_target_version_id': master.id}),
                 (0, 0, {'config_id': self.config_all_no_demo.id, 'db_name': 'no-demo-all'})
@@ -192,6 +195,16 @@ class TestUpgrade(RunbotCaseMinimalSetup):
             'project_id': self.project.id,
             'upgrade_dumps_trigger_id': self.trigger_addons_nightly.id,
         })
+
+        self.build_niglty_master, self.build_weekly_master = self.create_version('master')
+        self.build_niglty_11, self.build_weekly_11 = self.create_version('11.0')
+        self.build_niglty_113, self.build_weekly_113 = self.create_version('saas-11.3')
+        self.build_niglty_12, self.build_weekly_12 = self.create_version('12.0')
+        self.build_niglty_123, self.build_weekly_123 = self.create_version('saas-12.3')
+        self.build_niglty_13, self.build_weekly_13 = self.create_version('13.0')
+        self.build_niglty_131, self.build_weekly_131 = self.create_version('saas-13.1')
+        self.build_niglty_132, self.build_weekly_132 = self.create_version('saas-13.2')
+        self.build_niglty_133, self.build_weekly_133 = self.create_version('saas-13.3')
 
     def create_version(self, name):
         intname = int(''.join(c for c in name if c.isdigit())) if name != 'master' else 0
@@ -226,7 +239,8 @@ class TestUpgrade(RunbotCaseMinimalSetup):
 
         batch_nigthly = bundle._force(self.nightly_category.id)
         self.assertEqual(batch_nigthly.category_id, self.nightly_category)
-        builds_nigthly  = {}
+        builds_nigthly = {}
+        host = self.env['runbot.host']._get_current()
         for build in batch_nigthly.slot_ids.mapped('build_id'):
             self.assertEqual(build.params_id.config_id, self.config_nightly)
             main_child = build._add_child({'config_id': self.config_nightly_db_generate.id})
@@ -235,11 +249,13 @@ class TestUpgrade(RunbotCaseMinimalSetup):
                 (0, 0, {'name': '%s-%s' % (demo.dest, 'base')}), 
                 (0, 0, {'name': '%s-%s' % (demo.dest, 'dummy')}),
                 (0, 0, {'name': '%s-%s' % (demo.dest, 'all')})]
+            demo.host = host.name
             no_demo = main_child._add_child({'config_id': self.config_all_no_demo.id})
             no_demo.database_ids = [
                 (0, 0, {'name': '%s-%s' % (no_demo.dest, 'base')}),
                 (0, 0, {'name': '%s-%s' % (no_demo.dest, 'dummy')}),
                 (0, 0, {'name': '%s-%s' % (no_demo.dest, 'no-demo-all')})]
+            no_demo.host = host.name
             (build | main_child | demo | no_demo).write({'local_state': 'done'})
             builds_nigthly[('root', build.params_id.trigger_id)] = build
             builds_nigthly[('demo', build.params_id.trigger_id)] = demo
@@ -258,61 +274,27 @@ class TestUpgrade(RunbotCaseMinimalSetup):
                 child = build._add_child({'config_id': self.config_single.id})
                 child.database_ids = [(0, 0, {'name': '%s-%s' % (child.dest, db)})]
                 child.local_state = 'done'
+                child.host = host.name
                 builds_weekly[(db, build.params_id.trigger_id)] = child
             build.local_state = 'done'
         batch_weekly.state = 'done'
         return builds_nigthly, builds_weekly
 
-    def test_ensure_config_step_upgrade(self):
+
+    def test_all(self):
+        # Test setup
+        self.assertEqual(self.branch_server.bundle_id, self.branch_upgrade.bundle_id)
+        self.assertTrue(self.branch_upgrade.bundle_id.is_base)
+        self.assertTrue(self.branch_upgrade.bundle_id.version_id)
+        self.assertEqual(self.trigger_upgrade_server.upgrade_step_id, self.step_upgrade_server)
+
+
         with self.assertRaises(UserError):
             self.step_upgrade_server.job_type = 'install_odoo'
-            self.step_upgrade_server.flush()
+            self.trigger_upgrade_server.flush(['upgrade_step_id'])
 
-    def test_dependency_builds(self):
-        build_niglty_13, _ = self.create_version('13.0')
-        build_niglty_131, _ = self.create_version('saas-13.1')
-        build_niglty_132, _ = self.create_version('saas-13.2')
-        build_niglty_133, _ = self.create_version('saas-13.3')
-
-        batch = self.master_bundle._force()
-        upgrade_slot = batch.slot_ids.filtered(lambda slot: slot.trigger_id == self.trigger_upgrade_server)
-        self.assertTrue(upgrade_slot)
-        upgrade_build = upgrade_slot.build_id
-        self.assertTrue(upgrade_build)
-        self.assertEqual(upgrade_build.params_id.config_id, self.upgrade_server_config)
-        #e should have 2 builds, the nightly roots of 13 and 13.3
-        self.assertEqual(
-            upgrade_build.params_id.builds_reference_ids,
-            (
-                build_niglty_13[('root', self.trigger_server_nightly)] |
-                build_niglty_133[('root', self.trigger_server_nightly)]
-            )
-        )
-
-        self.trigger_upgrade_server.upgrade_step_id.upgrade_from_all_intermediate_version = True
-        batch = self.master_bundle._force()
-        upgrade_build = batch.slot_ids.filtered(lambda slot: slot.trigger_id == self.trigger_upgrade_server).build_id
-        self.assertEqual(
-            upgrade_build.params_id.builds_reference_ids,
-            (
-                build_niglty_13[('root', self.trigger_server_nightly)] |
-                build_niglty_131[('root', self.trigger_server_nightly)] |
-                build_niglty_132[('root', self.trigger_server_nightly)] |
-                build_niglty_133[('root', self.trigger_server_nightly)]
-            )
-        )
-
-    def test_configure_upgrade_step(self):
+        #test_configure_upgrade_step(self):
         # TODO test difference sticky/base
-        build_niglty_master, build_weekly_master = self.create_version('master')
-        build_niglty_11, build_weekly_11 = self.create_version('11.0')
-        build_niglty_113, build_weekly_113 = self.create_version('saas-11.3')
-        build_niglty_12, build_weekly_12 = self.create_version('12.0')
-        build_niglty_123, build_weekly_123 = self.create_version('saas-12.3')
-        build_niglty_13, build_weekly_13 = self.create_version('13.0')
-        build_niglty_131, build_weekly_131 = self.create_version('saas-13.1')
-        build_niglty_132, build_weekly_132 = self.create_version('saas-13.2')
-        build_niglty_133, build_weekly_133 = self.create_version('saas-13.3')
 
         # server/addons repos tests
         batch = self.master_bundle._force()
@@ -326,25 +308,20 @@ class TestUpgrade(RunbotCaseMinimalSetup):
 
         [b_13_master_demo, b_13_master_no_demo, b_133_master_demo, b_133_master_no_demo] = upgrade_current_build.children_ids
 
-        self.assertEqual(b_13_master_demo.params_id.upgrade_to_build_id, upgrade_current_build)
-        self.assertEqual(b_13_master_demo.params_id.upgrade_from_build_id, build_niglty_13[('root', self.trigger_server_nightly)])
-        self.assertEqual(b_13_master_demo.params_id.dump_db.build_id, build_niglty_13[('demo', self.trigger_server_nightly)])
-        self.assertEqual(b_13_master_demo.params_id.dump_db.name, '%s-all' % b_13_master_demo.params_id.dump_db.build_id.dest)
+        def assertOk(build, t, f, b_type, db_suffix, trigger):
+            self.assertEqual(build.params_id.upgrade_to_build_id, t)
+            self.assertEqual(build.params_id.upgrade_from_build_id, f[('root', trigger)])
+            self.assertEqual(build.params_id.dump_db.build_id, f[(b_type, trigger)])
+            self.assertEqual(build.params_id.dump_db.db_suffix, db_suffix)
+            self.assertEqual(build.params_id.config_id, self.test_upgrade_config)
 
-        self.assertEqual(b_13_master_no_demo.params_id.upgrade_to_build_id, upgrade_current_build)
-        self.assertEqual(b_13_master_no_demo.params_id.upgrade_from_build_id, build_niglty_13[('root', self.trigger_server_nightly)])
-        self.assertEqual(b_13_master_no_demo.params_id.dump_db.build_id, build_niglty_13[('no_demo', self.trigger_server_nightly)])
-        self.assertEqual(b_13_master_no_demo.params_id.dump_db.name, '%s-no-demo-all' % b_13_master_no_demo.params_id.dump_db.build_id.dest)
 
-        self.assertEqual(b_133_master_demo.params_id.upgrade_to_build_id, upgrade_current_build)
-        self.assertEqual(b_133_master_demo.params_id.upgrade_from_build_id, build_niglty_133[('root', self.trigger_server_nightly)])
-        self.assertEqual(b_133_master_demo.params_id.dump_db.build_id, build_niglty_133[('demo', self.trigger_server_nightly)])
-        self.assertEqual(b_133_master_demo.params_id.dump_db.name, '%s-all' % b_133_master_demo.params_id.dump_db.build_id.dest)
+        assertOk(b_13_master_demo, upgrade_current_build, self.build_niglty_13, 'demo', 'all', self.trigger_server_nightly)
+        assertOk(b_13_master_no_demo, upgrade_current_build, self.build_niglty_13, 'no_demo', 'no-demo-all', self.trigger_server_nightly)
+        assertOk(b_133_master_demo, upgrade_current_build, self.build_niglty_133, 'demo', 'all', self.trigger_server_nightly)
+        assertOk(b_133_master_no_demo, upgrade_current_build, self.build_niglty_133, 'no_demo', 'no-demo-all', self.trigger_server_nightly)
 
-        self.assertEqual(b_133_master_no_demo.params_id.upgrade_to_build_id, upgrade_current_build)
-        self.assertEqual(b_133_master_no_demo.params_id.upgrade_from_build_id, build_niglty_133[('root', self.trigger_server_nightly)])
-        self.assertEqual(b_133_master_no_demo.params_id.dump_db.build_id, build_niglty_133[('no_demo', self.trigger_server_nightly)])
-        self.assertEqual(b_133_master_no_demo.params_id.dump_db.name, '%s-no-demo-all' % b_133_master_no_demo.params_id.dump_db.build_id.dest)
+        self.assertEqual(b_13_master_demo.params_id.commit_ids.repo_id, self.repo_server|self.repo_upgrade)
 
         # upgrade repos tests
         upgrade_build = batch.slot_ids.filtered(lambda slot: slot.trigger_id == self.trigger_upgrade).build_id
@@ -357,18 +334,8 @@ class TestUpgrade(RunbotCaseMinimalSetup):
 
         [b_11_12, b_12_13] = upgrade_build.children_ids
 
-        self.assertEqual(b_11_12.params_id.upgrade_to_build_id, build_niglty_12[('root', self.trigger_addons_nightly)])
-        self.assertEqual(b_11_12.params_id.upgrade_from_build_id, build_niglty_11[('root', self.trigger_addons_nightly)])
-        self.assertEqual(b_11_12.params_id.dump_db.build_id, build_niglty_11[('no_demo', self.trigger_addons_nightly)])
-        self.assertEqual(b_11_12.params_id.dump_db.name, '%s-no-demo-all' % b_11_12.params_id.dump_db.build_id.dest)
-
-        self.assertEqual(b_12_13.params_id.upgrade_to_build_id, build_niglty_13[('root', self.trigger_addons_nightly)])
-        self.assertEqual(b_12_13.params_id.upgrade_from_build_id, build_niglty_12[('root', self.trigger_addons_nightly)])
-        self.assertEqual(b_12_13.params_id.dump_db.build_id, build_niglty_12[('no_demo', self.trigger_addons_nightly)])
-        self.assertEqual(b_12_13.params_id.dump_db.name, '%s-no-demo-all' % b_12_13.params_id.dump_db.build_id.dest)
-
-        # upgrade repos nightly
-
+        assertOk(b_11_12, self.build_niglty_12[('root', self.trigger_addons_nightly)], self.build_niglty_11, 'no_demo', 'no-demo-all', self.trigger_addons_nightly)
+        assertOk(b_12_13, self.build_niglty_13[('root', self.trigger_addons_nightly)], self.build_niglty_12, 'no_demo', 'no-demo-all', self.trigger_addons_nightly)
 
         self.step_upgrade_nightly = self.env['runbot.build.config.step'].create({
             'name': 'upgrade_nightly',
@@ -378,7 +345,7 @@ class TestUpgrade(RunbotCaseMinimalSetup):
             'upgrade_from_previous_major_version': True,
             'upgrade_from_all_intermediate_version': True,
             'upgrade_flat': False,
-            'upgrade_config_id': self.upgrade_config.id,
+            'upgrade_config_id': self.test_upgrade_config.id,
             'upgrade_dbs': [
                 (0, 0, {'config_id': self.config_single.id, 'db_name': '*'})
             ]
@@ -428,6 +395,25 @@ class TestUpgrade(RunbotCaseMinimalSetup):
         self.assertEqual(from_version_builds.mapped('local_state'), ['done']*8)
         db_builds = from_version_builds.children_ids
         self.assertEqual(len(db_builds), 40)
+
+        self.assertEqual(
+            db_builds.mapped('params_id.config_id'), self.test_upgrade_config
+        )
+
+        self.assertEqual(
+            db_builds.mapped('params_id.commit_ids.repo_id'),
+            self.repo_upgrade,
+            "Build should only have the upgrade commit"
+        )
+        b11_12 = db_builds[:5]
+        self.assertEqual(
+            b11_12.mapped('params_id.upgrade_to_build_id.params_id.version_id.name'),
+            ['12.0']
+        )
+        self.assertEqual(
+            b11_12.mapped('params_id.upgrade_from_build_id.params_id.version_id.name'),
+            ['11.0']
+        )
         b133_master = db_builds[-5:]
         self.assertEqual(
             b133_master.mapped('params_id.upgrade_to_build_id.params_id.version_id.name'),
@@ -441,9 +427,78 @@ class TestUpgrade(RunbotCaseMinimalSetup):
             [b.params_id.dump_db.db_suffix for b in b133_master],
             ['account', 'l10n_be', 'l10n_ch', 'mail', 'stock'] # is this order ok?
         )
-        import pprint
-        pprint.pprint(b133_master.params_id.read())
 
-    def test_step_upgrade(self):
-        def docker_run(cmd, log_path, *args, **kwargs):
-            pass
+        first_build = db_builds[0]
+
+        def docker_run_restore(cmd, *args, **kwargs):
+            source_dest = first_build.params_id.dump_db.build_id.dest
+            self.assertEqual(str(cmd),
+                ' && '.join([
+                    'mkdir /data/build/restore',
+                    'cd /data/build/restore',
+                    'wget {dump_url}',
+                    'unzip -q {zip_name}',
+                    'echo "### restoring filestore"',
+                    'mkdir -p /data/build/datadir/filestore/{db_name}',
+                    'mv filestore/* /data/build/datadir/filestore/{db_name}',
+                    'echo "###restoring db"',
+                    'psql -q {db_name} < dump.sql',
+                    'cd /data/build',
+                    'echo "### cleaning"',
+                    'rm -r restore',
+                    'echo "### listing modules"',
+                    'psql {db_name} -c "select name from ir_module_module where state = \'installed\'" -t -A > /data/build/logs/restore_modules_installed.txt'
+                ]).format(
+                    dump_url='http://host.runbot.com/runbot/static/build/%s/logs/%s-account.zip' % (source_dest, source_dest),
+                    zip_name='%s-account.zip' % source_dest,
+                    db_name='%s-master-account' % first_build.id,
+                )
+            )
+        self.patchers['docker_run'].side_effect = docker_run_restore
+        first_build.host = host.name
+        first_build._init_pendings(host)
+
+        def docker_run_upgrade(cmd, *args, ro_volumes=False, **kwargs):
+            self.assertEqual(ro_volumes, {
+                'addons': '/tmp/runbot_test/static/sources/addons/addons120',
+                'server': '/tmp/runbot_test/static/sources/server/server120',
+                'upgrade': '/tmp/runbot_test/static/sources/upgrade/123abc789'
+            },
+            "other commit should have been added automaticaly")
+            self.assertEqual(str(cmd),
+                'python3 server/server.py {addons_path} --no-xmlrpcs --no-netrpc -u all -d {db_name} --stop-after-init --max-cron-threads=0'.format(
+                addons_path='--addons-path addons,server/addons,server/core/addons',
+                db_name='%s-master-account' % first_build.id
+            ))
+        self.patchers['docker_run'].side_effect = docker_run_upgrade
+
+        first_build._schedule()
+
+        # test_build_references
+        batch = self.master_bundle._force()
+        upgrade_slot = batch.slot_ids.filtered(lambda slot: slot.trigger_id == self.trigger_upgrade_server)
+        self.assertTrue(upgrade_slot)
+        upgrade_build = upgrade_slot.build_id
+        self.assertTrue(upgrade_build)
+        self.assertEqual(upgrade_build.params_id.config_id, self.upgrade_server_config)
+        #e should have 2 builds, the nightly roots of 13 and 13.3
+        self.assertEqual(
+            upgrade_build.params_id.builds_reference_ids,
+            (
+                self.build_niglty_13[('root', self.trigger_server_nightly)] |
+                self.build_niglty_133[('root', self.trigger_server_nightly)]
+            )
+        )
+
+        self.trigger_upgrade_server.upgrade_step_id.upgrade_from_all_intermediate_version = True
+        batch = self.master_bundle._force()
+        upgrade_build = batch.slot_ids.filtered(lambda slot: slot.trigger_id == self.trigger_upgrade_server).build_id
+        self.assertEqual(
+            upgrade_build.params_id.builds_reference_ids,
+            (
+                self.build_niglty_13[('root', self.trigger_server_nightly)] |
+                self.build_niglty_131[('root', self.trigger_server_nightly)] |
+                self.build_niglty_132[('root', self.trigger_server_nightly)] |
+                self.build_niglty_133[('root', self.trigger_server_nightly)]
+            )
+        )

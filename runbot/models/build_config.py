@@ -20,14 +20,14 @@ PYTHON_DEFAULT = "# type python code here\n\n\n\n\n\n"
 
 
 class Config(models.Model):
-    _name = "runbot.build.config"
+    _name = 'runbot.build.config'
     _description = "Build config"
     _inherit = "mail.thread"
 
-    name = fields.Char('Config name', required=True, unique=True, track_visibility='onchange', help="Unique name for config please use trigram as postfix for custom configs")
+    name = fields.Char('Config name', required=True, unique=True, tracking=True, help="Unique name for config please use trigram as postfix for custom configs")
     description = fields.Char('Config description')
     step_order_ids = fields.One2many('runbot.build.config.step.order', 'config_id', copy=True)
-    protected = fields.Boolean('Protected', default=False, track_visibility='onchange')
+    protected = fields.Boolean('Protected', default=False, tracking=True)
     group = fields.Many2one('runbot.build.config', 'Configuration group', help="Group of config's and config steps")
     group_name = fields.Char('Group name', related='group.name')
     # todo compute step_ids ?
@@ -99,7 +99,7 @@ class ConfigStep(models.Model):
     _inherit = 'mail.thread'
 
     # general info
-    name = fields.Char('Step name', required=True, unique=True, track_visibility='onchange', help="Unique name for step please use trigram as postfix for custom step_ids")
+    name = fields.Char('Step name', required=True, unique=True, tracking=True, help="Unique name for step please use trigram as postfix for custom step_ids")
     job_type = fields.Selection([
         ('install_odoo', 'Test odoo'),
         ('run_odoo', 'Run odoo'),
@@ -108,39 +108,39 @@ class ConfigStep(models.Model):
         ('configure_upgrade', 'Configure Upgrade'),
         ('test_upgrade', 'Test Upgrade'),
         ('restore', 'Restore')
-    ], default='install_odoo', required=True, track_visibility='onchange')
-    protected = fields.Boolean('Protected', default=False, track_visibility='onchange')
-    default_sequence = fields.Integer('Sequence', default=100, track_visibility='onchange')  # or run after? # or in many2many rel?
+    ], default='install_odoo', required=True, tracking=True)
+    protected = fields.Boolean('Protected', default=False, tracking=True)
+    default_sequence = fields.Integer('Sequence', default=100, tracking=True)  # or run after? # or in many2many rel?
     step_order_ids = fields.One2many('runbot.build.config.step.order', 'step_id')
     group = fields.Many2one('runbot.build.config', 'Configuration group', help="Group of config's and config steps")
     group_name = fields.Char('Group name', related='group.name')
     make_stats = fields.Boolean('Make stats', default=False)
     build_stat_regex_ids = fields.Many2many('runbot.build.stat.regex', string='Stats Regexes')
     # install_odoo
-    create_db = fields.Boolean('Create Db', default=True, track_visibility='onchange')  # future
-    custom_db_name = fields.Char('Custom Db Name', track_visibility='onchange')  # future
+    create_db = fields.Boolean('Create Db', default=True, tracking=True)  # future
+    custom_db_name = fields.Char('Custom Db Name', tracking=True)  # future
     install_modules = fields.Char('Modules to install', help="List of module patterns to install, use * to install all available modules, prefix the pattern with dash to remove the module.", default='')
-    db_name = fields.Char('Db Name', compute='_compute_db_name', inverse='_inverse_db_name', track_visibility='onchange')
-    cpu_limit = fields.Integer('Cpu limit', default=3600, track_visibility='onchange')
-    coverage = fields.Boolean('Coverage', default=False, track_visibility='onchange')
-    flamegraph = fields.Boolean('Allow Flamegraph', default=False, track_visibility='onchange')
-    test_enable = fields.Boolean('Test enable', default=True, track_visibility='onchange')
-    test_tags = fields.Char('Test tags', help="comma separated list of test tags", track_visibility='onchange')
-    enable_auto_tags = fields.Boolean('Allow auto tag', default=False, track_visibility='onchange')
-    sub_command = fields.Char('Subcommand', track_visibility='onchange')
-    extra_params = fields.Char('Extra cmd args', track_visibility='onchange')
-    additionnal_env = fields.Char('Extra env', help='Example: foo="bar",bar="foo". Cannot contains \' ', track_visibility='onchange')
+    db_name = fields.Char('Db Name', compute='_compute_db_name', inverse='_inverse_db_name', tracking=True)
+    cpu_limit = fields.Integer('Cpu limit', default=3600, tracking=True)
+    coverage = fields.Boolean('Coverage', default=False, tracking=True)
+    flamegraph = fields.Boolean('Allow Flamegraph', default=False, tracking=True)
+    test_enable = fields.Boolean('Test enable', default=True, tracking=True)
+    test_tags = fields.Char('Test tags', help="comma separated list of test tags", tracking=True)
+    enable_auto_tags = fields.Boolean('Allow auto tag', default=False, tracking=True)
+    sub_command = fields.Char('Subcommand', tracking=True)
+    extra_params = fields.Char('Extra cmd args', tracking=True)
+    additionnal_env = fields.Char('Extra env', help='Example: foo="bar",bar="foo". Cannot contains \' ', tracking=True)
     # python
-    python_code = fields.Text('Python code', track_visibility='onchange', default=PYTHON_DEFAULT)
-    python_result_code = fields.Text('Python code for result', track_visibility='onchange', default=PYTHON_DEFAULT)
-    ignore_triggered_result = fields.Boolean('Ignore error triggered in logs', track_visibility='onchange', default=False)
+    python_code = fields.Text('Python code', tracking=True, default=PYTHON_DEFAULT)
+    python_result_code = fields.Text('Python code for result', tracking=True, default=PYTHON_DEFAULT)
+    ignore_triggered_result = fields.Boolean('Ignore error triggered in logs', tracking=True, default=False)
     running_job = fields.Boolean('Job final state is running', default=False, help="Docker won't be killed if checked")
     # create_build
-    create_config_ids = fields.Many2many('runbot.build.config', 'runbot_build_config_step_ids_create_config_ids_rel', string='New Build Configs', track_visibility='onchange', index=True)
-    number_builds = fields.Integer('Number of build to create', default=1, track_visibility='onchange')
+    create_config_ids = fields.Many2many('runbot.build.config', 'runbot_build_config_step_ids_create_config_ids_rel', string='New Build Configs', tracking=True, index=True)
+    number_builds = fields.Integer('Number of build to create', default=1, tracking=True)
 
-    force_host = fields.Boolean('Use same host as parent for children', default=False, track_visibility='onchange')  # future
-    make_orphan = fields.Boolean('No effect on the parent result', help='Created build result will not affect parent build result', default=False, track_visibility='onchange')
+    force_host = fields.Boolean('Use same host as parent for children', default=False, tracking=True)  # future
+    make_orphan = fields.Boolean('No effect on the parent result', help='Created build result will not affect parent build result', default=False, tracking=True)
 
     # upgrade
     # 1. define target
@@ -157,12 +157,12 @@ class ConfigStep(models.Model):
 
     upgrade_flat = fields.Boolean("Flat", help="Take all decisions in on build")
 
-    upgrade_config_id = fields.Many2one('runbot.build.config',string='Upgrade Config', track_visibility='onchange', index=True)
-    upgrade_dbs = fields.One2many('runbot.config.step.upgrade.db', 'step_id', track_visibility='onchange')
+    upgrade_config_id = fields.Many2one('runbot.build.config',string='Upgrade Config', tracking=True, index=True)
+    upgrade_dbs = fields.One2many('runbot.config.step.upgrade.db', 'step_id', tracking=True)
     master_reference_versions = fields.One2many('runbot.version', compute='_compute_master_reference_versions')
 
-    restore_download_db_name = fields.Char('Download db name', default='all')
-    restore_rename_db_name = fields.Char('Retore db name', default='restore')
+    restore_download_db_suffix = fields.Char('Download db suffix')
+    restore_rename_db_suffix = fields.Char('Rename db suffix')
 
     @api.constrains('python_code')
     def _check_python_code(self):
@@ -391,7 +391,7 @@ class ConfigStep(models.Model):
         cmd = build._cmd(python_params, py_version, sub_command=self.sub_command)
         # create db if needed
         db_suffix = build.params_id.config_data.get('db_name') or self.db_name
-        db_name = "%s-%s" % (build.dest, db_suffix)
+        db_name = '%s-%s' % (build.dest, db_suffix)
         if self.create_db:
             build._local_pg_createdb(db_name)
         cmd += ['-d', db_name]
@@ -535,12 +535,22 @@ class ConfigStep(models.Model):
                         dbs = dump_builds.database_ids.sorted('db_suffix')
                         for db in dbs:
                             if fnmatch.fnmatch(db.db_suffix, upgrade_db.db_name):
+
+                                #commit_ids = build.params_id.commit_ids
+                                #if commit_ids != target.params_id.commit_ids:
+                                #    repo_ids = commit_ids.mapped('repo_id')
+                                #    for commit_link in target.params_id.commit_link_ids:
+                                #        if commit_link.commit_id.repo_id not in repo_ids:
+                                #            additionnal_commit_links |= commit_link
+                                #    build._log('', 'Adding sources from build [%s](%s)' % (target.id, target.build_url), log_type='markdown')
+
                                 child = build._add_child({
                                     'upgrade_to_build_id': target.id,
                                     'upgrade_from_build_id': source,
                                     'dump_db': db.id,
                                     'config_id': self.upgrade_config_id
                                 })
+
                                 child.description = 'Testing migration from %s to %s using db [%s](%s) (%s)' % (
                                     source.params_id.version_id.name,
                                     target.params_id.version_id.name,
@@ -550,22 +560,22 @@ class ConfigStep(models.Model):
                                 ) # TODO check markdown
 
     def _run_test_upgrade(self, build, log_path):
-        upgrade_to_build_id = build.params_id.upgrade_to_build_id
-        commit_ids = build.params_id.commit_link_ids.mapped('commit_id')
-        to_commit_ids = upgrade_to_build_id.params_id.commit_link_ids.mapped('commit_id')
-        if commit_ids != to_commit_ids: # not the same commit/aka not the same root_parent
-            repo_ids = commit_ids.mapped('repo_id')
-            for commit in to_commit_ids:
-                if commit.repo_id not in repo_ids:
-                    commit_ids |= commit
-            build._log('Adding sources from build [%s](%s)' % (upgrade_to_build_id.id, upgrade_to_build_id.name), log_type='markdown')
 
-        exports = build._checkout(commit_ids)
+        target = build.params_id.upgrade_to_build_id
+        commit_ids = build.params_id.commit_ids
+        target_commit_ids = target.params_id.commit_ids
+        if commit_ids != target_commit_ids:
+            target_repo_ids = target_commit_ids.mapped('repo_id')
+            for commit in commit_ids:
+                if commit.repo_id not in target_repo_ids:
+                    target_commit_ids |= commit
+            build._log('', 'Adding sources from build [%s](%s)' % (target.id, target.build_url), log_type='markdown')
+        build = build.with_context(defined_commit_ids=target_commit_ids)
+        exports = build._checkout()
 
         dump_db = build.params_id.dump_db
-        dump_db_name = dump_db.name  # only ok if restore does not force dbname
 
-        migrate_db_name = '%s-%s' % (build.dest, dump_db.name)
+        migrate_db_name = '%s-%s' % (build.dest, dump_db.db_suffix) # only ok if restore does not force db_suffix
 
         migrate_cmd = build._cmd()
         migrate_cmd += ['-u all']
@@ -582,22 +592,24 @@ class ConfigStep(models.Model):
 
     def _run_restore(self, build, log_path):
         #exports = build._checkout()
+        params = build.params_id
 
-        download_db_name = self.dump_db.name or self.restore_download_db_name
-        rename_db_name = self.restore_rename_db_name or download_db_name
-
-        if 'dump_url' in build.config_data:
-            dump_url = build.config_data['dump_url']
+        if 'dump_url' in params.config_data:
+            dump_url = params.config_data['dump_url']
             zip_name = dump_url.split('/')[-1]
             build._log('test-migration', 'Restoring db $$%s$$' % (zip_name), log_type='link', path=dump_url) # TODO replace by markdown
         else:
-            dump_build = build.params_id.dump_db.build_id or build.parent_id
-            complete_download_db_name = '%s-%s' % (dump_build.dest, download_db_name)
-            zip_name = '%s.zip' % complete_download_db_name
+            download_db_suffix = params.dump_db.db_suffix or self.restore_download_db_suffix
+            dump_build = params.dump_db.build_id or build.parent_id
+            assert download_db_suffix and dump_build
+            download_db_name = '%s-%s' % (dump_build.dest, download_db_suffix)
+            zip_name = '%s.zip' % download_db_name
             dump_url = '%s%s' % (dump_build.http_log_url(), zip_name)
             build._log('test-migration', 'Using dump from build %s' % dump_build.id, log_type='subbuild', path=str(dump_build.id)) # TODO replace by markdown
 
-        restore_db_name = '%s-%s' % (build.dest, rename_db_name)
+        restore_suffix = self.restore_rename_db_suffix or params.dump_db.db_suffix
+        assert restore_suffix # TODO check dump_url case
+        restore_db_name = '%s-%s' % (build.dest, restore_suffix)
 
         build._local_pg_createdb(restore_db_name)
         cmd = ' && '.join([
@@ -706,7 +718,7 @@ class ConfigStep(models.Model):
 
     def _coverage_params(self, build, modules_to_install):
         pattern_to_omit = set()
-        for commit in build.params_id.commit_link_ids.mapped('commit_id'):
+        for commit in build.params_id.commit_ids:
             docker_source_folder = build._docker_source_folder(commit)
             for manifest_file in commit.repo_id.manifest_files.split(','):
                 pattern_to_omit.add('*%s' % manifest_file)
@@ -730,7 +742,7 @@ class ConfigStep(models.Model):
             if self.test_enable or self.test_tags:
                 build_values.update(self._make_tests_results(build))
         elif self.job_type == 'test_upgrade':
-                build_values.update(self._make_upgrade_results(build))
+            build_values.update(self._make_upgrade_results(build))
         return build_values
 
     def _make_python_results(self, build):

@@ -17,7 +17,7 @@ class TestSchedule(RunbotCase):
         mock_getmtime.return_value = job_end_time.timestamp() # looks wrong
 
         params = self.BuildParameters.create({
-            'version_id': self.version_master,
+            'version_id': self.version_13,
             'project_id': self.project,
             'config_id': self.env.ref('runbot.runbot_build_config_default').id,
         })

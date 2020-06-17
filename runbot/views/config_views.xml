@@ -104,8 +104,8 @@
                       </field>
                     </group>
                     <group string="Create settings" attrs="{'invisible': [('job_type', '!=', 'restore')]}">
-                        <field name="restore_download_db_name"/>
-                        <field name="restore_rename_db_name"/>
+                        <field name="restore_download_db_suffix"/>
+                        <field name="restore_rename_db_suffix"/>
                     </group>
                 </sheet>
                 <div class="oe_chatter">

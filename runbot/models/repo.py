@@ -42,13 +42,13 @@ class RepoTrigger(models.Model):
     dependency_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_dependencies', string="Dependencies")
     config_id = fields.Many2one('runbot.build.config', string="Config", required=True)
 
-    ci_context = fields.Char("Ci context", default='ci/runbot')
+    ci_context = fields.Char("Ci context", default='ci/runbot', tracking=True)
     category_id = fields.Many2one('runbot.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
     version_ids = fields.Many2many('runbot.version', string="Allowed version ids", help="Only allow for versions, leave empty fo all")
     group_ids = fields.Many2many('res.groups', string='Limited to groups') #  TODO test
     hide = fields.Boolean('Hide batch on main page') #  TODO test or remove
 
-    upgrade_dumps_trigger_id = fields.Many2one('runbot.trigger')
+    upgrade_dumps_trigger_id = fields.Many2one('runbot.trigger', tracking=True)
     upgrade_step_id = fields.Many2one('runbot.build.config.step', compute="_compute_upgrade_step_id", store=True)
 
     @api.depends('upgrade_dumps_trigger_id', 'config_id', 'config_id.step_order_ids.step_id.job_type')
@@ -86,22 +86,23 @@ class Remote(models.Model):
     _name = 'runbot.remote'
     _description = 'Remote'
     _order = 'sequence, id'
+    _inherit = 'mail.thread'
 
-    name = fields.Char('Url', required=True)  # TODO valide with regex
-    repo_id = fields.Many2one('runbot.repo', required=True)
+    name = fields.Char('Url', required=True, tracking=True)  # TODO valide with regex
+    repo_id = fields.Many2one('runbot.repo', required=True, tracking=True)
 
-    owner = fields.Char(compute='_compute_base_infos', string='Repo Owner', store=True, readonly=True)
-    repo_name = fields.Char(compute='_compute_base_infos', string='Repo Name', store=True, readonly=True)
-    repo_domain = fields.Char(compute='_compute_base_infos', string='Repo domain', store=True, readonly=True)
+    owner = fields.Char(compute='_compute_base_infos', string='Repo Owner', store=True, readonly=True, tracking=True)
+    repo_name = fields.Char(compute='_compute_base_infos', string='Repo Name', store=True, readonly=True, tracking=True)
+    repo_domain = fields.Char(compute='_compute_base_infos', string='Repo domain', store=True, readonly=True, tracking=True)
 
-    base_url = fields.Char(compute='_compute_base_url', string='Base URL', readonly=True)
+    base_url = fields.Char(compute='_compute_base_url', string='Base URL', readonly=True, tracking=True)
 
-    short_name = fields.Char('Short name', compute='_compute_short_name')
-    remote_name = fields.Char('Remote name', compute='_compute_remote_name')
+    short_name = fields.Char('Short name', compute='_compute_short_name', tracking=True)
+    remote_name = fields.Char('Remote name', compute='_compute_remote_name', tracking=True)
 
-    sequence = fields.Integer('Sequence')
-    fetch_heads = fields.Boolean('Fetch branches', default=True)
-    fetch_pull = fields.Boolean('Fetch PR', default=False)
+    sequence = fields.Integer('Sequence', tracking=True)
+    fetch_heads = fields.Boolean('Fetch branches', default=True, tracking=True)
+    fetch_pull = fields.Boolean('Fetch PR', default=False, tracking=True)
 
     token = fields.Char("Github token", groups="runbot.group_runbot_admin")
 
@@ -200,36 +201,37 @@ class Remote(models.Model):
 
 class Repo(models.Model):
 
-    _name = "runbot.repo"
+    _name = 'runbot.repo'
     _description = "Repo"
     _order = 'sequence, id'
+    _inherit = 'mail.thread'
 
 
-    name = fields.Char("Name", unique=True)  # odoo/enterprise/upgrade/security/runbot/design_theme
-    main_remote_id = fields.Many2one('runbot.remote', "Main remote")
+    name = fields.Char("Name", unique=True, tracking=True)  # odoo/enterprise/upgrade/security/runbot/design_theme
+    main_remote_id = fields.Many2one('runbot.remote', "Main remote", tracking=True)
     remote_ids = fields.One2many('runbot.remote', 'repo_id', "Remotes")
-    project_id = fields.Many2one('runbot.project', required=True,
+    project_id = fields.Many2one('runbot.project', required=True, tracking=True,
         help="Default bundle project to use when pushing on this repos",
         default=lambda self: self.env.ref('runbot.main_project', raise_if_not_found=False))
     # -> not verry usefull, remove it? (iterate on projects or contraints triggers:
     # all trigger where a repo is used must be in the same project.
-    modules = fields.Char("Modules to install", help="Comma-separated list of modules to install and test.")
+    modules = fields.Char("Modules to install", help="Comma-separated list of modules to install and test.", tracking=True)
     group_ids = fields.Many2many('res.groups', string='Limited to groups')
-    server_files = fields.Char('Server files', help='Comma separated list of possible server files')  # odoo-bin,openerp-server,openerp-server.py
-    manifest_files = fields.Char('Manifest files', help='Comma separated list of possible manifest files', default='__manifest__.py')
-    addons_paths = fields.Char('Addons paths', help='Comma separated list of possible addons path', default='')
+    server_files = fields.Char('Server files', help='Comma separated list of possible server files', tracking=True)  # odoo-bin,openerp-server,openerp-server.py
+    manifest_files = fields.Char('Manifest files', help='Comma separated list of possible manifest files', default='__manifest__.py', tracking=True)
+    addons_paths = fields.Char('Addons paths', help='Comma separated list of possible addons path', default='', tracking=True)
 
-    sequence = fields.Integer('Sequence')
+    sequence = fields.Integer('Sequence', tracking=True)
     path = fields.Char(compute='_get_path', string='Directory', readonly=True)
     mode = fields.Selection([('disabled', 'Disabled'),
                              ('poll', 'Poll'),
                              ('hook', 'Hook')],
                             default='poll',
-                            string="Mode", required=True, help="hook: Wait for webhook on /runbot/hook/<id> i.e. github push event")
+                            string="Mode", required=True, help="hook: Wait for webhook on /runbot/hook/<id> i.e. github push event", tracking=True)
     hook_time = fields.Float('Last hook time', compute='_compute_hook_time')
     get_ref_time = fields.Float('Last refs db update', compute='_compute_get_ref_time')
     trigger_ids = fields.Many2many('runbot.trigger', relation='runbot_trigger_triggers', readonly=True)
-    forbidden_regex = fields.Char('Forbidden regex', help="Regex that forid bundle creation if branch name is matching")
+    forbidden_regex = fields.Char('Forbidden regex', help="Regex that forid bundle creation if branch name is matching", tracking=True)
 
     def _compute_get_ref_time(self):
         self.env.cr.execute("""
@@ -470,7 +472,7 @@ class Repo(models.Model):
                 if bundle.no_build:
                     continue
 
-                if bundle.last_batch.state != 'preparing' and commit not in bundle.last_batch.commit_link_ids.mapped('commit_id'):
+                if bundle.last_batch.state != 'preparing' and commit not in bundle.last_batch.commit_ids:
                     preparing = self.env['runbot.batch'].create({
                         'last_update': fields.Datetime.now(),
                         'bundle_id': bundle.id,
@@ -573,7 +575,7 @@ class Repo(models.Model):
 
 
 class RefTime(models.Model):
-    _name = "runbot.repo.reftime"
+    _name = 'runbot.repo.reftime'
     _description = "Repo reftime"
     _log_access = False
 
@@ -582,7 +584,7 @@ class RefTime(models.Model):
 
 
 class HookTime(models.Model):
-    _name = "runbot.repo.hooktime"
+    _name = 'runbot.repo.hooktime'
     _description = "Repo hooktime"
     _log_access = False
 

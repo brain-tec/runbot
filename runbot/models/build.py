@@ -35,18 +35,17 @@ COPY_WHITELIST = [
 
 
 def make_selection(array):
-    def format(string):
-        return (string, string.replace('_', ' ').capitalize())
-    return [format(elem) if isinstance(elem, str) else elem for elem in array]
+    return [(elem, elem.replace('_', ' ').capitalize()) if isinstance(elem, str) else elem for elem in array]
 
 
 class BuildParameters(models.Model):
-    _name = "runbot.build.params"
+    _name = 'runbot.build.params'
     _description = "All information used by a build to run, should be unique and set on create only"
 
     # on param or on build?
     # execution parametter
     commit_link_ids = fields.Many2many('runbot.commit.link', copy=True)
+    commit_ids = fields.Many2many('runbot.commit', compute='_compute_commit_ids')
     version_id = fields.Many2one('runbot.version', required=True, index=True)
     project_id = fields.Many2one('runbot.project', required=True)  # for access rights
     trigger_id = fields.Many2one('runbot.trigger')  # for access rights
@@ -87,6 +86,11 @@ class BuildParameters(models.Model):
             }
             param.fingerprint = hashlib.sha256(str(cleaned_vals).encode('utf8')).hexdigest()
 
+    @api.depends('commit_link_ids')
+    def _compute_commit_ids(self):
+        for params in self:
+            params.commit_ids = params.commit_link_ids.commit_id
+
     def create(self, values):
         params = self.new(values)
         match = self._find_existing(params.fingerprint)
@@ -96,7 +100,6 @@ class BuildParameters(models.Model):
         return super().create(values)
 
     def _find_existing(self, fingerprint):
-        self.env['runbot.build'].flush()
         return self.env['runbot.build.params'].search([('fingerprint', '=', fingerprint)], limit=1)
 
     def write(self, vals):
@@ -112,7 +115,7 @@ class BuildResult(models.Model):
     # if a build is detached from all bundle, kill it
     # nigktly?
 
-    _name = "runbot.build"
+    _name = 'runbot.build'
     _description = "Build"
 
     _parent_store = True
@@ -313,7 +316,11 @@ class BuildResult(models.Model):
             self.flush()
         return res
 
-    def _add_child(self, param_values, orphan=False, description=False):
+    def _add_child(self, param_values, orphan=False, description=False, additionnal_commit_links=False):
+        if additionnal_commit_links:
+            commit_link_ids = self.params_id.commit_link_ids
+            commit_link_ids |= additionnal_commit_links
+            param_values['commit_link_ids'] = commit_link_ids
         return self.create({
             'params_id': self.params_id.copy(param_values).id,
             'parent_id': self.id,
@@ -743,11 +750,11 @@ class BuildResult(models.Model):
     def _docker_source_folder(self, commit):
         return commit.repo_id.name
 
-    def _checkout(self, commits=None):
+    def _checkout(self):
         self.ensure_one()  # will raise exception if hash not found, we don't want to fail for all build.
         # checkout branch
         exports = {}
-        for commit in commits or self.params_id.commit_link_ids.mapped('commit_id'):
+        for commit in self.env.context.get('defined_commit_ids') or self.params_id.commit_ids:
             build_export_path = self._docker_source_folder(commit)
             if build_export_path in exports:
                 self._log('_checkout', 'Multiple repo have same export path in build, some source may be missing for %s' % build_export_path, level='ERROR')
@@ -758,7 +765,7 @@ class BuildResult(models.Model):
     def _get_available_modules(self):
         available_modules = defaultdict(list)
         #repo_modules = []
-        for commit in self.params_id.commit_link_ids.mapped('commit_id'):
+        for commit in self.env.context.get('defined_commit_ids') or self.params_id.commit_ids:
             for (addons_path, module, manifest_file_name) in commit._get_available_modules():
                 if module in available_modules:
                     self._log(
@@ -874,18 +881,20 @@ class BuildResult(models.Model):
         else:
             self.requested_action = 'wake_up'
 
-    def _get_server_commit(self, commits=None):
+    def _get_server_commit(self):
         """
         returns a commit of the first repo containing server files found in commits or in build commits
         the commits param is not used in code base but could be usefull for jobs and crons
         """
-        for commit in (commits or self.params_id.commit_link_ids.mapped('commit_id')):
+        for commit in (self.env.context.get('defined_commit_ids') or self.params_id.commit_ids):
             if commit.repo_id.server_files:
                 return commit
         raise ValidationError('No repo found with defined server_files')
 
-    def _get_addons_path(self, build_commits=None):
-        for commit in (build_commits or self.params_id.commit_link_ids.mapped('commit_id')):
+    def _get_addons_path(self):
+        for commit in (self.env.context.get('defined_commit_ids') or self.params_id.commit_ids):
+            if not commit.repo_id.manifest_files:
+                continue  # skip repo without addons
             source_path = self._docker_source_folder(commit)
             for addons_path in (commit.repo_id.addons_paths or '').split(','):
                 if os.path.isdir(commit._source_path(addons_path)):
@@ -907,9 +916,9 @@ class BuildResult(models.Model):
         python_params = python_params or []
         py_version = py_version if py_version is not None else build._get_py_version()
         pres = []
-        for build_commit in self.params_id.commit_link_ids:
-            if os.path.isfile(build_commit.commit_id._source_path('requirements.txt')):  # this is a change I think
-                repo_dir = self._docker_source_folder(build_commit.commit_id)
+        for commit_id in self.env.context.get('defined_commit_ids') or self.params_id.commit_ids:
+            if os.path.isfile(commit_id._source_path('requirements.txt')):  # this is a change I think
+                repo_dir = self._docker_source_folder(commit_id)
                 requirement_path = os.path.join(repo_dir, 'requirements.txt')
                 pres.append(['sudo', 'pip%s' % py_version, 'install', '-r', '%s' % requirement_path])
 

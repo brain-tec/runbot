@@ -135,7 +135,12 @@
         <div>TODO: Links, rebuild, wizard, launch empty slots, ...</div>
         <t t-foreach="batch.log_ids" t-as="log">
             <t t-set="logclass" t-value="dict(ERROR='danger', WARNING='warning', INFO='info').get(log.level, 'warning')"/>
-            <div t-attf-class="alert alert-{{logclass}}"><b t-esc="log.level"/> -- <span t-esc="log.message"/></div>
+            <div t-attf-class="alert alert-{{logclass}}"><b t-esc="log.level"/> -- 
+                <t t-foreach="log.message.split('\n')" t-as="line">
+                    <span t-esc="line"/>
+                    <br t-if="not line_last"/>
+                </t>
+            </div>
         </t>
     </t>
 </template>

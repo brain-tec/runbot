@@ -97,8 +97,10 @@ class Command():
         res.seek(0)
         return res.read()
 
-
 def docker_build(log_path, build_dir):
+    return _docker_build(log_path, build_dir)
+
+def _docker_build(log_path, build_dir):
     """Build the docker image
     :param log_path: path to the logfile that will contain odoo stdout and stderr
     :param build_dir: the build directory that contains the Odoo sources to build.
@@ -114,8 +116,10 @@ def docker_build(log_path, build_dir):
     dbuild = subprocess.Popen(['docker', 'build', '--tag', 'odoo:runbot_tests', '.'], stdout=logs, stderr=logs, cwd=docker_dir)
     dbuild.wait()
 
+def docker_run(*args, **kwargs):
+    return _docker_run(*args, **kwargs)
 
-def docker_run(run_cmd, log_path, build_dir, container_name, exposed_ports=None, cpu_limit=None, preexec_fn=None, ro_volumes=None, env_variables=None):
+def _docker_run(run_cmd, log_path, build_dir, container_name, exposed_ports=None, cpu_limit=None, preexec_fn=None, ro_volumes=None, env_variables=None):
     """Run tests in a docker container
     :param run_cmd: command string to run in container
     :param log_path: path to the logfile that will contain odoo stdout and stderr
@@ -174,6 +178,9 @@ def docker_run(run_cmd, log_path, build_dir, container_name, exposed_ports=None,
     return
 
 def docker_stop(container_name, build_dir=None):
+    return _docker_stop(container_name, build_dir)
+
+def _docker_stop(container_name, build_dir):
     """Stops the container named container_name"""
     _logger.info('Stopping container %s', container_name)
     if build_dir:
@@ -220,6 +227,9 @@ def docker_get_gateway_ip():
             return None
 
 def docker_ps():
+    return _docker_ps()
+
+def _docker_ps():
     """Return a list of running containers names"""
     try:
         docker_ps = subprocess.run(['docker', 'ps', '--format', '{{.Names}}'], stderr=subprocess.DEVNULL, stdout=subprocess.PIPE)

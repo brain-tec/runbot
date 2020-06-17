@@ -24,13 +24,13 @@ class RunbotBuildError(models.Model):
     module_name = fields.Char('Module name')  # name in ir_logging
     function = fields.Char('Function name')  # func name in ir logging
     fingerprint = fields.Char('Error fingerprint', index=True)
-    random = fields.Boolean('underterministic error', track_visibility='onchange')
-    responsible = fields.Many2one('res.users', 'Assigned fixer', track_visibility='onchange')
-    fixing_commit = fields.Char('Fixing commit', track_visibility='onchange')
+    random = fields.Boolean('underterministic error', tracking=True)
+    responsible = fields.Many2one('res.users', 'Assigned fixer', tracking=True)
+    fixing_commit = fields.Char('Fixing commit', tracking=True)
     build_ids = fields.Many2many('runbot.build', 'runbot_build_error_ids_runbot_build_rel', string='Affected builds')
     branch_ids = fields.Many2many('runbot.branch', compute='_compute_branch_ids')
     repo_ids = fields.Many2many('runbot.repo', compute='_compute_repo_ids')
-    active = fields.Boolean('Error is not fixed', default=True, track_visibility='onchange')
+    active = fields.Boolean('Error is not fixed', default=True, tracking=True)
     tag_ids = fields.Many2many('runbot.build.error.tag', string='Tags')
     build_count = fields.Integer(compute='_compute_build_counts', string='Nb seen')
     parent_id = fields.Many2one('runbot.build.error', 'Linked to')

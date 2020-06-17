@@ -2,12 +2,12 @@
 import datetime
 
 from odoo.tests.common import TransactionCase
+from odoo.tools import lazy
 from unittest.mock import patch, DEFAULT
 
 import logging
 
 _logger = logging.getLogger(__name__)
-
 
 class RunbotCase(TransactionCase):
 
@@ -45,69 +45,70 @@ class RunbotCase(TransactionCase):
             author_email)]
 
     def setUp(self):
-        super(RunbotCase, self).setUp()
+        super().setUp()
         self.Project = self.env['runbot.project']
         self.Build = self.env['runbot.build']
         self.BuildParameters = self.env['runbot.build.params']
-        self.Repo = self.env['runbot.repo']
-        self.Remote = self.env['runbot.remote']
+        self.Repo = self.env['runbot.repo'].with_context(mail_create_nolog=True, mail_notrack=True)
+        self.Remote = self.env['runbot.remote'].with_context(mail_create_nolog=True, mail_notrack=True)
+        self.Trigger = self.env['runbot.trigger'].with_context(mail_create_nolog=True, mail_notrack=True)
         self.Branch = self.env['runbot.branch']
         self.Bundle = self.env['runbot.bundle']
         self.Version = self.env['runbot.version']
-        self.Config = self.env['runbot.build.config']
+        self.Config = self.env['runbot.build.config'].with_context(mail_create_nolog=True, mail_notrack=True)
+        self.Step = self.env['runbot.build.config.step'].with_context(mail_create_nolog=True, mail_notrack=True)
         self.Commit = self.env['runbot.commit']
         self.Runbot = self.env['runbot.runbot']
-
         self.project = self.env['runbot.project'].create({'name': 'Tests'})
-        self.repo_server = self.env['runbot.repo'].create({
+        self.repo_server = self.Repo.create({
             'name': 'server',
             'project_id': self.project.id,
             'server_files': 'server.py',
             'addons_paths': 'addons,core/addons'
         })
-        self.repo_addons = self.env['runbot.repo'].create({
+        self.repo_addons = self.Repo.create({
             'name': 'addons',
             'project_id': self.project.id,
         })
 
-        self.remote_server = self.env['runbot.remote'].create({
+        self.remote_server = self.Remote.create({
             'name': 'bla@example.com:base/server',
             'repo_id': self.repo_server.id,
             'token': '123',
         })
-        self.remote_server_dev = self.env['runbot.remote'].create({
+        self.remote_server_dev = self.Remote.create({
             'name': 'bla@example.com:dev/server',
             'repo_id': self.repo_server.id,
             'token': '123',
         })
-        self.remote_addons = self.env['runbot.remote'].create({
+        self.remote_addons = self.Remote.create({
             'name': 'bla@example.com:base/addons',
             'repo_id': self.repo_addons.id,
             'token': '123',
         })
-        self.remote_addons_dev = self.env['runbot.remote'].create({
+        self.remote_addons_dev = self.Remote.create({
             'name': 'bla@example.com:dev/addons',
             'repo_id': self.repo_addons.id,
             'token': '123',
         })
 
-        self.version_master = self.Version.create({'name': '13.0'}) # TODO change fix master 13.0
+        self.version_13 = self.Version.create({'name': '13.0'})
         self.default_config = self.env.ref('runbot.runbot_build_config_default')
 
         self.base_params = self.BuildParameters.create({
-            'version_id': self.version_master.id,
+            'version_id': self.version_13.id,
             'project_id': self.project.id,
             'config_id': self.default_config.id,
         })
 
-        self.trigger_server = self.env['runbot.trigger'].create({
+        self.trigger_server = self.Trigger.create({
             'name': 'Server trigger',
             'repo_ids': [(4, self.repo_server.id)],
             'config_id': self.default_config.id,
             'project_id': self.project.id,
         })
 
-        self.trigger_addons = self.env['runbot.trigger'].create({
+        self.trigger_addons = self.Trigger.create({
             'name': 'Addons trigger',
             'repo_ids': [(4, self.repo_addons.id)],
             'dependency_ids': [(4, self.repo_server.id)],
@@ -128,10 +129,10 @@ class RunbotCase(TransactionCase):
         self.start_patcher('local_pgadmin_cursor', 'odoo.addons.runbot.common.local_pgadmin_cursor', False)  # avoid to create databases
         self.start_patcher('isdir', 'odoo.addons.runbot.common.os.path.isdir', True)
         self.start_patcher('isfile', 'odoo.addons.runbot.common.os.path.isfile', True)
-        self.start_patcher('docker_run', 'odoo.addons.runbot.models.build_config.docker_run')
-        self.start_patcher('docker_build', 'odoo.addons.runbot.models.host.docker_build')
-        self.start_patcher('docker_ps', 'odoo.addons.runbot.models.runbot.docker_ps', [])
-        self.start_patcher('docker_stop', 'odoo.addons.runbot.models.runbot.docker_stop')
+        self.start_patcher('docker_run', 'odoo.addons.runbot.container._docker_run')
+        self.start_patcher('docker_build', 'odoo.addons.runbot.container._docker_build')
+        self.start_patcher('docker_ps', 'odoo.addons.runbot.container._docker_ps', [])
+        self.start_patcher('docker_stop', 'odoo.addons.runbot.container._docker_stop')
         self.start_patcher('docker_get_gateway_ip', 'odoo.addons.runbot.models.build_config.docker_get_gateway_ip', None)
 
         self.start_patcher('cr_commit', 'odoo.sql_db.Cursor.commit', None)
@@ -144,6 +145,8 @@ class RunbotCase(TransactionCase):
         self.start_patcher('update_commits_infos', 'odoo.addons.runbot.models.bundle.Batch._update_commits_infos', None)
         self.start_patcher('_local_pg_createdb', 'odoo.addons.runbot.models.build.BuildResult._local_pg_createdb', True)
         self.start_patcher('getmtime', 'odoo.addons.runbot.common.os.path.getmtime', datetime.datetime.now().timestamp())
+
+        self.start_patcher('_get_py_version', 'odoo.addons.runbot.models.build.BuildResult._get_py_version', 3)
 
 
     def start_patcher(self, patcher_name, patcher_path, return_value=DEFAULT, side_effect=DEFAULT, new=DEFAULT):
@@ -167,10 +170,7 @@ class RunbotCase(TransactionCase):
             self.patcher_objects[patcher_name].stop()
             del self.patcher_objects[patcher_name]
 
-
-class RunbotCaseMinimalSetup(RunbotCase):
-
-    def minimal_setup(self):
+    def additionnal_setup(self):
         """Helper that setup a the repos with base branches and heads"""
 
         self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_is_base_regex', r'^((master)|(saas-)?\d+\.\d+)$')
@@ -213,6 +213,8 @@ class RunbotCaseMinimalSetup(RunbotCase):
         self.assertEqual(triggers.repo_ids + triggers.dependency_ids, self.remote_addons.repo_id + self.remote_server.repo_id)
 
         self.branch_addons.bundle_id._force()
+
+class RunbotCaseMinimalSetup(RunbotCase):
 
     def start_patchers(self):
         """Start necessary patchers for tests that use repo__update_batch() and batch._prepare()"""
