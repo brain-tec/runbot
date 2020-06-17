@@ -457,13 +457,93 @@ class ConfigStep(models.Model):
     def _upgrade_create_childs(self):
         pass
 
+    def _run_configure_upgrade_complement(self, build, log_path):
+        """
+        Parameters:
+        upgrade_complement_step:  a configure_upgradestep
+        upgrade_config_id: and upgrade config most likely with a restore step and a test_upgrade step.
+
+        A complement aims to test the exact oposite as a configure_upgrade
+        Some difficulties exist: upgrade use a nightly dump. Future uses the lase master. This means that the upgrade_dumps_trigger_id is different.
+        -> we dont want to apply inverse only in niglthy builds, meaning that we don't want to inverse upgrade_dumps_trigger_id
+
+        Example: trigger upgrade_odoo
+            - Run in all versions (only on master would be enough defining version_id)
+            - run from previous major version
+            - run from last stiky
+
+        -> source is build, we only nee to define target
+
+        When do we need to run complement?
+        for each version where upgrade_odoo can run:
+            check if current version is in target
+
+        The only possibility will be to migrate from current to a next version, we can only check next_version.
+        this.is_main and upgrade_complement_step.upgrade_from_previous_major_version -> is set, we need to migrate only if this.is_main
+
+        usefull vars:
+        -next_version
+        -next_intermediates
+        -is_last_intermediate: version.next_version.last_intermediate=version
+        """
+        params = build.params_id
+        version = params.version_id
+
+        valid_targets = ... # this parts needs to be adapted for build reference too
+
+        if valid_targets:
+            build._log('', 'Stable policy: checking upgrade to %s' % valid_targets)
+        for target in valid_targets:
+            for upgrade_db in self.upgrade_dbs:
+                if not upgrade_db.min_target_version_id or upgrade_db.min_target_version_id.number <= target.params_id.version_id.number:
+                    dump_builds = build # note: here we don't consider the upgrade_db config here
+                    dbs = dump_builds.database_ids.sorted('db_suffix')
+                    for db in dbs:
+                        if fnmatch.fnmatch(db.db_suffix, upgrade_db.db_name):
+                            child = build._add_child({
+                                'upgrade_to_build_id': target.id,
+                                'upgrade_from_build_id': build, # always build
+                                'dump_db': db.id,
+                                'config_id': self.upgrade_complement_step.upgrade_config_id
+                            })
+                            child.description = 'Testing migration from %s to %s using parent db %s (stable policy)' % (
+                                version.name,
+                                target.params_id.version_id.name,
+                                db.name,
+                            )
+                            child.log('This build aims to avoid to break upgrade tests targeting %s' % target.params_id.version_id.name)
+
     def _run_configure_upgrade(self, build, log_path):
+        """
+        Source/target parameters:
+            - upgrade_to_current | (upgrade_to_master + (upgrade_to_major_versions | upgrade_to_all_versions))
+            - upgrade_from_previous_major_version + (upgrade_from_all_intermediate_version | upgrade_from_last_intermediate_version)
+            - upgrade_dbs
+
+        Other parameters
+            - upgrade_flat
+            - upgrade_config_id
+
+        Create subbuilds with parameters defined for a step of type test_upgrade:
+            - upgrade_to_build_id
+            - upgrade_from_build_id
+            - dump_db
+            - config_id (upgrade_config_id)
+
+        If upgrade_flat is False, a level of child will be create for target, source and dbs
+        (if there is multiple choices).
+        If upgrade_flat is True, all combination will be computed locally and only one level of children will be added to caller build.
+
+        Note:
+        - This step should be alone in a config since this config is recursive
+        - A typical upgrade_config_id should have a restore step and a test_upgrade step.
+        """
         assert len(build.parent_path.split('/')) < 6 # small security to avoid recursion loop, 6 is arbitrary
         param = build.params_id
         end = False
         target_builds = False
         source_builds_by_target = {}
-        builds_references = build.params_id.builds_reference_ids
+        builds_references = param.builds_reference_ids
         builds_references_by_version_id = {b.params_id.version_id.id:b for b in builds_references}
         if param.upgrade_to_build_id:
             target_builds = param.upgrade_to_build_id

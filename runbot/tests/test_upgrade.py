@@ -457,13 +457,13 @@ class TestUpgradeFlow(RunbotCase):
                 ]).format(
                     dump_url='http://host.runbot.com/runbot/static/build/%s/logs/%s-account.zip' % (source_dest, source_dest),
                     zip_name='%s-account.zip' % source_dest,
-                    db_name='%s-master-account' % first_build.id,
+                    db_name='%s-master-account' % str(first_build.id).zfill(5),
                 )
             )
         self.patchers['docker_run'].side_effect = docker_run_restore
         first_build.host = host.name
         first_build._init_pendings(host)
-        self.patchers['docker_run'].assert_called_once()
+        self.patchers['docker_run'].assert_called()
 
         def docker_run_upgrade(cmd, *args, ro_volumes=False, **kwargs):
             self.assertEqual(
@@ -478,11 +478,11 @@ class TestUpgradeFlow(RunbotCase):
                 str(cmd),
                 'python3 server/server.py {addons_path} --no-xmlrpcs --no-netrpc -u all -d {db_name} --stop-after-init --max-cron-threads=0'.format(
                     addons_path='--addons-path addons,server/addons,server/core/addons',
-                    db_name='%s-master-account' % first_build.id)
+                    db_name='%s-master-account' % str(first_build.id).zfill(5))
             )
         self.patchers['docker_run'].side_effect = docker_run_upgrade
         first_build._schedule()
-        self.patchers['docker_run'].assert_called_once()
+        self.assertEqual(self.patchers['docker_run'].call_count, 2)
 
         # test_build_references
         batch = self.master_bundle._force()
