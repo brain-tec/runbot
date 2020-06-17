@@ -1,10 +1,9 @@
-from .common import  RunbotCase
-from odoo.tests.common import tagged, SingleTransactionCase
-from odoo.exceptions import UserError
-
 import logging
+from odoo.exceptions import UserError
+from .common import  RunbotCase
 
 _logger = logging.getLogger(__name__)
+
 
 class TestVersions(RunbotCase):
     def test_version_relations(self):
@@ -246,7 +245,7 @@ class TestUpgradeFlow(RunbotCase):
             main_child = build._add_child({'config_id': self.config_nightly_db_generate.id})
             demo = main_child._add_child({'config_id': self.config_all.id})
             demo.database_ids = [
-                (0, 0, {'name': '%s-%s' % (demo.dest, 'base')}), 
+                (0, 0, {'name': '%s-%s' % (demo.dest, 'base')}),
                 (0, 0, {'name': '%s-%s' % (demo.dest, 'dummy')}),
                 (0, 0, {'name': '%s-%s' % (demo.dest, 'all')})]
             demo.host = host.name
@@ -265,7 +264,7 @@ class TestUpgradeFlow(RunbotCase):
 
         batch_weekly = bundle._force(self.weekly_category.id)
         self.assertEqual(batch_weekly.category_id, self.weekly_category)
-        builds_weekly  = {}
+        builds_weekly = {}
         for build in batch_weekly.slot_ids.mapped('build_id'):
             build.database_ids = [(0, 0, {'name': '%s-%s' % (build.dest, 'dummy')})]
             self.assertEqual(build.params_id.config_id, self.config_weekly)
@@ -337,7 +336,7 @@ class TestUpgradeFlow(RunbotCase):
         assertOk(b_11_12, self.build_niglty_12[('root', self.trigger_addons_nightly)], self.build_niglty_11, 'no_demo', 'no-demo-all', self.trigger_addons_nightly)
         assertOk(b_12_13, self.build_niglty_13[('root', self.trigger_addons_nightly)], self.build_niglty_12, 'no_demo', 'no-demo-all', self.trigger_addons_nightly)
 
-        self.step_upgrade_nightly = self.env['runbot.build.config.step'].create({
+        step_upgrade_nightly = self.env['runbot.build.config.step'].create({
             'name': 'upgrade_nightly',
             'job_type': 'configure_upgrade',
             'upgrade_to_master': True,
@@ -350,13 +349,13 @@ class TestUpgradeFlow(RunbotCase):
                 (0, 0, {'config_id': self.config_single.id, 'db_name': '*'})
             ]
         })
-        self.upgrade_config_nightly = self.env['runbot.build.config'].create({
+        upgrade_config_nightly = self.env['runbot.build.config'].create({
             'name': 'Upgrade nightly',
-            'step_order_ids':[(0, 0, {'step_id': self.step_upgrade_nightly.id})]
+            'step_order_ids':[(0, 0, {'step_id': step_upgrade_nightly.id})]
         })
-        self.trigger_upgrade_addons_nightly = self.env['runbot.trigger'].create({
+        trigger_upgrade_addons_nightly = self.env['runbot.trigger'].create({
             'name': 'Nigtly upgrade',
-            'config_id': self.upgrade_config_nightly.id,
+            'config_id': upgrade_config_nightly.id,
             'project_id': self.project.id,
             'dependency_ids': [(4, self.repo_upgrade.id)],
             'upgrade_dumps_trigger_id': self.trigger_addons_weekly.id,
@@ -364,7 +363,7 @@ class TestUpgradeFlow(RunbotCase):
         })
 
         batch = self.master_bundle._force(self.nightly_category.id)
-        upgrade_nightly = batch.slot_ids.filtered(lambda slot: slot.trigger_id == self.trigger_upgrade_addons_nightly).build_id
+        upgrade_nightly = batch.slot_ids.filtered(lambda slot: slot.trigger_id == trigger_upgrade_addons_nightly).build_id
         host = self.env['runbot.host']._get_current()
         upgrade_nightly.host = host.name
         upgrade_nightly._init_pendings(host)
@@ -372,21 +371,27 @@ class TestUpgradeFlow(RunbotCase):
         to_version_builds = upgrade_nightly.children_ids
         self.assertEqual(upgrade_nightly.local_state, 'done')
         self.assertEqual(len(to_version_builds), 4)
-        self.assertEqual(to_version_builds.mapped(
-            'params_id.upgrade_to_build_id.params_id.version_id.name'), 
-            ['11.0', '12.0', '13.0', 'master'])
-        self.assertEqual(to_version_builds.mapped(
-            'params_id.upgrade_from_build_id.params_id.version_id.name'), 
-            [])
+        self.assertEqual(
+            to_version_builds.mapped('params_id.upgrade_to_build_id.params_id.version_id.name'),
+            ['11.0', '12.0', '13.0', 'master']
+        )
+        self.assertEqual(
+            to_version_builds.mapped('params_id.upgrade_from_build_id.params_id.version_id.name'),
+            []
+        )
         to_version_builds.host = host.name
         to_version_builds._init_pendings(host)
         to_version_builds._schedule()
         self.assertEqual(to_version_builds.mapped('local_state'), ['done']*4)
         from_version_builds = to_version_builds.children_ids
-        from_to = ['%s->%s' % (b.params_id.upgrade_from_build_id.params_id.version_id.name, b.params_id.upgrade_to_build_id.params_id.version_id.name)
-                    for b in from_version_builds]
         self.assertEqual(
-            from_to,
+            [
+                '%s->%s' % (
+                    b.params_id.upgrade_from_build_id.params_id.version_id.name,
+                    b.params_id.upgrade_to_build_id.params_id.version_id.name
+                )
+                for b in from_version_builds
+            ],
             ['11.0->12.0', 'saas-11.3->12.0', '12.0->13.0', 'saas-12.3->13.0', '13.0->master', 'saas-13.1->master', 'saas-13.2->master', 'saas-13.3->master']
         )
         from_version_builds.host = host.name
@@ -432,7 +437,8 @@ class TestUpgradeFlow(RunbotCase):
 
         def docker_run_restore(cmd, *args, **kwargs):
             source_dest = first_build.params_id.dump_db.build_id.dest
-            self.assertEqual(str(cmd),
+            self.assertEqual(
+                str(cmd),
                 ' && '.join([
                     'mkdir /data/build/restore',
                     'cd /data/build/restore',
@@ -457,22 +463,26 @@ class TestUpgradeFlow(RunbotCase):
         self.patchers['docker_run'].side_effect = docker_run_restore
         first_build.host = host.name
         first_build._init_pendings(host)
+        self.patchers['docker_run'].assert_called_once()
 
         def docker_run_upgrade(cmd, *args, ro_volumes=False, **kwargs):
-            self.assertEqual(ro_volumes, {
-                'addons': '/tmp/runbot_test/static/sources/addons/addons120',
-                'server': '/tmp/runbot_test/static/sources/server/server120',
-                'upgrade': '/tmp/runbot_test/static/sources/upgrade/123abc789'
-            },
-            "other commit should have been added automaticaly")
-            self.assertEqual(str(cmd),
+            self.assertEqual(
+                ro_volumes, {
+                    'addons': '/tmp/runbot_test/static/sources/addons/addons120',
+                    'server': '/tmp/runbot_test/static/sources/server/server120',
+                    'upgrade': '/tmp/runbot_test/static/sources/upgrade/123abc789'
+                },
+                "other commit should have been added automaticaly"
+            )
+            self.assertEqual(
+                str(cmd),
                 'python3 server/server.py {addons_path} --no-xmlrpcs --no-netrpc -u all -d {db_name} --stop-after-init --max-cron-threads=0'.format(
-                addons_path='--addons-path addons,server/addons,server/core/addons',
-                db_name='%s-master-account' % first_build.id
-            ))
+                    addons_path='--addons-path addons,server/addons,server/core/addons',
+                    db_name='%s-master-account' % first_build.id)
+            )
         self.patchers['docker_run'].side_effect = docker_run_upgrade
-
         first_build._schedule()
+        self.patchers['docker_run'].assert_called_once()
 
         # test_build_references
         batch = self.master_bundle._force()
