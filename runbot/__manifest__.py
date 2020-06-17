@@ -30,6 +30,7 @@
         'views/res_config_settings_views.xml',
         'views/stat_views.xml',
         'views/warning_views.xml',
+        'views/commit_views.xml',
         'wizards/mutli_build_wizard_views.xml',
         'wizards/stat_regex_wizard_views.xml',
         'templates/frontend.xml',
