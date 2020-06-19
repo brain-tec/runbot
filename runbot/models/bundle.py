@@ -1,84 +1,13 @@
-import re
 import time
 import logging
 import datetime
 import subprocess
 
 from collections import defaultdict
-from babel.dates import format_timedelta
 from odoo import models, fields, api
 from ..common import dt2time, s2human_long
 
-
 _logger = logging.getLogger(__name__)
-
-class Version(models.Model):
-    _name = 'runbot.version'
-    _description = "Version"
-
-    _order='number desc,id'
-
-    name = fields.Char('Version name')
-    number = fields.Char('Version number', compute='_compute_version_number', store=True, help="Usefull to sort by version")
-    is_major = fields.Char('Is major version', compute='_compute_version_number', store=True)
-
-    base_bundle_id = fields.Many2one('runbot.bundle', compute='_compute_base_bundle_id')
-
-    previous_major_version_id = fields.Many2one('runbot.version', compute='_compute_version_relations')
-    intermediate_version_ids = fields.Many2many('runbot.version', compute='_compute_version_relations')
-
-    @api.depends('name')
-    def _compute_version_number(self):
-        for version in self:
-            if version.name == 'master':
-                version.number = '~'
-                version.is_major = False
-            else:
-                # max version number with this format: 99.99
-                version.number = '.'.join([elem.zfill(2) for elem in re.sub(r'[^0-9\.]', '', version.name).split('.')])
-                version.is_major = all(elem == '00' for elem in version.number.split('.')[1:])
-
-    def _get(self, name):
-        version = self.search([('name', '=', name)])
-        if not version:
-            version = self.create({
-                'name': name,
-            })
-        return version
-
-    @api.depends('is_major', 'number')
-    def _compute_version_relations(self):
-        all_versions = self.search([], order='number')
-        for version in self:
-            version.previous_major_version_id = next(
-                (
-                    v
-                    for v in reversed(all_versions)
-                    if v.is_major and v.number < version.number
-                ), self.browse())
-            if version.previous_major_version_id:
-                version.intermediate_version_ids = all_versions.filtered(
-                    lambda v, current=version: v.number > current.previous_major_version_id.number and v.number < current.number
-                    )
-            else:
-                version.intermediate_version_ids = self.browse()
-
-    #@api.depends('base_bundle_id.is_base', 'base_bundle_id.version_id', 'base_bundle_id.project_id')
-    @api.depends_context('project_id')
-    def _compute_base_bundle_id(self):
-        project_id = self.env.context.get('project_id')
-        if not project_id:
-            _logger.warning("_compute_base_bundle_id: no project_id in context")
-            project_id = self.env.ref('runbot.main_project').id
-
-        bundles = self.env['runbot.bundle'].search([
-            ('version_id', 'in', self.ids),
-            ('is_base', '=', True),
-            ('project_id', '=', project_id)
-        ])
-        bundle_by_version = {bundle.version_id.id:bundle for bundle in bundles}
-        for version in self:
-            version.base_bundle_id = bundle_by_version.get(version.id)
 
 class Project(models.Model):
     _name = 'runbot.project'
@@ -460,11 +389,18 @@ class Batch(models.Model):
                     self.warning('%s\n%s' % (message, '\n'.join(suggestions)))
                 fill_missing({link.branch_id: link.commit_id for link in batch.commit_link_ids}, 'base_match')
 
-        # 3. FIND missing commit in base heads
+        # 3.1 FIND missing commit in base heads
         if missing_repos:
             if not bundle.is_base:
                 self._log('Not all commit found in bundle branches and base batch. Fallback on base branches heads.')
             fill_missing({branch: branch.head for branch in self.bundle_id.base_id.branch_ids}, 'base_head')
+
+        # 3.2 FIND missing commit in master base heads
+        if missing_repos: # this is to get an upgrade branch.
+            if not bundle.is_base:
+                self._log('Not all commit found in current version. Fallback on master branches heads.')
+            master_bundle = self.env['runbot.version']._get('master').with_context(project_id=self.bundle_id.project_id.id).base_bundle_id
+            fill_missing({branch: branch.head for branch in master_bundle.branch_ids}, 'base_head')
 
         # 4. FIND missing commit in foreign project
         if missing_repos:

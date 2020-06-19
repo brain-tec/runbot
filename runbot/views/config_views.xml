@@ -103,9 +103,12 @@
                         </tree>
                       </field>
                     </group>
-                    <group string="Create settings" attrs="{'invisible': [('job_type', '!=', 'restore')]}">
+                    <group string="Restore settings" attrs="{'invisible': [('job_type', '!=', 'restore')]}">
                         <field name="restore_download_db_suffix"/>
                         <field name="restore_rename_db_suffix"/>
+                    </group>
+                    <group string="Upgrade complement settings" attrs="{'invisible': [('job_type', '!=', 'configure_upgrade_complement')]}">
+                        <field name="upgrade_complement_trigger_id"/>
                     </group>
                 </sheet>
                 <div class="oe_chatter">

@@ -106,6 +106,7 @@ class ConfigStep(models.Model):
         ('python', 'Python code'),
         ('create_build', 'Create build'),
         ('configure_upgrade', 'Configure Upgrade'),
+        ('configure_upgrade_complement', 'Configure Upgrade'),
         ('test_upgrade', 'Test Upgrade'),
         ('restore', 'Restore')
     ], default='install_odoo', required=True, tracking=True)
@@ -146,14 +147,15 @@ class ConfigStep(models.Model):
     # 1. define target
     upgrade_to_master = fields.Boolean() # upgrade niglty + (future migration? no, need last master, not nightly master)
     upgrade_to_current = fields.Boolean() # upgrade_odoo case # TODO if checked, no other should be checked
-    upgrade_to_major_version = fields.Boolean() # upgrade (no master)
+    upgrade_to_major_versions = fields.Boolean() # upgrade (no master)
     upgrade_to_all_versions = fields.Boolean() # upgrade niglty (no master)
-
+    upgrade_to_version_ids = fields.Many2many('runbot.version', relation='runbot_upgrade_to_version_ids', string='Forced version to use as target')
     # 2. define source from target
     #upgrade_from_current = fields.Boolean()  #usefull for future migration (13.0-dev/13.3-dev  -> master) AVOID TO USE THAT
     upgrade_from_previous_major_version = fields.Boolean() # 13.0
     upgrade_from_last_intermediate_version = fields.Boolean() # 13.3
     upgrade_from_all_intermediate_version = fields.Boolean() # 13.2 # 13.1
+    upgrade_from_version_ids = fields.Many2many('runbot.version', relation='runbot_upgrade_from_version_ids', string='Forced version to use as source (cartesian with target)')
 
     upgrade_flat = fields.Boolean("Flat", help="Take all decisions in on build")
 
@@ -163,6 +165,8 @@ class ConfigStep(models.Model):
 
     restore_download_db_suffix = fields.Char('Download db suffix')
     restore_rename_db_suffix = fields.Char('Rename db suffix')
+
+    upgrade_complement_trigger_id = fields.Many2one('runbot.trigger')
 
     @api.constrains('python_code')
     def _check_python_code(self):
@@ -184,18 +188,6 @@ class ConfigStep(models.Model):
             self.install_modules = '-*'
             self.test_enable = False
             self.create_db = False
-
-    # 1. define target
-    upgrade_to_master = fields.Boolean() # upgrade niglty + (future migration? no, need last master, not nightly master)
-    upgrade_to_current = fields.Boolean() # upgrade_odoo case # TODO if checked, no other should be checked
-    upgrade_to_major_versions = fields.Boolean() # upgrade (no master)
-    upgrade_to_all_versions = fields.Boolean() # upgrade niglty (no master)
-
-    # 2. define source from target
-    #upgrade_from_current = fields.Boolean()  #usefull for future migration (13.0-dev/13.3-dev  -> master) AVOID TO USE THAT
-    upgrade_from_previous_major_version = fields.Boolean() # 13.0
-    upgrade_from_last_intermediate_version = fields.Boolean() # 13.3
-    upgrade_from_all_intermediate_version = fields.Boolean() # 13.2 # 13.1
 
     @api.depends('upgrade_to_master',
                  'upgrade_to_current',
@@ -263,22 +255,10 @@ class ConfigStep(models.Model):
 
     def _run_step(self, build, log_path):
         build.log_counter = self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_maxlogs', 100)
-        if self.job_type == 'run_odoo':
-            return self._run_odoo_run(build, log_path)
-        if self.job_type == 'install_odoo':
-            return self._run_odoo_install(build, log_path)
-        elif self.job_type == 'python':
-            return self._run_python(build, log_path)
-        elif self.job_type == 'create_build':
-            return self._create_build(build, log_path)
-        elif self.job_type == 'configure_upgrade':
-            return self._run_configure_upgrade(build, log_path)
-        elif self.job_type == 'test_upgrade':
-            return self._run_test_upgrade(build, log_path)
-        elif self.job_type == 'restore':
-            return self._run_restore(build, log_path)
+        run_method = getattr(self, '_run_%s' % self.job_type)
+        return run_method(build, log_path)
 
-    def _create_build(self, build, log_path):
+    def _run_create_build(self, build, log_path):
         Build = self.env['runbot.build']
         count = 0
         for create_config in self.create_config_ids:
@@ -329,7 +309,7 @@ class ConfigStep(models.Model):
         return self.job_type in ('install_odoo', 'run_odoo') or (self.job_type == 'python' and 'docker_run(' in self.python_code)
 
 
-    def _run_odoo_run(self, build, log_path):
+    def _run_run_odoo(self, build, log_path):
         exports = build._checkout()
         # update job_start AFTER checkout to avoid build being killed too soon if checkout took some time and docker take some time to start
         build.job_start = now()
@@ -373,7 +353,7 @@ class ConfigStep(models.Model):
         self.env['runbot.runbot']._reload_nginx()
         return res
 
-    def _run_odoo_install(self, build, log_path):
+    def _run_install_odoo(self, build, log_path):
         exports = build._checkout()
         # update job_start AFTER checkout to avoid build being killed too soon if checkout took some time and docker take some time to start
         build.job_start = now()
@@ -457,68 +437,58 @@ class ConfigStep(models.Model):
     def _upgrade_create_childs(self):
         pass
 
-    def _run_configure_upgrade_complement(self, build, log_path):
+    def _run_configure_upgrade_complement(self, build, *args):
         """
         Parameters:
-        upgrade_complement_step:  a configure_upgradestep
-        upgrade_config_id: and upgrade config most likely with a restore step and a test_upgrade step.
+            - upgrade_complement_trigger_id:  a configure_upgradestep
 
-        A complement aims to test the exact oposite as a configure_upgrade
-        Some difficulties exist: upgrade use a nightly dump. Future uses the lase master. This means that the upgrade_dumps_trigger_id is different.
-        -> we dont want to apply inverse only in niglthy builds, meaning that we don't want to inverse upgrade_dumps_trigger_id
-
-        Example: trigger upgrade_odoo
-            - Run in all versions (only on master would be enough defining version_id)
-            - run from previous major version
-            - run from last stiky
-
-        -> source is build, we only nee to define target
-
-        When do we need to run complement?
-        for each version where upgrade_odoo can run:
-            check if current version is in target
-
-        The only possibility will be to migrate from current to a next version, we can only check next_version.
-        this.is_main and upgrade_complement_step.upgrade_from_previous_major_version -> is set, we need to migrate only if this.is_main
-
-        usefull vars:
-        -next_version
-        -next_intermediates
-        -is_last_intermediate: version.next_version.last_intermediate=version
+        A complement aims to test the exact oposite of an upgrade trigger.
+        Ignore configs an categories: only focus on versions.
         """
-        params = build.params_id
-        version = params.version_id
-
-        valid_targets = ... # this parts needs to be adapted for build reference too
+        param = build.params_id
+        version = param.version_id
+        builds_references = param.builds_reference_ids
+        builds_references_by_version_id = {b.params_id.version_id.id:b for b in builds_references}
+        upgrade_complement_step = self.upgrade_complement_trigger_id.upgrade_step_id
+        allowed_target_version_ids = self.upgrade_complement_trigger_id.version_ids
+        valid_targets =  build.browse()
+        next_versions = version.next_major_version_id | version.next_intermediate_version_ids
+        if allowed_target_version_ids: # filter only on version where trigger is enabled
+            next_versions = next_versions & allowed_target_version_ids
+        if next_versions:
+            for next_version in next_versions:
+                if version in upgrade_complement_step._get_upgrade_source_versions(next_version):
+                    valid_targets |= (builds_references_by_version_id.get(next_version.id) or build.browse())
 
         if valid_targets:
-            build._log('', 'Stable policy: checking upgrade to %s' % valid_targets)
+            build._log('', 'Stable policy: checking upgrade to %s' % valid_targets) # TODO change text
         for target in valid_targets:
-            for upgrade_db in self.upgrade_dbs:
+            for upgrade_db in upgrade_complement_step.upgrade_dbs:
                 if not upgrade_db.min_target_version_id or upgrade_db.min_target_version_id.number <= target.params_id.version_id.number:
-                    dump_builds = build # note: here we don't consider the upgrade_db config here
-                    dbs = dump_builds.database_ids.sorted('db_suffix')
-                    for db in dbs:
-                        if fnmatch.fnmatch(db.db_suffix, upgrade_db.db_name):
-                            child = build._add_child({
-                                'upgrade_to_build_id': target.id,
-                                'upgrade_from_build_id': build, # always build
-                                'dump_db': db.id,
-                                'config_id': self.upgrade_complement_step.upgrade_config_id
-                            })
-                            child.description = 'Testing migration from %s to %s using parent db %s (stable policy)' % (
-                                version.name,
-                                target.params_id.version_id.name,
-                                db.name,
-                            )
-                            child.log('This build aims to avoid to break upgrade tests targeting %s' % target.params_id.version_id.name)
-
+                    # note: here we don't consider the upgrade_db config here
+                    dbs = build.database_ids.sorted('db_suffix')
+                    for db in self._filter_upgrade_database(dbs, upgrade_db.db_name):
+                        child = build._add_child({
+                            'upgrade_to_build_id': target.id,
+                            'upgrade_from_build_id': build, # always current build
+                            'dump_db': db.id,
+                            'config_id': upgrade_complement_step.upgrade_config_id
+                        })
+                        child.description = 'Testing migration from %s to %s using parent db %s (stable policy)' % (
+                            version.name,
+                            target.params_id.version_id.name,
+                            db.name,
+                        )
+                        child._log('', 'This build tests change of schema in stable version testing upgrade to %s' % target.params_id.version_id.name)
+                    # TODO log somewhere if no db at all is found for a db_suffix
     def _run_configure_upgrade(self, build, log_path):
         """
         Source/target parameters:
             - upgrade_to_current | (upgrade_to_master + (upgrade_to_major_versions | upgrade_to_all_versions))
             - upgrade_from_previous_major_version + (upgrade_from_all_intermediate_version | upgrade_from_last_intermediate_version)
             - upgrade_dbs
+            - upgrade_to_version_ids (use instead of upgrade_to flags)
+            - upgrade_from_version_ids (use instead of upgrade_from flags)
 
         Other parameters
             - upgrade_flat
@@ -552,15 +522,19 @@ class ConfigStep(models.Model):
                 target_builds = build
             else:
                 target_builds = build.browse()
-                master_build = builds_references.filtered(lambda b: b.params_id.version_id.name == 'master')
-                base_builds = (builds_references - master_build)
-                if self.upgrade_to_master:
-                    target_builds = master_build
-                if self.upgrade_to_major_versions:
-                    target_builds |= base_builds.filtered(lambda b: b.params_id.version_id.is_major)
-                elif self.upgrade_to_all_versions:
-                    target_builds |= base_builds
-                target_builds = target_builds.sorted( lambda b: b.params_id.version_id.number)
+                if self.upgrade_to_version_ids:
+                     for version in self.upgrade_to_version_ids:
+                        target_builds |= builds_references_by_version_id.get(version.id) or build.browse()
+                else:
+                    master_build = builds_references.filtered(lambda b: b.params_id.version_id.name == 'master')
+                    base_builds = (builds_references - master_build)
+                    if self.upgrade_to_master:
+                        target_builds = master_build
+                    if self.upgrade_to_major_versions:
+                        target_builds |= base_builds.filtered(lambda b: b.params_id.version_id.is_major)
+                    elif self.upgrade_to_all_versions:
+                        target_builds |= base_builds
+                target_builds = target_builds.sorted(lambda b: b.params_id.version_id.number)
             build._log('', 'Defining target version(s): %s' % ', '.join(target_builds.mapped('params_id.version_id.name')))
             if not target_builds:
                 build._log('_run_configure_upgrade', 'No target version found, skipping', level='ERROR')
@@ -577,17 +551,7 @@ class ConfigStep(models.Model):
                 source_builds_by_target[target_build] = param.upgrade_from_build_id
             else:
                 target_version = target_build.params_id.version_id
-                from_builds = build.browse()
-
-                if self.upgrade_from_previous_major_version:
-                    from_builds |= builds_references_by_version_id.get(target_version.previous_major_version_id.id) or build.browse()
-                if self.upgrade_from_all_intermediate_version:
-                    for version in target_version.intermediate_version_ids:
-                        from_builds |= builds_references_by_version_id.get(version.id) or build.browse()
-                elif self.upgrade_from_last_intermediate_version:
-                    if target_version.intermediate_version_ids:
-                        from_builds |= builds_references_by_version_id.get(target_version.intermediate_version_ids[-1].id) or build.browse()
-                from_builds = from_builds.sorted(lambda b: b.params_id.version_id.number)
+                from_builds = self._get_upgrade_source_builds(target_version, builds_references_by_version_id)
                 source_builds_by_target[target_build] = from_builds
                 build._log('', 'Defining source version(s) for %s: %s' % (target_build.params_id.version_id.name, ', '.join(source_builds_by_target[target_build].mapped('params_id.version_id.name'))))
                 if not from_builds:
@@ -613,31 +577,57 @@ class ConfigStep(models.Model):
                         if not dump_builds:
                             build._log('_run_configure_upgrade', 'No dump build found', level='ERROR')
                         dbs = dump_builds.database_ids.sorted('db_suffix')
-                        for db in dbs:
-                            if fnmatch.fnmatch(db.db_suffix, upgrade_db.db_name):
+                        for db in self._filter_upgrade_database(dbs, upgrade_db.db_name):
+                            #commit_ids = build.params_id.commit_ids
+                            #if commit_ids != target.params_id.commit_ids:
+                            #    repo_ids = commit_ids.mapped('repo_id')
+                            #    for commit_link in target.params_id.commit_link_ids:
+                            #        if commit_link.commit_id.repo_id not in repo_ids:
+                            #            additionnal_commit_links |= commit_link
+                            #    build._log('', 'Adding sources from build [%s](%s)' % (target.id, target.build_url), log_type='markdown')
 
-                                #commit_ids = build.params_id.commit_ids
-                                #if commit_ids != target.params_id.commit_ids:
-                                #    repo_ids = commit_ids.mapped('repo_id')
-                                #    for commit_link in target.params_id.commit_link_ids:
-                                #        if commit_link.commit_id.repo_id not in repo_ids:
-                                #            additionnal_commit_links |= commit_link
-                                #    build._log('', 'Adding sources from build [%s](%s)' % (target.id, target.build_url), log_type='markdown')
+                            child = build._add_child({
+                                'upgrade_to_build_id': target.id,
+                                'upgrade_from_build_id': source,
+                                'dump_db': db.id,
+                                'config_id': self.upgrade_config_id
+                            })
 
-                                child = build._add_child({
-                                    'upgrade_to_build_id': target.id,
-                                    'upgrade_from_build_id': source,
-                                    'dump_db': db.id,
-                                    'config_id': self.upgrade_config_id
-                                })
+                            child.description = 'Testing migration from %s to %s using db [%s](%s) (%s)' % (
+                                source.params_id.version_id.name,
+                                target.params_id.version_id.name,
+                                db.name,
+                                db.build_id.build_url,
+                                config_id.name
+                            ) # TODO check markdown
+                        # TODO log somewhere if no db at all is found for a db_suffix
 
-                                child.description = 'Testing migration from %s to %s using db [%s](%s) (%s)' % (
-                                    source.params_id.version_id.name,
-                                    target.params_id.version_id.name,
-                                    db.name,
-                                    db.build_id.build_url,
-                                    config_id.name
-                                ) # TODO check markdown
+    def _get_upgrade_source_versions(self, target_version):
+        if self.upgrade_from_version_ids:
+            return self.upgrade_from_version_ids
+        else:
+            versions = self.env['runbot.version'].browse()
+            if self.upgrade_from_previous_major_version:
+                versions |= target_version.previous_major_version_id
+            if self.upgrade_from_all_intermediate_version:
+                versions |= target_version.intermediate_version_ids
+            elif self.upgrade_from_last_intermediate_version:
+                if target_version.intermediate_version_ids:
+                    versions |= target_version.intermediate_version_ids[-1]
+        return versions
+
+    def _get_upgrade_source_builds(self, target_version, builds_references_by_version_id):
+        versions = self._get_upgrade_source_versions(target_version)
+        from_builds = self.env['runbot.build'].browse()
+        for version in versions: 
+            from_builds |= builds_references_by_version_id.get(version.id) or self.env['runbot.build'].browse()
+        return from_builds.sorted(lambda b: b.params_id.version_id.number)
+
+    def _filter_upgrade_database(self, dbs, pattern):
+        pat_list = pattern.split(',')
+        for db in dbs:
+            if any(fnmatch.fnmatch(db.db_suffix, pat) for pat in pat_list):
+                yield db
 
     def _run_test_upgrade(self, build, log_path):
 
@@ -720,7 +710,32 @@ class ConfigStep(models.Model):
         # is last_"done"_batch enough?
         return refs_builds
 
+    def _is_upgrade_step(self):
+        return self.job_type in ('configure_upgrade', 'configure_upgrade_complement')
+
     def _reference_batches(self, bundle, category_id):
+        if self.job_type == 'configure_upgrade_complement':
+            return self._reference_batches_complement(bundle, category_id)
+        else:
+            return self._reference_batches_upgrade(bundle, category_id)
+
+    def _reference_batches_complement(self, bundle, category_id):
+        # TODO factorize with step logic
+        version = bundle.version_id
+        next_versions = version.next_major_version_id | version.next_intermediate_version_ids  # TODO filter on trigger version
+        target_versions = version.browse()
+
+        upgrade_complement_step = self.upgrade_complement_trigger_id.upgrade_step_id
+
+        if next_versions:
+            for next_version in next_versions:
+                if bundle.version_id in upgrade_complement_step._get_upgrade_source_versions(next_version):
+                    target_versions |= next_version
+        return target_versions.with_context(
+            category_id=category_id, project_id=bundle.project_id.id
+            ).mapped('base_bundle_id.last_done_batch')
+
+    def _reference_batches_upgrade(self, bundle, category_id):
         target_refs_bundles = self.env['runbot.bundle']
         sticky_domain = [('sticky', '=', True), ('project_id', '=', bundle.project_id.id)]
         if self.upgrade_to_master:
@@ -850,7 +865,7 @@ class ConfigStep(models.Model):
             build._log('coverage_result', 'Coverage file not found', level='WARNING')
         return build_values
 
-    def _make_upgrade_results(self, build):
+    def _make_upgrade_results(self, build):  # TODO test me
         build_values = {}
         build._log('upgrade', 'Getting results for build %s' % build.dest)
 
