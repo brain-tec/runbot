@@ -85,7 +85,7 @@
                   </b>
                 </a>
                 <div class="dropdown-menu js_usermenu" role="menu">
-                  <a class="dropdown-item" role="menuitem" t-attf-href="/web/session/logout?redirect=/">Logout</a>
+                  <a class="dropdown-item" id="o_logout" role="menuitem" t-attf-href="/web/session/logout?redirect=/">Logout</a>
                   <a class="dropdown-item" role="menuitem" t-attf-href="/web">Web</a>
                 </div>
               </li>

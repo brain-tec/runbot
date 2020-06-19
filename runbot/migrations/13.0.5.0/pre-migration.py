@@ -2,8 +2,13 @@
 import logging
 _logger = logging.getLogger(__name__)
 
+
 def migrate(cr, version):
     # dependency is not correct since it will be all commits. This also free the name for a build dependant on another build params
+
+    # those indexes are improving the branches deletion
+    cr.execute('CREATE INDEX ON runbot_branch (defined_sticky);')
+    cr.execute('CREATE INDEX ON runbot_build_dependency (closest_branch_id);')
 
     # Fix duplicate problems
     cr.execute("UPDATE runbot_build SET duplicate_id = null WHERE duplicate_id > id")
@@ -23,6 +28,9 @@ def migrate(cr, version):
         cr.execute("""DELETE FROM runbot_branch WHERE (sticky='f' OR sticky IS NULL) AND branch_name=%s and repo_id=%s and name ~ 'refs/heads/.+/.+' RETURNING id,branch_name;""", (branch_name, repo_id))
         for branch_id, branch_name in cr.fetchall():
             _logger.warning('Deleting branch id %s with branch_name "%s"', branch_id, branch_name)
+
+    # avoid recompute of branch._comput_bundle_id otherwise, it cannot find xml data
+    cr.execute('ALTER TABLE runbot_branch ADD COLUMN bundle_id INTEGER;')
 
 
     # TODO delete runbot.inherits_branch_in_menu
