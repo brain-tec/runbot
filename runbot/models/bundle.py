@@ -21,7 +21,7 @@ class Bundle(models.Model):
     _description = "Bundle"
 
     name = fields.Char('Bundle name', required=True, help="Name of the base branch")
-    project_id = fields.Many2one('runbot.project', required=True)
+    project_id = fields.Many2one('runbot.project', required=True, index=True)
     branch_ids = fields.One2many('runbot.branch', 'bundle_id')
 
     # custom behaviour

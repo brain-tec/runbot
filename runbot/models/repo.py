@@ -56,7 +56,7 @@ class RepoTrigger(models.Model):
         for trigger in self:
             trigger.upgrade_step_id = False
             if trigger.upgrade_dumps_trigger_id:
-                if len(trigger.config_id.step_order_ids) != 1 or trigger.config_id.step_order_ids[0].step_id.job_type != 'configure_upgrade':
+                if len(trigger.config_id.step_order_ids) != 1 or not trigger.config_id.step_order_ids[0].step_id._is_upgrade_step():
                     raise UserError('Upgrade trigger should have a config with a single step of type Configure Upgrade')
                 trigger.upgrade_step_id = trigger.config_id.step_order_ids[0].step_id
 
@@ -66,8 +66,6 @@ class RepoTrigger(models.Model):
             refs_builds = self.upgrade_step_id._reference_builds(bundle, self.upgrade_dumps_trigger_id)
             return [(4, b.id) for b in refs_builds]
         return []
-
-
 
 
 class Category(models.Model):

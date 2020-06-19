@@ -17,15 +17,15 @@ class Branch(models.Model):
     name = fields.Char('Name', required=True)
     remote_id = fields.Many2one('runbot.remote', 'Remote', required=True, ondelete='cascade')
 
-    head = fields.Many2one('runbot.commit', 'Head Commit')
+    head = fields.Many2one('runbot.commit', 'Head Commit', index=True)
     head_name = fields.Char('Head name', related='head.name', store=True)
 
     reference_name = fields.Char(compute='_compute_reference_name', string='Bundle name', store=True)
-    bundle_id = fields.Many2one('runbot.bundle', 'Bundle', compute='_compute_bundle_id', store=True, ondelete='cascade')
+    bundle_id = fields.Many2one('runbot.bundle', 'Bundle', compute='_compute_bundle_id', store=True, ondelete='cascade', index=True)
 
     is_pr = fields.Boolean('IS a pr', required=True)
     pull_head_name = fields.Char(compute='_compute_branch_infos', string='PR HEAD name', readonly=1, store=True)
-    pull_head_remote_id = fields.Many2one('runbot.remote', 'Pull head repository', compute='_compute_branch_infos', store=True)
+    pull_head_remote_id = fields.Many2one('runbot.remote', 'Pull head repository', compute='_compute_branch_infos', store=True, index=True)
     target_branch_name = fields.Char(compute='_compute_branch_infos', string='PR target branch', store=True)
 
     branch_url = fields.Char(compute='_compute_branch_url', string='Branch url', readonly=1)

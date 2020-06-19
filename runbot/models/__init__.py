@@ -16,3 +16,4 @@ from . import build_stat_regex
 from . import res_config_settings
 from . import ir_ui_view
 from . import database
+from . import version

@@ -36,7 +36,7 @@ class TestBuildConfigStep(RunbotCase):
         config = self.Config.create({'name': 'test_config'})
         config_step.create_config_ids = [config.id]
 
-        config_step._create_build(self.parent_build, '/tmp/essai')
+        config_step._run_create_build(self.parent_build, '/tmp/essai')
         self.assertEqual(len(self.parent_build.children_ids), 2, 'Two sub-builds should have been generated')
 
         # check that the result will be ignored by parent build
@@ -60,7 +60,7 @@ class TestBuildConfigStep(RunbotCase):
         config = self.Config.create({'name': 'test_config'})
         config_step.create_config_ids = [config.id]
 
-        config_step._create_build(self.parent_build, '/tmp/essai')
+        config_step._run_create_build(self.parent_build, '/tmp/essai')
         self.assertEqual(len(self.parent_build.children_ids), 2, 'Two sub-builds should have been generated')
 
         # check that the result will be ignored by parent build
@@ -147,7 +147,7 @@ class TestBuildConfigStep(RunbotCase):
             self.assertEqual(log_path, 'dev/null/logpath')
 
         self.patchers['docker_run'].side_effect = docker_run
-        config_step._run_odoo_install(self.parent_build, 'dev/null/logpath')
+        config_step._run_install_odoo(self.parent_build, 'dev/null/logpath')
 
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
     def test_dump(self, mock_checkout):
@@ -165,7 +165,7 @@ class TestBuildConfigStep(RunbotCase):
 
         self.patchers['docker_run'].side_effect = docker_run
 
-        config_step._run_odoo_install(self.parent_build, 'dev/null/logpath')
+        config_step._run_install_odoo(self.parent_build, 'dev/null/logpath')
 
 
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
@@ -189,7 +189,7 @@ class TestBuildConfigStep(RunbotCase):
             self.assertEqual(tags, '/module,:class.method')
 
         self.patchers['docker_run'].side_effect = docker_run
-        config_step._run_odoo_install(self.parent_build, 'dev/null/logpath')
+        config_step._run_install_odoo(self.parent_build, 'dev/null/logpath')
 
         config_step.enable_auto_tags = True
 
@@ -200,7 +200,7 @@ class TestBuildConfigStep(RunbotCase):
             self.assertEqual(tags, '/module,:class.method,-:otherclass.othertest')
 
         self.patchers['docker_run'].side_effect = docker_run2
-        config_step._run_odoo_install(self.parent_build, 'dev/null/logpath')
+        config_step._run_install_odoo(self.parent_build, 'dev/null/logpath')
 
 
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
@@ -220,14 +220,14 @@ class TestBuildConfigStep(RunbotCase):
 
         self.patchers['docker_run'].side_effect = docker_run
 
-        config_step._run_odoo_install(self.parent_build, 'dev/null/logpath')
+        config_step._run_install_odoo(self.parent_build, 'dev/null/logpath')
 
         assert_db_name = 'custom_build'
         parent_build_params = self.parent_build.params_id.copy({'config_data': {'db_name': 'custom_build'}})
         parent_build = self.parent_build.copy({'params_id': parent_build_params.id})
-        config_step._run_odoo_install(parent_build, 'dev/null/logpath')
+        config_step._run_install_odoo(parent_build, 'dev/null/logpath')
 
-        config_step._run_odoo_run(parent_build, 'dev/null/logpath')
+        config_step._run_run_odoo(parent_build, 'dev/null/logpath')
 
         self.assertEqual(call_count, 3)
 
@@ -269,7 +269,7 @@ docker_run(cmd)
             call_count += 1
 
         self.patchers['docker_run'].side_effect = docker_run
-        config_step._run_odoo_install(self.parent_build, 'dev/null/logpath')
+        config_step._run_install_odoo(self.parent_build, 'dev/null/logpath')
 
         self.assertEqual(call_count, 1)
 

@@ -33,7 +33,7 @@ class RunbotBuildError(models.Model):
     active = fields.Boolean('Error is not fixed', default=True, tracking=True)
     tag_ids = fields.Many2many('runbot.build.error.tag', string='Tags')
     build_count = fields.Integer(compute='_compute_build_counts', string='Nb seen')
-    parent_id = fields.Many2one('runbot.build.error', 'Linked to')
+    parent_id = fields.Many2one('runbot.build.error', 'Linked to', index=True)
     child_ids = fields.One2many('runbot.build.error', 'parent_id', string='Child Errors', context={'active_test': False})
     children_build_ids = fields.Many2many('runbot.build', compute='_compute_children_build_ids', string='Children builds')
     error_history_ids = fields.Many2many('runbot.build.error', compute='_compute_error_history_ids', string='Old errors', context={'active_test': False})

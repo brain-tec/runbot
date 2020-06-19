@@ -47,7 +47,7 @@ class BuildParameters(models.Model):
     commit_link_ids = fields.Many2many('runbot.commit.link', copy=True)
     commit_ids = fields.Many2many('runbot.commit', compute='_compute_commit_ids')
     version_id = fields.Many2one('runbot.version', required=True, index=True)
-    project_id = fields.Many2one('runbot.project', required=True)  # for access rights
+    project_id = fields.Many2one('runbot.project', required=True, index=True)  # for access rights
     trigger_id = fields.Many2one('runbot.trigger', index=True)  # for access rights
     category = fields.Char('Category', index=True) # normal vs nightly vs weekly, ...
     # other informations
@@ -637,8 +637,8 @@ class BuildResult(models.Model):
                             'port': port,
                         })
                         build._log('wake_up', '**Waking up build**', log_type='markdown', level='SEPARATOR')
-                        self.env['runbot.build.config.step']._run_odoo_run(build, log_path)
-                        # reload_nginx will be triggered by _run_odoo_run
+                        self.env['runbot.build.config.step']._run_run_odoo(build, log_path)
+                        # reload_nginx will be triggered by _run_run_odoo
                     except Exception:
                         _logger.exception('Failed to wake up build %s', build.dest)
                         build._log('_schedule', 'Failed waking up build', level='ERROR')

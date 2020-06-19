@@ -227,7 +227,7 @@ class Runbot(models.AbstractModel):
             if runbot_do_fetch:
                 repos = self.env['runbot.repo'].search([('mode', '!=', 'disabled')])
 
-                processing_batch = self.env['runbot.batch'].search([('state', '!=', 'done')], order='id asc')
+                processing_batch = self.env['runbot.batch'].search([('state', 'in', ('preparing', 'ready'))], order='id asc')
                 preparing_batch = processing_batch.filtered(lambda b: b.state == 'preparing')
 
                 for repo in repos:
