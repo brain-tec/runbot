@@ -6,6 +6,10 @@
         <field name="model">runbot.build.config</field>
         <field name="inherit_id" ref="runbot.config_form"/>
         <field name="arch" type="xml">
+
+            <xpath expr="//field[@name='protected']" position="after">
+                <field name="github_context"/>
+            </xpath>
             <xpath expr="//field[@name='step_order_ids']" position="replace">
                 <field name="step_order_ids">
                     <tree string="Step list">

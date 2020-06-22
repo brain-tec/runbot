@@ -28,6 +28,11 @@ def regex_match_file(filename, pattern):
 
 _logger = logging.getLogger(__name__)
 
+class Config(models.Model):
+    _inherit = "runbot.build.config"
+
+    github_context = fields.Char('Github context', default='ci/runbot')
+
 class ConfigStep(models.Model):
     _inherit = 'runbot.build.config.step'
 

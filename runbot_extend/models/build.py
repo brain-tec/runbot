@@ -109,3 +109,8 @@ class runbot_build(models.Model):
             cmd += ["-c", "/data/build/build.conf"]
 
         return cmd
+
+    def _github_status_notify_all(self, status):
+        if status.get('context') == 'ci/runbot':
+            status['context'] = self.config_id.github_context or "ci/runbot"
+        return super(runbot_build, self)._github_status_notify_all(status)
