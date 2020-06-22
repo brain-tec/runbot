@@ -32,6 +32,14 @@ def migrate(cr, version):
     # avoid recompute of branch._comput_bundle_id otherwise, it cannot find xml data
     cr.execute('ALTER TABLE runbot_branch ADD COLUMN bundle_id INTEGER;')
 
+    # avoid recompute of pull_head_name wich is emptied during the recompute
+    cr.execute('ALTER TABLE runbot_branch ADD COLUMN pull_head_remote_id INTEGER;')
+
+    cr.execute('ALTER TABLE runbot_branch ADD COLUMN is_pr BOOLEAN;')
+    cr.execute("""UPDATE runbot_branch SET is_pr = CASE WHEN name like 'refs/pull/%' THEN true ELSE false END;""")
+
+    # delete runbot.repo inehrited views
+    cr.execute("DELETE FROM ir_ui_view WHERE inherit_id IN (SELECT id from ir_ui_view WHERE name = 'runbot.repo');")
 
     # TODO delete runbot.inherits_branch_in_menu
 

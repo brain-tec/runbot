@@ -149,7 +149,6 @@ def migrate(cr, version):
     #######################
     # Branches
     #######################
-    cr.execute("""UPDATE runbot_branch SET is_pr = CASE WHEN name like 'refs/pull/%' THEN true ELSE false END;""")
     cr.execute('UPDATE runbot_branch SET name=branch_name')
 
     #TODO si master en odoo-dev pas dans le bundle master du repo (faire ça malin)
@@ -296,7 +295,7 @@ def migrate(cr, version):
 
             remote_id = env['runbot.remote'].browse(repo_id)
             commit_link_ids_create_values = [
-                {'commit_id': commit_link_ids[id][remote_id.repo_id.id], 'match_type':'exact'}]
+                {'commit_id': commit_link_ids[id][remote_id.repo_id.id], 'match_type':'base_head'}]
 
             cr.execute('SELECT dependency_hash, dependecy_repo_id, closest_branch_id, match_type FROM runbot_build_dependency WHERE build_id=%s', (id,))
             for dependency_hash, dependecy_repo_id, closest_branch_id, match_type in cr.fetchall():
@@ -313,7 +312,7 @@ def migrate(cr, version):
                     sha_repo_commits[key] = commit
                     sha_commits[dependency_hash] = commit
                 commit_link_ids[id][dependency_remote_id.id] = commit.id
-                match_type = 'default' if match_type in ('pr_target', 'prefix', 'default') else 'head'
+                match_type = 'base_head' if match_type in ('pr_target', 'prefix', 'default') else 'head'
                 commit_link_ids_create_values.append({'commit_id': commit.id, 'match_type':match_type, 'branch_id': closest_branch_id})
 
             params = param.create({
