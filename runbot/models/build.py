@@ -48,12 +48,12 @@ class BuildParameters(models.Model):
     commit_ids = fields.Many2many('runbot.commit', compute='_compute_commit_ids')
     version_id = fields.Many2one('runbot.version', required=True, index=True)
     project_id = fields.Many2one('runbot.project', required=True)  # for access rights
-    trigger_id = fields.Many2one('runbot.trigger')  # for access rights
+    trigger_id = fields.Many2one('runbot.trigger', index=True)  # for access rights
     category = fields.Char('Category', index=True) # normal vs nightly vs weekly, ...
     # other informations
     extra_params = fields.Char('Extra cmd args')
     config_id = fields.Many2one('runbot.build.config', 'Run Config', required=True,
-        default=lambda self: self.env.ref('runbot.runbot_build_config_default', raise_if_not_found=False))
+        default=lambda self: self.env.ref('runbot.runbot_build_config_default', raise_if_not_found=False), index=True)
     config_data = JsonDictField('Config Data')
 
     build_ids = fields.One2many('runbot.build', 'params_id')
@@ -61,9 +61,9 @@ class BuildParameters(models.Model):
     modules = fields.Char('Modules')
 
     # todo 2 fingerprint ?, soft, complete. Complete for build-> params, soft for slot-> build
-    upgrade_to_build_id = fields.Many2one('runbot.build')  # use to define sources to use with upgrade script
-    upgrade_from_build_id = fields.Many2one('runbot.build')  # use to download db
-    dump_db = fields.Many2one('runbot.database')  # use to define db to download
+    upgrade_to_build_id = fields.Many2one('runbot.build', index=True)  # use to define sources to use with upgrade script
+    upgrade_from_build_id = fields.Many2one('runbot.build', index=True)  # use to download db
+    dump_db = fields.Many2one('runbot.database', index=True)  # use to define db to download
 
     fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)
 

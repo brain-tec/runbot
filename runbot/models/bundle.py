@@ -643,8 +643,8 @@ class RunbotCommitLink(models.Model):
     match_type = fields.Selection([('new', 'New head of branch'), ('head', 'Head of branch'), ('base_head', 'Found on base branch'), ('base_match', 'Found on base branch')])  # HEAD, DEFAULT
     branch_id = fields.Many2one('runbot.branch', string='Found in branch')  # Shouldn't be use for anything else than display
 
-    base_commit_id = fields.Many2one('runbot.commit', 'Base head commit')
-    merge_base_commit_id = fields.Many2one('runbot.commit', 'Merge Base commit')
+    base_commit_id = fields.Many2one('runbot.commit', 'Base head commit', index=True)
+    merge_base_commit_id = fields.Many2one('runbot.commit', 'Merge Base commit', index=True)
     base_behind = fields.Integer('# commits behind base')
     base_ahead = fields.Integer('# commits ahead base')
     file_changed = fields.Integer('# file changed')
