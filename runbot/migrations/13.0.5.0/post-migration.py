@@ -164,7 +164,7 @@ def migrate(cr, version):
 
     branches._compute_reference_name()
 
-    bundles = {('master', RD_project.id):env.ref('runbot.bundle_master')}
+    bundles = {('master', RD_project.id): env.ref('runbot.bundle_master')}
     branch_to_bundle = {}
     branch_to_version = {}
     progress = _bar(len(branches))
@@ -196,7 +196,7 @@ def migrate(cr, version):
         bundle = bundles[key]
         if bundle.is_base and branch.is_pr:
             _logger.warning('Trying to add pr to base bundle')
-        bundle = dummy_bundle
+            bundle = dummy_bundle
         branch.bundle_id = bundle
         branch_to_bundle[branch.id] = bundle
         branch_to_version[branch.id] = bundle.version_id.id
