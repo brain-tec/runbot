@@ -52,15 +52,15 @@
               <t t-if="build.local_result == 'ok'"><t t-set="klass">success</t></t>
               <t t-if="build.local_result == 'killed'"><t t-set="klass">killed</t></t>
               <td>
-                <a t-attf-href='/runbot/build/{{build.id}}'><span t-attf-class="badge badge-{{klass}}"><t t-esc="build.config_id.name"/></span></a>
+                <a t-attf-href='/runbot/build/{{build.id}}'><span t-attf-class="badge badge-{{klass}}"><t t-esc="build.params_id.config_id.name"/></span></a>
               </td>
               <td>
-              <span t-foreach="build.children_ids.sorted(key=lambda c:c.config_id.name, reverse=True).filtered(lambda c: c.local_result != 'ok' and not c.orphan_result)" t-as="child">
+              <span t-foreach="build.children_ids.sorted(key=lambda c:c.params_id.config_id.name, reverse=True).filtered(lambda c: c.local_result != 'ok' and not c.orphan_result)" t-as="child">
                 <t t-if="child.global_result == 'ko'"><t t-set="klass">danger</t></t>
                 <t t-if="child.global_result == 'warn'"><t t-set="klass">warning</t></t>
                 <t t-if="child.global_result == 'ok'"><t t-set="klass">success</t></t>
                 <t t-if="child.global_result == 'killed'"><t t-set="klass">killed</t></t>
-                <a t-attf-href='/runbot/build/{{child.id}}'><span t-attf-class="badge badge-{{klass}}"><t t-esc="child.params_id.config_data.get('db_name') or child.config_id.name"/></span></a>
+                <a t-attf-href='/runbot/build/{{child.id}}'><span t-attf-class="badge badge-{{klass}}"><t t-esc="child.params_id.config_data.get('db_name') or child.params_id.config_id.name"/></span></a>
               </span>
               </td>
             </tr>
@@ -155,7 +155,7 @@
                           <t t-set="build" t-value="slot.build_id"/>
                           <td><span t-attf-class="badge badge-{{slot.build_id.get_color_class()}}"><i t-attf-class="fa fa-{{category.icon}}"/></span></td>
                           <td t-foreach="build.children_ids" t-as="child">
-                            <span t-attf-class="badge badge-{{slot.build_id.get_color_class()}}"><t t-esc="child.config_id.name[:4]"/></span>
+                            <span t-attf-class="badge badge-{{slot.build_id.get_color_class()}}"><t t-esc="child.params_id.config_id.name[:4]"/></span>
                           </td>
                         </tr>
                       </t>
@@ -163,7 +163,6 @@
                   </td>
                 </tr>
               </table>
-              
             </div>
           </div>
         </div>

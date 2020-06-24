@@ -176,7 +176,7 @@
                                 </t>
                                 <b>Host:</b>  <t t-esc="build.host"/><br/>
                                 <b>Total time:</b>  <t t-esc="build.get_formated_build_time()"/><br/>
-
+                                <b>Trigger:</b> <t t-esc="build.params_id.trigger_id.name"/><br/>
                             <br/>
                             </td>
                             <td t-if="build.children_ids">
@@ -190,9 +190,9 @@
                                       <t t-raw="child.md_description" />
                                     </t>
                                     <t t-else="">
-                                        with config <t t-esc="child.config_id.name"/>
+                                        with config <t t-esc="child.params_id.config_id.name"/>
                                     </t>
-                                    <a groups="runbot.group_build_config_user" t-attf-href="/web#id={{child.config_id.id}}&amp;view_type=form&amp;model=runbot.build.config">...</a>
+                                    <a groups="runbot.group_build_config_user" t-attf-href="/web#id={{child.params_id.config_id.id}}&amp;view_type=form&amp;model=runbot.build.config">...</a>
                                     <t t-if="child.orphan_result"><i class="fa fa-chain-broken" title="Build result ignored for parent" /></t>
                                     <t t-if="child.job"> Running step: <t t-esc="child.job"/></t>
                                     <t t-if="child.global_state in ['testing', 'waiting']">
