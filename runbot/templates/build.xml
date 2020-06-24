@@ -115,7 +115,7 @@
                             <b>Batch:</b> <a t-esc="bundles.name" t-attf-href="/runbot/batch/{{batches[0].id}}"/>
                           </t>
                           <t t-else="">
-                            <b>Bundle:</b> <t t-esc="bundles.name" t-attf-href="/runbot/bundle/{{bundle.id}}"/>
+                            <b>Bundle:</b> <t t-esc="bundles.name" t-attf-href="/runbot/bundle/{{bundle.id}}"/><br/>
                           </t>
                         </t>
                         <t t-else="">
@@ -150,6 +150,7 @@
                                 <b>Version:</b> <t t-esc="build.params_id.version_id.name"/><br/>
                                 <b>Config:</b> <t t-esc="build.params_id.config_id.name"/><br/>
                                 <t t-if='more'>
+                                  <b>Trigger:</b>  <t t-esc="build.params_id.trigger_id.name"/><br/>
                                   <b>Config data:</b> <t t-esc="build.params_id.config_data.dict"/><br/>
                                   <b>Modules:</b> <t t-esc="build.params_id.modules"/><br/>
                                   <b>Extra params:</b> <t t-esc="build.params_id.extra_params"/><br/>
@@ -173,8 +174,8 @@
                                       </t>
                                       <br/>
                                   </t>
+                                  <b>Host:</b>  <t t-esc="build.host"/><br/>
                                 </t>
-                                <b>Host:</b>  <t t-esc="build.host"/><br/>
                                 <b>Total time:</b>  <t t-esc="build.get_formated_build_time()"/><br/>
                                 <b>Trigger:</b> <t t-esc="build.params_id.trigger_id.name"/><br/>
                             <br/>

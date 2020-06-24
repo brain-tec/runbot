@@ -62,8 +62,6 @@ class Commit(models.Model):
         Status = self.env['runbot.commit.status']
         last_status = Status.search([('commit_id', '=', self.id), ('context', '=', context)], order='id desc', limit=1)
         if last_status and last_status.state == state:
-            import traceback
-            traceback.print_stack()
             _logger.info('Skipping already sent status %s:%s for %s', context, state, self.name)
             return
         last_status = Status.create({
@@ -88,7 +86,7 @@ class CommitStatus(models.Model):
     description = fields.Char('Description')
     sent_date = fields.Datetime('Sent Date')
 
-    def _send(self, force=False):
+    def _send(self):
         user_id = self.env.user.id
         _dbname = self.env.cr.dbname
         _context = self.env.context
@@ -108,7 +106,7 @@ class CommitStatus(models.Model):
             'target_url': self.target_url,
             'description': self.description,
         }
-        if force and remote_ids:  # TODO remove this security force false and
+        if False and remote_ids:  # TODO remove this security force false and
             def send_github_status():
                 try:
                     db_registry = registry(_dbname)

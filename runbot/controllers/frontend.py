@@ -241,7 +241,7 @@ class Runbot(Controller):
     @o_route([
         '/runbot/build/<int:build_id>/<operation>',
     ], type='http', auth="public", methods=['POST'], csrf=False)
-    def build_operations(self, build_id, operation, exact=0, **post):
+    def build_operations(self, build_id, operation, **post):
         build = request.env['runbot.build'].sudo().browse(build_id)
         if operation == 'rebuild':
             build = build._rebuild()

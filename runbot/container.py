@@ -238,7 +238,10 @@ def _docker_ps():
         return []
     if docker_ps.returncode != 0:
         return []
-    return docker_ps.stdout.decode().strip().split('\n')
+    output = docker_ps.stdout.decode()
+    if not output:
+        return []
+    return output.strip().split('\n')
 
 def build(args):
     """Build container from CLI"""
@@ -352,8 +355,9 @@ def tests(args):
 # Ugly monkey patch to set runbot in set runbot in testing mode
 # No Docker will be started, instead a fake docker_run function will be used
 ##############################################################################
-if os.environ.get('RUNBOT_MODE') == 'test':
 
+if os.environ.get('RUNBOT_MODE') == 'test':
+    _logger.warning('Using Fake Docker')
     def fake_docker_run(run_cmd, log_path, build_dir, container_name, exposed_ports=None, cpu_limit=None, preexec_fn=None, ro_volumes=None, env_variables=None, *args, **kwargs):
         _logger.info('Docker Fake Run: %s', run_cmd)
         open(os.path.join(build_dir, 'start-%s' % container_name), 'w').write('fake start\n')
@@ -363,7 +367,8 @@ if os.environ.get('RUNBOT_MODE') == 'test':
             log_file.write('run_cmd: %s\n' % run_cmd)
             log_file.write('build_dir: %s\n' % container_name)
             log_file.write('container_name: %s\n' % container_name)
-            log_file.write('Modules loaded.\n')
+            log_file.write('.modules.loading: Modules loaded.\n')
+            log_file.write('Initiating shutdown\n')
 
     docker_run = fake_docker_run
 

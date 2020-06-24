@@ -298,7 +298,7 @@ class BuildResult(models.Model):
     def create(self, values_list):
         builds = super().create(values_list)
         for build in builds:
-            if not build.parent_id:  # avoid sending pending for child build (except for exact rebuild?)
+            if not build.parent_id:  # avoid sending pending for child build (TODO check except for exact rebuild?)
                 build._github_status()
         return builds
 
@@ -432,8 +432,8 @@ class BuildResult(models.Model):
     def _rebuild(self, message=None):
         """Force a rebuild and return a recordset of builds"""
         self.ensure_one()
-        if self.local_result == 'ok': # or global?
-            return
+        if self.global_result == 'ok':
+            return self
         # TODO don't rebuild if there is a more recent build for this params?
         values = {
             'params_id': self.params_id.id,
@@ -490,7 +490,7 @@ class BuildResult(models.Model):
             elif dest != hide_in_logs:
                 ignored.add(dest)
         if ignored:
-            _logger.debug('%s (%s) not deleted because not dest format', label, " ".join(list(ignored)))
+            _logger.debug('%s (%s) not deleted because not dest format', label, list(ignored))
         builds = self.browse(dest_by_builds_ids)
         existing = builds.exists()
         remaining = (builds - existing)
@@ -596,6 +596,7 @@ class BuildResult(models.Model):
             build.write(values)
             if not build.active_step:
                 build._log('_schedule', 'No job in config, doing nothing')
+                build.local_result = 'warn'
                 continue
             try:
                 build._log('_schedule', 'Init build environment with config %s ' % build.params_id.config_id.name)

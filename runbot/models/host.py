@@ -80,8 +80,8 @@ class RunbotHost(models.Model):
         return os.path.abspath(os.path.join(os.path.dirname(__file__), '../static'))
 
     @api.model
-    def _get_current(self):
-        name = fqdn()
+    def _get_current(self, suffix=''):
+        name = '%s%s' % (fqdn(), suffix)
         return self.search([('name', '=', name)]) or self.create({'name': name})
 
     def get_running_max(self):

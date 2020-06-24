@@ -89,7 +89,7 @@ class ConfigStepUpgradeDb(models.Model):
 
     step_id = fields.Many2one('runbot.build.config.step', 'Step')
     config_id = fields.Many2one('runbot.build.config', 'Config')
-    db_name = fields.Char('DbName')  # todo ad build_dbs and make it pattern
+    db_pattern = fields.Char('DbName')  # todo ad build_dbs and make it pattern
     min_target_version_id = fields.Many2one('runbot.version', "Minimal target version_id")
 
 
@@ -106,7 +106,7 @@ class ConfigStep(models.Model):
         ('python', 'Python code'),
         ('create_build', 'Create build'),
         ('configure_upgrade', 'Configure Upgrade'),
-        ('configure_upgrade_complement', 'Configure Upgrade'),
+        ('configure_upgrade_complement', 'Configure Upgrade Complement'),
         ('test_upgrade', 'Test Upgrade'),
         ('restore', 'Restore')
     ], default='install_odoo', required=True, tracking=True)
@@ -467,7 +467,7 @@ class ConfigStep(models.Model):
                 if not upgrade_db.min_target_version_id or upgrade_db.min_target_version_id.number <= target.params_id.version_id.number:
                     # note: here we don't consider the upgrade_db config here
                     dbs = build.database_ids.sorted('db_suffix')
-                    for db in self._filter_upgrade_database(dbs, upgrade_db.db_name):
+                    for db in self._filter_upgrade_database(dbs, upgrade_db.db_pattern):
                         child = build._add_child({
                             'upgrade_to_build_id': target.id,
                             'upgrade_from_build_id': build, # always current build
@@ -481,6 +481,7 @@ class ConfigStep(models.Model):
                         )
                         child._log('', 'This build tests change of schema in stable version testing upgrade to %s' % target.params_id.version_id.name)
                     # TODO log somewhere if no db at all is found for a db_suffix
+
     def _run_configure_upgrade(self, build, log_path):
         """
         Source/target parameters:
@@ -535,9 +536,10 @@ class ConfigStep(models.Model):
                     elif self.upgrade_to_all_versions:
                         target_builds |= base_builds
                 target_builds = target_builds.sorted(lambda b: b.params_id.version_id.number)
-            build._log('', 'Defining target version(s): %s' % ', '.join(target_builds.mapped('params_id.version_id.name')))
+            if target_builds:
+                build._log('', 'Defining target version(s): %s' % ', '.join(target_builds.mapped('params_id.version_id.name')))
             if not target_builds:
-                build._log('_run_configure_upgrade', 'No target version found, skipping', level='ERROR')
+                build._log('_run_configure_upgrade', 'No reference build found for tagret version %s, skipping.', level='ERROR')
                 end = True
             elif len(target_builds) > 1 and not self.upgrade_flat:
                 for target_build in target_builds:
@@ -575,9 +577,12 @@ class ConfigStep(models.Model):
                         dump_builds = build.search([('id', 'child_of', source.id), ('params_id.config_id', '=', config_id.id)])
                         # this search is not optimal
                         if not dump_builds:
-                            build._log('_run_configure_upgrade', 'No dump build found', level='ERROR')
+                            build._log('_run_configure_upgrade', 'No child build found with config %s in %s' % (config_id.name, source.id), level='ERROR')
                         dbs = dump_builds.database_ids.sorted('db_suffix')
-                        for db in self._filter_upgrade_database(dbs, upgrade_db.db_name):
+                        valid_databases = self._filter_upgrade_database(dbs, upgrade_db.db_pattern)
+                        if not valid_databases:
+                            build._log('_run_configure_upgrade', 'No datase found for pattern %s' % (upgrade_db.db_pattern), level='ERROR')
+                        for db in valid_databases:
                             #commit_ids = build.params_id.commit_ids
                             #if commit_ids != target.params_id.commit_ids:
                             #    repo_ids = commit_ids.mapped('repo_id')

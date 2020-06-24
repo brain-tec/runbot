@@ -159,8 +159,8 @@ class TestUpgradeFlow(RunbotCase):
             'upgrade_flat': True,
             'upgrade_config_id': self.test_upgrade_config.id,
             'upgrade_dbs': [
-                (0, 0, {'config_id': self.config_all.id, 'db_name': 'all', 'min_target_version_id': master.id}),
-                (0, 0, {'config_id': self.config_all_no_demo.id, 'db_name': 'no-demo-all'})
+                (0, 0, {'config_id': self.config_all.id, 'db_pattern': 'all', 'min_target_version_id': master.id}),
+                (0, 0, {'config_id': self.config_all_no_demo.id, 'db_pattern': 'no-demo-all'})
             ]
         })
         self.upgrade_server_config = self.env['runbot.build.config'].create({
@@ -186,8 +186,8 @@ class TestUpgradeFlow(RunbotCase):
             'upgrade_flat': True,
             'upgrade_config_id': self.test_upgrade_config.id,
             'upgrade_dbs': [
-                (0, 0, {'config_id': self.config_all.id, 'db_name': 'all', 'min_target_version_id': master.id}),
-                (0, 0, {'config_id': self.config_all_no_demo.id, 'db_name': 'no-demo-all'})
+                (0, 0, {'config_id': self.config_all.id, 'db_pattern': 'all', 'min_target_version_id': master.id}),
+                (0, 0, {'config_id': self.config_all_no_demo.id, 'db_pattern': 'no-demo-all'})
             ]
         })
         self.upgrade_config = self.env['runbot.build.config'].create({
@@ -360,7 +360,7 @@ class TestUpgradeFlow(RunbotCase):
             'upgrade_flat': False,
             'upgrade_config_id': self.test_upgrade_config.id,
             'upgrade_dbs': [
-                (0, 0, {'config_id': self.config_single.id, 'db_name': '*'})
+                (0, 0, {'config_id': self.config_single.id, 'db_pattern': '*'})
             ]
         })
         upgrade_config_nightly = self.env['runbot.build.config'].create({

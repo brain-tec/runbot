@@ -21,7 +21,7 @@ _logger = logging.getLogger(__name__)
 
 # TODO check for accidental drop_db
 # TODO also checks sec of dest
-dest_reg = re.compile(r'^\d{5}-.+-.*$')
+dest_reg = re.compile(r'^\d{5}-.+$')
 
 class RunbotException(Exception):
     pass

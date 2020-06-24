@@ -26,7 +26,7 @@ class RunbotClient():
         from odoo import fields
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
-        host = self.env['runbot.host']._get_current()
+        host = self.env['runbot.host']._get_current('worker')
         host._bootstrap()
         count = 0
         while True:
@@ -34,11 +34,12 @@ class RunbotClient():
                 host.last_start_loop = fields.Datetime.now()
                 count = count % 60
                 if count == 0:
-                    logging.info('Host %s running with %s slots on pid %s%s', host.name, host.get_nb_worker(), os.getpid(), ' (assigned only)' if host.assigned_only else '')
+                    logging.info('Host %s running with %s slots on pid %s%s', host.name, host.nb_worker, os.getpid(), ' (assigned only)' if host.assigned_only else '')
                     self.env['runbot.runbot']._source_cleanup()
                     self.env['runbot.build']._local_cleanup()
                     self.env['runbot.runbot']._docker_cleanup()
                     host.set_psql_conn_count()
+                    _logger.info('Building docker image...')
                     host._docker_build()
                     _logger.info('Scheduling...')
                 count += 1
