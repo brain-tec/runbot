@@ -381,9 +381,8 @@ def migrate(cr, version):
                     batch_commits = batch.commit_ids
                     batch_repos_ids = batch_commits.mapped('repo_id').ids
                     for commit in batch_commits:
-                        repo_id = commit.repo_id.id
-                        if repo_id in build_commits:
-                            if commit.id != build_commits[repo_id]:
+                        if commit.repo_id.id in build_commits:
+                            if commit.id != build_commits[commit.repo_id.id]:
                                 batch = False
                                 batch_repos_ids = []
                                 break
