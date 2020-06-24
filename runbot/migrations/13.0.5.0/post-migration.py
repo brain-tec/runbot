@@ -274,9 +274,10 @@ def migrate(cr, version):
     nb_real_build = cr.fetchone()[0]
     progress = _bar(nb_real_build)
 
-    #monkey patch to avoid search
+    # monkey patch to avoid search
     original = env['runbot.build.params']._find_existing
     existing = {}
+
     def _find_existing(fingerprint):
         return existing.get(fingerprint, env['runbot.build.params'])
 
@@ -284,26 +285,26 @@ def migrate(cr, version):
     param._find_existing = _find_existing
 
     for offset in range(0, nb_real_build, batch_size):
-        progress.update(counter)
+
         def get_deps(bid):
-            nonlocal builds_deps
             cr.execute('SELECT dependency_hash, dependecy_repo_id, closest_branch_id, match_type FROM runbot_build_dependency WHERE build_id=%s', (bid,))
             return [r for r in cr.fetchall()]
 
-        counter+=1
         cr.execute("""
             SELECT
             id, branch_id, repo_id, extra_params, config_id, config_data
             FROM runbot_build WHERE duplicate_id IS NULL ORDER BY id asc LIMIT %s OFFSET %s""", (batch_size, offset))
 
         for id, branch_id, repo_id, extra_params, config_id, config_data in cr.fetchall():
+            progress.update(counter)
+            counter += 1
 
             remote_id = env['runbot.remote'].browse(repo_id)
             commit_link_ids_create_values = [
                 {'commit_id': commit_link_ids[id][remote_id.repo_id.id], 'match_type':'base_head'}]
 
             cr.execute('SELECT dependency_hash, dependecy_repo_id, closest_branch_id, match_type FROM runbot_build_dependency WHERE build_id=%s', (id,))
-            for dependency_hash, dependecy_repo_id, closest_branch_id, match_type in get_deps(id)
+            for dependency_hash, dependecy_repo_id, closest_branch_id, match_type in get_deps(id):
                 dependency_remote_id = env['runbot.remote'].browse(dependecy_repo_id)
                 key = (dependency_hash, dependency_remote_id.id)
                 commit = sha_repo_commits.get(key) or sha_commits.get(dependency_hash) # TODO check this (changing repo)
