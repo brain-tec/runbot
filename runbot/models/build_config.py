@@ -89,7 +89,7 @@ class ConfigStepUpgradeDb(models.Model):
 
     step_id = fields.Many2one('runbot.build.config.step', 'Step')
     config_id = fields.Many2one('runbot.build.config', 'Config')
-    db_pattern = fields.Char('DbName')  # todo ad build_dbs and make it pattern
+    db_pattern = fields.Char('Db suffix pattern')  # todo ad build_dbs and make it pattern
     min_target_version_id = fields.Many2one('runbot.version', "Minimal target version_id")
 
 
@@ -629,7 +629,7 @@ class ConfigStep(models.Model):
         return from_builds.sorted(lambda b: b.params_id.version_id.number)
 
     def _filter_upgrade_database(self, dbs, pattern):
-        pat_list = pattern.split(',')
+        pat_list = pattern.split(',') if pattern else []
         for db in dbs:
             if any(fnmatch.fnmatch(db.db_suffix, pat) for pat in pat_list):
                 yield db

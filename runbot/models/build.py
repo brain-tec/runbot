@@ -432,8 +432,8 @@ class BuildResult(models.Model):
     def _rebuild(self, message=None):
         """Force a rebuild and return a recordset of builds"""
         self.ensure_one()
-        if self.global_result == 'ok':
-            return self
+        #if self.global_result == 'ok':
+        #    return self
         # TODO don't rebuild if there is a more recent build for this params?
         values = {
             'params_id': self.params_id.id,
