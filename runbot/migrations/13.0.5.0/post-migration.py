@@ -308,6 +308,9 @@ def migrate(cr, version):
                 builds_deps[build_id].append(dependency_hash, dependecy_repo_id, closest_branch_id, match_type)
         return builds_deps[bid]
 
+    def update_build_params(params_id, id):
+        cr.execute('UPDATE runbot_build SET params_id=%s WHERE id=%s OR duplicate_id = %s', (params_id, id))
+
     for offset in range(0, nb_real_build, batch_size):
         cr.execute("""
             SELECT
@@ -322,7 +325,6 @@ def migrate(cr, version):
             commit_link_ids_create_values = [
                 {'commit_id': commit_link_ids[id][remote_id.repo_id.id], 'match_type':'base_head'}]
 
-            cr.execute('SELECT dependency_hash, dependecy_repo_id, closest_branch_id, match_type FROM runbot_build_dependency WHERE build_id=%s', (id,))
             for dependency_hash, dependecy_repo_id, closest_branch_id, match_type in get_deps(id):
                 dependency_remote_id = env['runbot.remote'].browse(dependecy_repo_id)
                 key = (dependency_hash, dependency_remote_id.id)
@@ -350,7 +352,7 @@ def migrate(cr, version):
                 'commit_link_ids': [(0, 0, values) for values in commit_link_ids_create_values]
             })
             existing[params.fingerprint] = params
-            cr.execute('UPDATE runbot_build SET params_id=%s WHERE id=%s OR duplicate_id = %s', (params.id, id, id))
+            update_build_params(params.id, id)
             # TODO one dev pass to check if params are the same for duplicate?
             # TODO deps from logs?
         env.cache.invalidate()
