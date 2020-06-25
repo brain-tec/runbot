@@ -300,16 +300,16 @@ def migrate(cr, version):
 
     builds_deps = defaultdict(list)
     def get_deps(bid):
-        nonlocal builds_deps
         if bid not in builds_deps:
-            builds_deps = defaultdict(list)
+            builds_deps.clear()
             cr.execute('SELECT build_id, dependency_hash, dependecy_repo_id, closest_branch_id, match_type FROM runbot_build_dependency WHERE build_id>=%s and build_id<%s', (bid, bid+batch_size))
             for build_id, dependency_hash, dependecy_repo_id, closest_branch_id, match_type in cr.fetchall():
-                builds_deps[build_id].append(dependency_hash, dependecy_repo_id, closest_branch_id, match_type)
+                builds_deps[build_id].append((dependency_hash, dependecy_repo_id, closest_branch_id, match_type))
+            print(dict(builds_deps).keys())
         return builds_deps[bid]
 
     def update_build_params(params_id, id):
-        cr.execute('UPDATE runbot_build SET params_id=%s WHERE id=%s OR duplicate_id = %s', (params_id, id))
+        cr.execute('UPDATE runbot_build SET params_id=%s WHERE id=%s OR duplicate_id = %s', (params_id, id, id))
 
     for offset in range(0, nb_real_build, batch_size):
         cr.execute("""
