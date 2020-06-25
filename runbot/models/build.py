@@ -65,7 +65,11 @@ class BuildParameters(models.Model):
     upgrade_from_build_id = fields.Many2one('runbot.build', index=True)  # use to download db
     dump_db = fields.Many2one('runbot.database', index=True)  # use to define db to download
 
-    fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True, unique=True)
+    fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True)
+
+    _sql_constraints = [
+        ('unique_fingerprint', 'unique (fingerprint)', 'avoid duplicate params'),
+    ]
 
     #@api.depends('version_id', 'project_id', 'extra_params', 'config_id', 'config_data', 'modules', 'commit_link_ids', 'builds_reference_ids')
     def _compute_fingerprint(self):
