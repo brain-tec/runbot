@@ -244,7 +244,7 @@ def migrate(cr, version):
         for id, repo_id, name, author, author_email, committer, committer_email, subject, date, duplicate_id, branch_id in cr.fetchall():
             progress.update(counter)
             remote_id = env['runbot.remote'].browse(repo_id)
-            assert remote_id.exists()
+            #assert remote_id.exists()
             if not repo_id:
                 _logger.warning('No repo_id for build %s, skipping', id)
                 continue
