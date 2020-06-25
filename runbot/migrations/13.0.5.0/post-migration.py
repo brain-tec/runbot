@@ -285,6 +285,11 @@ def migrate(cr, version):
 
     for offset in range(0, nb_real_build, batch_size):
         progress.update(counter)
+        def get_deps(bid):
+            nonlocal builds_deps
+            cr.execute('SELECT dependency_hash, dependecy_repo_id, closest_branch_id, match_type FROM runbot_build_dependency WHERE build_id=%s', (bid,))
+            return [r for r in cr.fetchall()]
+
         counter+=1
         cr.execute("""
             SELECT
@@ -298,7 +303,7 @@ def migrate(cr, version):
                 {'commit_id': commit_link_ids[id][remote_id.repo_id.id], 'match_type':'base_head'}]
 
             cr.execute('SELECT dependency_hash, dependecy_repo_id, closest_branch_id, match_type FROM runbot_build_dependency WHERE build_id=%s', (id,))
-            for dependency_hash, dependecy_repo_id, closest_branch_id, match_type in cr.fetchall():
+            for dependency_hash, dependecy_repo_id, closest_branch_id, match_type in get_deps(id)
                 dependency_remote_id = env['runbot.remote'].browse(dependecy_repo_id)
                 key = (dependency_hash, dependency_remote_id.id)
                 commit = sha_repo_commits.get(key) or sha_commits.get(dependency_hash) # TODO check this (changing repo)
