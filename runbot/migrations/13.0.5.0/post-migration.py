@@ -56,6 +56,14 @@ def migrate(cr, version):
     security_project = env['runbot.project'].create({
         'name': 'Security'
     })
+
+    # create a master bundle for security (master was discovered after saas-14)
+    env['runbot.bundle'].create({
+        'name': 'master',
+        'is_base': True,
+        'project_id': security_project.id
+    })
+
     project_matching = { # some hardcoded info
         'odoo': RD_project,
         'enterprise': RD_project,
@@ -131,6 +139,12 @@ def migrate(cr, version):
                 project = env['runbot.project'].create({
                     'name': repo_name,
                 })
+                # also create a master budle, just in case
+                env['runbot.bundle'].create({
+                    'name': 'master',
+                    'is_base': True,
+                    'project_id': project.id
+                })
             repo.project_id = project.id
 
             cr.execute(""" SELECT dependency_id FROM runbot_repo_dep_rel WHERE dependant_id = %s""", (id,))
@@ -195,7 +209,7 @@ def migrate(cr, version):
             bundles[key] = bundle
         bundle = bundles[key]
         if bundle.is_base and branch.is_pr:
-            _logger.warning('Trying to add pr to base bundle')
+            _logger.warning('Trying to add pr %s (%s) to base bundle (%s)', branch.name, branch.id, bundle.name)
             bundle = dummy_bundle
         branch.bundle_id = bundle
         branch_to_bundle[branch.id] = bundle
