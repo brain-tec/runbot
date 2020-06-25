@@ -303,7 +303,7 @@ def migrate(cr, version):
         nonlocal builds_deps
         if bid not in builds_deps:
             builds_deps = defaultdict(list)
-            cr.execute('SELECT build_id, dependency_hash, dependecy_repo_id, closest_branch_id, match_type FROM runbot_build_dependency WHERE build_id>=%s and build_id<%s+batch_size', (bid,))
+            cr.execute('SELECT build_id, dependency_hash, dependecy_repo_id, closest_branch_id, match_type FROM runbot_build_dependency WHERE build_id>=%s and build_id<%s', (bid, bid+batch_size))
             for build_id, dependency_hash, dependecy_repo_id, closest_branch_id, match_type in cr.fetchall():
                 builds_deps[build_id].append(dependency_hash, dependecy_repo_id, closest_branch_id, match_type)
         return builds_deps[bid]
