@@ -1,6 +1,6 @@
 import logging
 import re
-from odoo import models, fields, api
+from odoo import models, fields, api, tools
 
 
 _logger = logging.getLogger(__name__)
@@ -32,7 +32,13 @@ class Version(models.Model):
                 version.number = '.'.join([elem.zfill(2) for elem in re.sub(r'[^0-9\.]', '', version.name).split('.')])
                 version.is_major = all(elem == '00' for elem in version.number.split('.')[1:])
 
-    # TODO orm cache
+
+    def create(self, values):
+        model = self.browse()
+        model._get.clear_cache(model)  # TODO test me
+        return super().create(values)
+
+    @tools.ormcache('name')
     def _get(self, name):
         version = self.search([('name', '=', name)])
         if not version:

@@ -4,7 +4,7 @@ import datetime
 import subprocess
 
 from collections import defaultdict
-from odoo import models, fields, api
+from odoo import models, fields, api, tools
 from ..common import dt2time, s2human_long
 
 _logger = logging.getLogger(__name__)
@@ -61,7 +61,6 @@ class Bundle(models.Model):
 
     @api.depends('name', 'is_base', 'defined_base_id', 'base_id.is_base', 'project_id')
     def _compute_base_id(self):
-        bases_by_project = {}
         for bundle in self:
             if bundle.is_base:
                 bundle.base_id = bundle
@@ -70,11 +69,7 @@ class Bundle(models.Model):
                 bundle.base_id = bundle.defined_base_id
                 continue
             project_id = bundle.project_id.id
-            if project_id in bases_by_project:  # small perf imp for udge bartched
-                base_bundles = bases_by_project[project_id]
-            else:
-                base_bundles = self.search([('is_base', '=', True), ('project_id', '=', project_id)])
-                bases_by_project[project_id] = base_bundles
+            base_bundles = self._get_base_ids(project_id)
             master_base = False
             for candidate in base_bundles:
                 if bundle.name.startswith(candidate.name):
@@ -84,6 +79,10 @@ class Bundle(models.Model):
                     master_base = candidate
             else:
                 bundle.base_id = master_base
+
+    @tools.ormcache('project_id')
+    def _get_base_ids(self, project_id):
+        return self.search([('is_base', '=', True), ('project_id', '=', project_id)]) # todo clear cache when base is created
 
     @api.depends('is_base', 'base_id.version_id')
     def _compute_version_id(self):
@@ -161,7 +160,11 @@ class Bundle(models.Model):
                 batch.bundle_id.last_done_batch = batch
 
     def create(self, values_list):
-        return super().create(values_list)
+        res = super().create(values_list)
+        if res.is_base:
+            model = self.browse()
+            model._get_base_ids.clear_cache(model)  # TODO test me
+        return res
 
     def write(self, values):
         super().write(values)
