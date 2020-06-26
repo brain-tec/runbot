@@ -193,9 +193,11 @@ class ConfigStep(models.Model):
                  'upgrade_to_current',
                  'upgrade_to_major_versions',
                  'upgrade_to_all_versions',
+                 'upgrade_to_version_ids',
                  'upgrade_from_previous_major_version',
                  'upgrade_from_last_intermediate_version',
-                 'upgrade_from_all_intermediate_version')
+                 'upgrade_from_all_intermediate_version',
+                 'upgrade_from_version_ids')
     def _compute_master_reference_versions(self):
         for record in self:
             record.master_reference_versions = self._reference_batches(

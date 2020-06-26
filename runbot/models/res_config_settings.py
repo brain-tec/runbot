@@ -22,8 +22,16 @@ class ResConfigSettings(models.TransientModel):
     runbot_do_fetch = fields.Boolean('Discover new commits')
     runbot_do_schedule = fields.Boolean('Schedule builds')
     runbot_is_base_regex = fields.Char('Regex is_base')
+
     runbot_db_gc_days = fields.Integer('Days before gc', default=30, config_parameter='runbot.db_gc_days')
     runbot_db_gc_days_child = fields.Integer('Days before gc of child', default=15, config_parameter='runbot.db_gc_days_child')
+
+    runbot_pending_warning = fields.Integer('Pending warning limit', default=5, config_parameter='runbot.pending.warning')
+    runbot_pending_critical = fields.Integer('Pending critical limit', default=5, config_parameter='runbot.pending.critical')
+
+    # TODO other icp
+    # runbot.runbot_maxlogs 100
+    # runbot.runbot_nginx True
 
     @api.model
     def get_values(self):

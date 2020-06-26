@@ -16,6 +16,7 @@
                     <field name="version_id"/>
                     <field name="no_build"/>
                     <field name="priority"/>
+                    <field name="build_all"/>
                     <field name="branch_ids">
                         <tree>
                             <field name="dname"/>

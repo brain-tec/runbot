@@ -61,7 +61,7 @@
                     <li t-if="bu.global_state not in ('testing', 'waiting', 'pending')" class="divider"></li>
                     <li><a t-attf-href="/runbot/build/{{bu['id']}}">Logs <i class="fa fa-file-text-o"/></a></li>
                     <t t-set="log_url" t-value="'http://%s' % bu.host if bu.host != fqdn else ''"/>
-                    <t t-if="bu.host" t-foreach="(bu.log_list or '').split(',')" t-as="log_name" >
+                    <t t-if="bu.host" t-foreach="bu.log_list.split(',') if bu.log_list else []" t-as="log_name" >
                       <li><a t-attf-href="{{log_url}}/runbot/static/build/#{bu.dest}/logs/#{log_name}.txt">Full <t t-esc="log_name"/> logs <i class="fa fa-file-text-o"/></a></li>
                     </t>
                     <li t-if="bu.coverage and bu.host"><a t-attf-href="http://{{bu.host}}/runbot/static/build/#{bu.dest}/coverage/index.html">Coverage <i class="fa fa-file-text-o"/></a></li>
