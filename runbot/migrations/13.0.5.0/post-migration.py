@@ -307,7 +307,6 @@ def migrate(cr, version):
             cr.execute('SELECT build_id, dependency_hash, dependecy_repo_id, closest_branch_id, match_type FROM runbot_build_dependency WHERE build_id>=%s and build_id<=%s', (get_deps.start, get_deps.stop))
             for build_id, dependency_hash, dependecy_repo_id, closest_branch_id, match_type in cr.fetchall():
                 builds_deps[build_id].append((dependency_hash, dependecy_repo_id, closest_branch_id, match_type))
-            print(dict(builds_deps).keys())
         return builds_deps[bid]
     get_deps.start = 0
     get_deps.stop = 0
@@ -315,6 +314,7 @@ def migrate(cr, version):
     def update_build_params(params_id, id):
         cr.execute('UPDATE runbot_build SET params_id=%s WHERE id=%s OR duplicate_id = %s', (params_id, id, id))
 
+    build_ids_to_recompute = []
     for offset in range(0, nb_real_build, batch_size):
         cr.execute("""
             SELECT
@@ -324,6 +324,7 @@ def migrate(cr, version):
         for id, branch_id, repo_id, extra_params, config_id, config_data in cr.fetchall():
             progress.update(counter)
             counter += 1
+            build_ids_to_recompute.append(id)
 
             remote_id = env['runbot.remote'].browse(repo_id)
             commit_link_ids_create_values = [
@@ -364,6 +365,17 @@ def migrate(cr, version):
 
     env['runbot.build.params']._find_existing = original
 
+    ######################
+    # update dest
+    ######################
+    _logger.info('Updating build dests')
+    counter = 0
+    progress = _bar(nb_real_build)
+    for offset in range(0, len(build_ids_to_recompute), batch_size):
+        builds = env['runbot.build'].browse(build_ids_to_recompute[offset:offset+batch_size])
+        builds._compute_dest()
+        progress.update(batch_size)
+    progress.finish()
 
     for branch, head in branch_heads.items():
         cr.execute('UPDATE runbot_branch SET head=%s WHERE id=%s', (head, branch))
