@@ -185,7 +185,7 @@
                               <table class="table table-condensed">
                                 <t t-foreach="build.children_ids.sorted('id')" t-as="child">
                                   <t t-set="rowclass"><t t-call="runbot.build_class"><t t-set="build" t-value="child"/></t></t>
-                                  <tr t-attf-class="bg-{{rowclass.strip()}}-light"><td>
+                                  <tr t-attf-class="bg-{{rowclass.strip()}}-light{{' orphan_child' if child.orphan_result else ''}}"><td>
                                     <a t-attf-href="/runbot/build/{{child.id}}" >Build <t t-esc="child.id"/></a>
                                     <t t-if="child.description">
                                       <t t-raw="child.md_description" />

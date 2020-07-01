@@ -15,6 +15,7 @@ class Project(models.Model):
 
     name = fields.Char('Category name', required=True, unique=True, help="Name of the base branch")
     trigger_ids = fields.One2many('runbot.trigger', 'project_id', string='Triggers', required=True, unique=True, help="Name of the base branch")
+    group_ids = fields.One2many('runbot.trigger', 'project_id', string='Triggers', required=True, unique=True, help="Name of the base branch")
 
 class Bundle(models.Model):
     _name = 'runbot.bundle'
@@ -69,20 +70,19 @@ class Bundle(models.Model):
                 bundle.base_id = bundle.defined_base_id
                 continue
             project_id = bundle.project_id.id
-            base_bundles = self._get_base_ids(project_id)
             master_base = False
-            for candidate in base_bundles:
-                if bundle.name.startswith(candidate.name):
-                    bundle.base_id = candidate
+            for bid, bname in self._get_base_ids(project_id):
+                if bundle.name.startswith(bname):
+                    bundle.base_id = self.browse(bid)
                     break
-                elif candidate.name == 'master':
-                    master_base = candidate
+                elif bname == 'master':
+                    master_base = self.browse(bid)
             else:
                 bundle.base_id = master_base
 
     @tools.ormcache('project_id')
     def _get_base_ids(self, project_id):
-        return self.search([('is_base', '=', True), ('project_id', '=', project_id)]) # todo clear cache when base is created
+        return [(b.id, b.name) for b in self.search([('is_base', '=', True), ('project_id', '=', project_id)])]
 
     @api.depends('is_base', 'base_id.version_id')
     def _compute_version_id(self):
@@ -168,6 +168,9 @@ class Bundle(models.Model):
 
     def write(self, values):
         super().write(values)
+        if 'is_base' in values:
+            model = self.browse()
+            model._get_base_ids.clear_cache(model)
 
     def _force(self, category_id=None):
         self.ensure_one()
@@ -313,11 +316,12 @@ class Batch(models.Model):
             _logger.error('No version found on bundle %s in project %s', bundle.name, project.name)
         triggers = self.env['runbot.trigger'].search([  # could be optimised for multiple batches. Ormcached method?
             ('project_id', '=', project.id),
-            ('category_id', '=', self.category_id.id),
-            '|',
-                ('version_ids', 'in', self.bundle_id.version_id.id),  # upgrade trigger are only used in master version
-                ('version_ids', '=', False)
-        ])
+            ('category_id', '=', self.category_id.id)
+        ]).filtered(
+            lambda t: not t.version_domain or \
+                self.bundle_id.version_id.filtered_domain(t.get_version_domain())
+            )
+
         pushed_repo = self.commit_link_ids.mapped('commit_id.repo_id')
         dependency_repos = triggers.mapped('dependency_ids')
         all_repos = triggers.mapped('repo_ids') | dependency_repos

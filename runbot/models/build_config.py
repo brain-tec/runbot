@@ -308,7 +308,7 @@ class ConfigStep(models.Model):
         if not self:
             return False
         self.ensure_one()
-        return self.job_type in ('install_odoo', 'run_odoo') or (self.job_type == 'python' and 'docker_run(' in self.python_code)
+        return self.job_type in ('install_odoo', 'run_odoo', 'restore', 'test_upgrade') or (self.job_type == 'python' and 'docker_run(' in self.python_code)
 
 
     def _run_run_odoo(self, build, log_path):
@@ -452,23 +452,25 @@ class ConfigStep(models.Model):
         builds_references = param.builds_reference_ids
         builds_references_by_version_id = {b.params_id.version_id.id:b for b in builds_references}
         upgrade_complement_step = self.upgrade_complement_trigger_id.upgrade_step_id
-        allowed_target_version_ids = self.upgrade_complement_trigger_id.version_ids
-        valid_targets =  build.browse()
+        version_domain = self.upgrade_complement_trigger_id.get_version_domain()
+        valid_targets = build.browse()
         next_versions = version.next_major_version_id | version.next_intermediate_version_ids
-        if allowed_target_version_ids: # filter only on version where trigger is enabled
-            next_versions = next_versions & allowed_target_version_ids
+        if version_domain: # filter only on version where trigger is enabled
+            next_versions = next_versions.filtered_domain(version_domain)
         if next_versions:
             for next_version in next_versions:
                 if version in upgrade_complement_step._get_upgrade_source_versions(next_version):
                     valid_targets |= (builds_references_by_version_id.get(next_version.id) or build.browse())
 
-        if valid_targets:
-            build._log('', 'Stable policy: checking upgrade to %s' % valid_targets) # TODO change text
         for target in valid_targets:
+            build._log('', 'Checking upgrade to [%s](%s)' % (target.params_id.version_id.name, target.build_url), log_type='markdown')
+            print('############', upgrade_complement_step)
             for upgrade_db in upgrade_complement_step.upgrade_dbs:
+                print(upgrade_db, upgrade_db.db_pattern)
                 if not upgrade_db.min_target_version_id or upgrade_db.min_target_version_id.number <= target.params_id.version_id.number:
                     # note: here we don't consider the upgrade_db config here
                     dbs = build.database_ids.sorted('db_suffix')
+                    print(dbs)
                     for db in self._filter_upgrade_database(dbs, upgrade_db.db_pattern):
                         child = build._add_child({
                             'upgrade_to_build_id': target.id,
@@ -476,7 +478,7 @@ class ConfigStep(models.Model):
                             'dump_db': db.id,
                             'config_id': upgrade_complement_step.upgrade_config_id
                         })
-                        child.description = 'Testing migration from %s to %s using parent db %s (stable policy)' % (
+                        child.description = 'Testing migration from %s to %s using parent db %s' % (
                             version.name,
                             target.params_id.version_id.name,
                             db.name,
@@ -526,7 +528,7 @@ class ConfigStep(models.Model):
             else:
                 target_builds = build.browse()
                 if self.upgrade_to_version_ids:
-                     for version in self.upgrade_to_version_ids:
+                    for version in self.upgrade_to_version_ids:
                         target_builds |= builds_references_by_version_id.get(version.id) or build.browse()
                 else:
                     master_build = builds_references.filtered(lambda b: b.params_id.version_id.name == 'master')
@@ -539,9 +541,9 @@ class ConfigStep(models.Model):
                         target_builds |= base_builds
                 target_builds = target_builds.sorted(lambda b: b.params_id.version_id.number)
             if target_builds:
-                build._log('', 'Defining target version(s): %s' % ', '.join(target_builds.mapped('params_id.version_id.name')))
+                build._log('', 'Testing upgrade targeting %s' % ', '.join(target_builds.mapped('params_id.version_id.name')))
             if not target_builds:
-                build._log('_run_configure_upgrade', 'No reference build found for tagret version %s, skipping.', level='ERROR')
+                build._log('_run_configure_upgrade', 'No reference build found with correct target in availables references, skipping. %s' % builds_references.mapped('params_id.version_id.name'), level='ERROR')
                 end = True
             elif len(target_builds) > 1 and not self.upgrade_flat:
                 for target_build in target_builds:
@@ -557,7 +559,8 @@ class ConfigStep(models.Model):
                 target_version = target_build.params_id.version_id
                 from_builds = self._get_upgrade_source_builds(target_version, builds_references_by_version_id)
                 source_builds_by_target[target_build] = from_builds
-                build._log('', 'Defining source version(s) for %s: %s' % (target_build.params_id.version_id.name, ', '.join(source_builds_by_target[target_build].mapped('params_id.version_id.name'))))
+                if from_builds:
+                    build._log('', 'Defining source version(s) for %s: %s' % (target_build.params_id.version_id.name, ', '.join(source_builds_by_target[target_build].mapped('params_id.version_id.name'))))
                 if not from_builds:
                     build._log('_run_configure_upgrade', 'No source version found for %s, skipping' % target_version.name, level='INFO')
                 elif not self.upgrade_flat:
@@ -745,12 +748,15 @@ class ConfigStep(models.Model):
     def _reference_batches_upgrade(self, bundle, category_id):
         target_refs_bundles = self.env['runbot.bundle']
         sticky_domain = [('sticky', '=', True), ('project_id', '=', bundle.project_id.id)]
-        if self.upgrade_to_master:
-            target_refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('name', '=', 'master')])
-        if self.upgrade_to_all_versions:
-            target_refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('name', '!=', 'master')])
-        elif self.upgrade_to_major_versions:
-            target_refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('name', '!=', 'master'), ('version_id.is_major', '=', True)])
+        if self.upgrade_to_version_ids:
+            target_refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('version_id', 'in', self.upgrade_to_version_ids.ids)])
+        else:
+            if self.upgrade_to_master:
+                target_refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('name', '=', 'master')])
+            if self.upgrade_to_all_versions:
+                target_refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('name', '!=', 'master')])
+            elif self.upgrade_to_major_versions:
+                target_refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('name', '!=', 'master'), ('version_id.is_major', '=', True)])
 
         source_refs_bundles = self.env['runbot.bundle']
         def from_versions(f_bundle):
@@ -763,10 +769,14 @@ class ConfigStep(models.Model):
                 if f_bundle.intermediate_version_base_ids:
                     source_refs_bundles |= f_bundle.intermediate_version_base_ids[-1]
 
-        if self.upgrade_to_current:
-            from_versions(bundle)
-        for f_bundle in target_refs_bundles:
-            from_versions(f_bundle)
+        if self.upgrade_from_version_ids:
+            source_refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('version_id', 'in', self.upgrade_from_version_ids.ids)])
+            # this is subject to discussion. should this be smart and filter 'from_versions' or should it be flexible and do all possibilities
+        else:
+            if self.upgrade_to_current:
+                from_versions(bundle)
+            for f_bundle in target_refs_bundles:
+                from_versions(f_bundle)
 
         return (target_refs_bundles|source_refs_bundles).with_context(
             category_id=category_id
@@ -891,10 +901,11 @@ class ConfigStep(models.Model):
         return build_values
 
     def _check_module_states(self, build):
-        content = build.read_file('logs/modules_states.txt')
-        if not content:
-            build._log('', 'no modules_states file found in logs')
+        if not build.is_file('logs/modules_states.txt'):
+            build._log('', '"logs/modules_states.txt" file not found.', level='ERROR')
             return 'ko'
+
+        content = build.read_file('logs/modules_states.txt') or ''
         if '(0 rows)' not in content:
             build._log('', 'Some modules are not in installed/uninstalled/uninstallable state after migration. \n %s' % content)
             return 'ko'
@@ -981,6 +992,7 @@ class ConfigStep(models.Model):
             self.env['runbot.build.stat']._write_key_values(build, self, key_values)
         except Exception as e:
             message = '**An error occured while computing statistics of %s:**\n`%s`' % (build.job, str(e).replace('\\n', '\n').replace("\\'", "'"))
+            _logger.exception(message)
             build._log('make_stats', message, level='INFO', log_type='markdown')
 
     def _step_state(self):

@@ -14,7 +14,7 @@
                     </div>
                     <div>
                         <table class="table table-condensed table-responsive table-stripped">
-                            <tr><td>Version</td><td t-esc="bundle.version_id.name"/></tr>
+                            <tr><td>Version</td><td> <t t-esc="bundle.version_id.name"/> <a t-if="more" t-attf-href="/runbot/bundle/{{bundle.id}}/force"><i class="fa fa-refresh"/></a></td></tr>
                             <tr><td>Branches</td><td>
                                 <div t-foreach="bundle.branch_ids.sorted(key=lambda b: (b.remote_id.repo_id.sequence, b.remote_id.repo_id.id, b.is_pr))" t-as="branch"><small>
                                     <a t-att-href="branch.branch_url" t-esc="branch.dname"/>

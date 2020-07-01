@@ -446,6 +446,7 @@ class BuildResult(models.Model):
         if self.parent_id:
             values.update({
                 'parent_id': self.parent_id.id,
+                'description': self.description,
             })
             self.orphan_result = True
 
@@ -453,8 +454,8 @@ class BuildResult(models.Model):
         user = request.env.user if request else self.env.user
         new_build._log('rebuild', 'Rebuild initiated by %s%s' % (user.name, (' :%s' % message) if message else ''))
 
-        if self.local_state not in ['running', 'done']:
-            self._ask_kill('Killed by rebuild requested by %s (%s) (new build:%s)', user.name, user.id, new_build.id)
+        if self.local_state != 'done':
+            self._ask_kill('Killed by rebuild requested by %s (%s) (new build:%s)' % (user.name, user.id, new_build.id))
 
         if not self.parent_id:
             # TODO CHECK SLOT BEHAVIOUR
@@ -1018,6 +1019,11 @@ class BuildResult(models.Model):
         builds_to_scan = self.search([('id', 'in', self.ids), ('local_result', '=', 'ko'), ('build_error_ids', '=', False)])
         ir_logs = self.env['ir.logging'].search([('level', '=', 'ERROR'), ('type', '=', 'server'), ('build_id', 'in', builds_to_scan.ids)])
         BuildError._parse_logs(ir_logs)
+
+
+    def is_file(self, file, mode='r'):
+        file_path = self._path(file)
+        return os.path.exists(file_path)
 
     def read_file(self, file, mode='r'):
         file_path = self._path(file)

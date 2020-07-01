@@ -12,6 +12,7 @@ import requests
 from odoo import models, fields, api
 from ..common import os, RunbotException
 from odoo.exceptions import UserError
+from odoo.tools.safe_eval import safe_eval
 
 _logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class RepoTrigger(models.Model):
 
     ci_context = fields.Char("Ci context", default='ci/runbot', tracking=True)
     category_id = fields.Many2one('runbot.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
-    version_ids = fields.Many2many('runbot.version', string="Allowed version ids", help="Only allow for versions, leave empty fo all")
+    version_domain = fields.Char(string="Version domain")
     group_ids = fields.Many2many('res.groups', string='Limited to groups') #  TODO test
     hide = fields.Boolean('Hide batch on main page') #  TODO test or remove
 
@@ -56,8 +57,8 @@ class RepoTrigger(models.Model):
         for trigger in self:
             trigger.upgrade_step_id = False
             if trigger.upgrade_dumps_trigger_id:
-                if len(trigger.config_id.step_order_ids) != 1 or not trigger.config_id.step_order_ids[0].step_id._is_upgrade_step():
-                    raise UserError('Upgrade trigger should have a config with a single step of type Configure Upgrade')
+                if not any(step_order.step_id._is_upgrade_step() for step_order in trigger.config_id.step_order_ids):
+                    raise UserError('Upgrade trigger should have a config with step of type Configure Upgrade')
                 trigger.upgrade_step_id = trigger.config_id.step_order_ids[0].step_id
 
     def _reference_builds(self, bundle):
@@ -67,6 +68,10 @@ class RepoTrigger(models.Model):
             return [(4, b.id) for b in refs_builds]
         return []
 
+    def get_version_domain(self):
+        if self.version_domain:
+            return safe_eval(self.version_domain)
+        return []
 
 class Category(models.Model):
     _name = 'runbot.category'
@@ -203,7 +208,6 @@ class Repo(models.Model):
     _description = "Repo"
     _order = 'sequence, id'
     _inherit = 'mail.thread'
-
 
     name = fields.Char("Name", unique=True, tracking=True)  # odoo/enterprise/upgrade/security/runbot/design_theme
     main_remote_id = fields.Many2one('runbot.remote', "Main remote", tracking=True)

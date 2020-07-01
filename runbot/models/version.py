@@ -38,14 +38,18 @@ class Version(models.Model):
         model._get.clear_cache(model)  # TODO test me
         return super().create(values)
 
-    @tools.ormcache('name')
+
     def _get(self, name):
+        return self.browse(self._get_id(name))
+
+    @tools.ormcache('name')
+    def _get_id(self, name):
         version = self.search([('name', '=', name)])
         if not version:
             version = self.create({
                 'name': name,
             })
-        return version
+        return version.id
 
     @api.depends('is_major', 'number')
     def _compute_version_relations(self):

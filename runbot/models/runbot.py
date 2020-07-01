@@ -230,6 +230,7 @@ class Runbot(models.AbstractModel):
                 processing_batch = self.env['runbot.batch'].search([('state', 'in', ('preparing', 'ready'))], order='id asc')
                 preparing_batch = processing_batch.filtered(lambda b: b.state == 'preparing')
 
+                self._commit()
                 for repo in repos:
                     repo._update_batches(bool(preparing_batch))
                     self._commit()

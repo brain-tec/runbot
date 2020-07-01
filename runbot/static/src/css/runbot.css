@@ -87,3 +87,11 @@ body, .table{
 .badge-killed {
     background-color: #aaa;
 }
+
+.table-condensed td {
+    padding: 0.25rem;
+}
+
+.orphan_child {
+    text-decoration: line-through;
+}
