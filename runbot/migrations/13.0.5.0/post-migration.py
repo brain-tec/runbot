@@ -477,6 +477,8 @@ def migrate(cr, version):
                     'match_type': 'new',
                 })
             batch.commit_link_ids = [(0, 0, values) for values in commit_links_values]
+            if batch.state == 'ready' and all(slot.build_id.global_state in (False, 'running', 'done') for slot in batch.slot_ids):
+                batch.state = 'done'
 
         env.cache.invalidate()
     progress.finish()
