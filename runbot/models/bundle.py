@@ -308,6 +308,30 @@ class Batch(models.Model):
                 batch._log('Batch done')
                 batch.state = 'done'
 
+    def _create_build(self, params, trigger, force=False):
+        """
+        Create a build with given params_id if it does not already exists.
+        In the case that a very same build already exists that build is returned
+        """
+        self.ensure_one()
+        build = self.env['runbot.build']
+        bundle = self.bundle_id
+        bundle_repos = bundle.branch_ids.mapped('remote_id.repo_id')
+        pushed_repo = self.commit_link_ids.mapped('commit_id.repo_id')
+        link_type = 'created'
+        if (trigger.repo_ids & bundle_repos) or force or bundle.build_all:  # only auto link build if bundle has a branch for this trigger
+            build = self.env['runbot.build'].search([('params_id', '=', params.id), ('parent_id', '=', False)], limit=1, order='id desc')
+            # id desc will take the most recent one if multiple build. Hopefully it is a green build.
+            # TODO sort on result?
+            if build:
+                link_type = 'matched'  # TODO ditinction between matched, but we have a existing branch (head) or matched
+                build.killable = False
+            elif (trigger.repo_ids & pushed_repo) or force or bundle.build_all or bundle.sticky:  # common repo between triggers and pushed
+                build = self.env['runbot.build'].create({
+                    'params_id': params.id,
+                })
+        return link_type, build
+
     def _prepare(self, force=False):
         self.state = 'ready'
         _logger.info('Preparing batch %s', self.id)
@@ -430,7 +454,6 @@ class Batch(models.Model):
         #  Generate build params
         ######################################
         commit_link_by_repos = {commit_link.commit_id.repo_id.id: commit_link for commit_link in self.commit_link_ids}
-        bundle_repos = bundle.branch_ids.mapped('remote_id.repo_id')
         version_id = self.bundle_id.version_id.id
         project_id = self.bundle_id.project_id.id
         config_by_trigger = {}
@@ -457,19 +480,7 @@ class Batch(models.Model):
             params_value['builds_reference_ids'] = trigger._reference_builds(bundle)
 
             params = self.env['runbot.build.params'].create(params_value)
-            build = self.env['runbot.build']
-            link_type = 'created'
-            if (trigger.repo_ids & bundle_repos) or force or bundle.build_all: # only auto link build if bundle has a branch for this trigger
-                build = self.env['runbot.build'].search([('params_id', '=', params.id), ('parent_id', '=', False)], limit=1, order='id desc')
-                # id desc will take the most recent one if multiple build. Hopefully it is a green build.
-                # TODO sort on result?
-                if build:
-                    link_type = 'matched' # TODO ditinction between matched, but we have a existing branch (head) or matched
-                    build.killable = False
-                elif (trigger.repo_ids & pushed_repo) or force or bundle.build_all or bundle.sticky: # common repo between triggers and pushed
-                    build = self.env['runbot.build'].create({
-                        'params_id': params.id,
-                    })
+            link_type, build = self._create_build(params, trigger, force=force)
             self.env['runbot.batch.slot'].create({
                 'batch_id': self.id,
                 'trigger_id': trigger.id,
