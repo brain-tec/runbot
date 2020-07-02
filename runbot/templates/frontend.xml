@@ -157,9 +157,7 @@
         <span t-if="bu and bu.local_state not in ('running', 'done')" class="btn btn-info">
           <i class="fa fa-spinner fa-spin fa-fw"/>
         </span>
-        <span t-if="not bu" class="btn btn-info" help="Create build">
-          <i class="fa fa-pause fa-fw"/>
-        </span>
+        <a t-if="not bu" class="btn btn-default" title="Create build" t-attf-href="/runbot/batch/slot/{{slot.id}}/build"><i class="fa fa-play fa-fw"/></a>
       </div>
     </template>
 

@@ -204,6 +204,12 @@ class Runbot(Controller):
         }
         return request.render('runbot.batch', context)
 
+    @o_route(['/runbot/batch/slot/<model("runbot.batch.slot"):slot>/build'], auth='user', type='http')
+    def slot_create_build(self, slot=None, **kwargs):
+        build = slot.sudo()._create_missing_build()
+        print(build.id)
+        return werkzeug.utils.redirect('/runbot/build/%s' % build.id)
+
     @route(['/runbot/commit/<model("runbot.commit"):commit>'], website=True, auth='public', type='http')
     def commit(self, commit=None, **kwargs):
         status_list = request.env['runbot.commit.status'].search([('commit_id', '=', commit.id)], order='id desc')

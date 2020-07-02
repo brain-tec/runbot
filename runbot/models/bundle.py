@@ -589,6 +589,14 @@ class BatchSlot(models.Model):
     def fa_link_type(self):
         return self._fa_link_type.get(self.link_type, 'exclamation-triangle')
 
+    def _create_missing_build(self):
+        """Create a build when the slot does not have one"""
+        self.ensure_one()
+        if self.link_type != 'created':
+            return
+        link_type, self.build_id = self.batch_id._create_build(self.params_id, self.trigger_id, force=True)
+        return self.build_id
+
 
 class RunbotCommitLink(models.Model):
     _name = 'runbot.commit.link'
