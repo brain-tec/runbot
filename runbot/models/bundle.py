@@ -536,7 +536,6 @@ class Batch(models.Model):
             except subprocess.CalledProcessError:
                 self.warning('Commit info failed between %s and %s', commit.name, base_head.name)
 
-
     def warning(self, message, *args):
         _logger.warning('batch %s: ' + message, self.id, *args)
         self._log(message, *args, level='WARNING')
