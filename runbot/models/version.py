@@ -35,7 +35,7 @@ class Version(models.Model):
 
     def create(self, values):
         model = self.browse()
-        model._get.clear_cache(model)  # TODO test me
+        model._get_id.clear_cache(model)  # TODO test me
         return super().create(values)
 
 
