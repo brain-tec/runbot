@@ -26,6 +26,61 @@
         </t>
     </template>
 
+    <template id="runbot.build_gear">
+      <t t-set="btnclass">btn-default</t>
+      <t t-if="bu.global_state == ['running']">
+        <t t-set="btnclass">btn-info</t>
+      </t>
+      <button t-attf-class="btn {{ btnclass }} dropdown-toggle" data-toggle="dropdown" title="Build options" aria-label="Build options" aria-expanded="false"><i class="fa fa-cog fa-fw"/><span class="caret"></span></button>
+      <div class="dropdown-menu dropdown-menu-right" role="menu">
+          <a t-if="bu.global_result=='skipped'" groups="runbot.group_runbot_admin" class="dropdown-item" href="#" data-runbot="rebuild" t-att-data-runbot-build="bu['id']">Force Build <i class="fa fa-level-up"></i></a>
+          <t t-if="bu.local_state=='running'">
+              <a class="dropdown-item" t-attf-href="http://{{bu['domain']}}/?db={{bu.dest}}-all">Connect all <i class="fa fa-sign-in"></i></a>
+              <a class="dropdown-item" t-attf-href="http://{{bu['domain']}}/?db={{bu.dest}}-base">Connect base <i class="fa fa-sign-in"></i></a>
+              <a class="dropdown-item" t-attf-href="http://{{bu['domain']}}/">Connect <i class="fa fa-sign-in"></i></a>
+          </t>
+          <a class="dropdown-item" t-if="bu.global_state in ['done','running'] or requested_action == 'deathrow'" groups="base.group_user" href="#" data-runbot="rebuild" t-att-data-runbot-build="bu['id']" title="Retry this build, usefull for false positive">
+          Rebuild <i class="fa fa-refresh"/>
+          </a>
+
+          <t t-if="bu.global_state != 'done'" >
+            <t t-if="bu.requested_action != 'deathrow'">
+              <a groups="base.group_user" href="#" data-runbot="kill" class="dropdown-item" t-att-data-runbot-build="bu['id']">Kill <i class="fa fa-crosshairs"/></a>
+            </t>
+            <t t-else="">
+              <a groups="base.group_user" data-runbot="kill" class="dropdown-item disabled"> Killing <i class="fa fa-spinner fa-spin"/> <i class="fa fa-crosshairs"/></a>
+            </t>
+          </t>
+
+          <t t-if="bu.global_state == 'done'">
+            <t t-if="bu.requested_action != 'wake_up'">
+              <a groups="base.group_user" class="dropdown-item" href="#" data-runbot="wakeup" t-att-data-runbot-build="bu['id']">Wake up <i class="fa fa-coffee"/></a>
+            </t>
+            <t t-else="">
+               <a groups="base.group_user" class="dropdown-item disabled" data-runbot="wakeup" > Waking up <i class="fa fa-spinner fa-spin"/> <i class="fa fa-crosshairs"/></a>
+            </t>
+          </t>
+
+          <div t-if="bu.global_state not in ('testing', 'waiting', 'pending')" class="dropdown-divider"></div>
+
+          <a class="dropdown-item" t-attf-href="/runbot/build/{{bu['id']}}">Logs <i class="fa fa-file-text-o"/></a>
+          <t t-set="log_url" t-value="'http://%s' % bu.host if bu.host != fqdn else ''"/>
+          <t t-if="bu.host" t-foreach="bu.log_list.split(',') if bu.log_list else []" t-as="log_name" >
+            <a class="dropdown-item" t-attf-href="{{log_url}}/runbot/static/build/#{bu.dest}/logs/#{log_name}.txt">Full <t t-esc="log_name"/> logs <i class="fa fa-file-text-o"/></a>
+          </t>
+
+          <li t-if="bu.coverage and bu.host"><a t-attf-href="http://{{bu.host}}/runbot/static/build/#{bu.dest}/coverage/index.html">Coverage <i class="fa fa-file-text-o"/></a></li>
+
+          <div t-if="bu.global_state!='pending'" class="dropdown-divider"></div>
+          <!--<li><a t-attf-href="{{br['branch'].branch_url}}"><t t-esc="'Branch ' if not br['branch'].pull_head_name else 'Pull '"/><i class="fa fa-github"/></a></li>
+          <li><a t-attf-href="https://{{repo.base_url}}/commit/{{bu['name']}}">Commit <i class="fa fa-github"/></a></li>
+          <li><a t-attf-href="https://{{repo.base_url}}/compare/{{br['branch'].branch_name}}">Compare <i class="fa fa-github"/></a></li>-->
+          <!-- TODO branch.pull from -->
+          <div class="dropdown-divider"></div>
+          <a groups="runbot.group_runbot_admin" class="dropdown-item" t-attf-href="/web/#id={{bu['id']}}&amp;view_type=form&amp;model=runbot.build" target="new">View in backend</a>
+      </div>
+    </template>
+
     <template id="runbot.build_button">
         <div t-attf-class="pull-right">
             <div t-attf-class="btn-group {{klass}}">
@@ -33,46 +88,7 @@
                 <a t-if="bu.local_state=='done' and bu.requested_action != 'wake_up'" href="#" data-runbot="wakeup" t-att-data-runbot-build="bu.id" class="btn btn-default" title="Wake up this build" aria-label="Wake up this build"><i class="fa fa-coffee"/></a>
                 <a t-attf-href="/runbot/build/{{bu['id']}}" class="btn btn-default" title="Build details" aria-label="Build details"><i class="fa fa-file-text-o"/></a>
                 <!--<a t-if="show_commit_button" t-attf-href="https://#{repo.base_url}/commit/#{bu['name']}" class="btn btn-default" title="Open commit on GitHub" aria-label="Open commit on GitHub"><i class="fa fa-github"/></a>-->
-                <button class="btn btn-default dropdown-toggle" data-toggle="dropdown" title="Build options" aria-label="Build options" aria-expanded="false"><i class="fa fa-cog"/><span class="caret"></span></button>
-                <ul class="dropdown-menu dropdown-menu-right" role="menu">
-                    <li t-if="bu.global_result=='skipped'" groups="runbot.group_runbot_admin">
-                        <a href="#" data-runbot="rebuild" t-att-data-runbot-build="bu['id']">Force Build <i class="fa fa-level-up"></i></a>
-                    </li>
-                    <t t-if="bu.local_state=='running'">
-                        <li><a t-attf-href="http://{{bu['domain']}}/?db={{bu.dest}}-all">Connect all <i class="fa fa-sign-in"></i></a></li>
-                        <li><a t-attf-href="http://{{bu['domain']}}/?db={{bu.dest}}-base">Connect base <i class="fa fa-sign-in"></i></a></li>
-                        <li><a t-attf-href="http://{{bu['domain']}}/">Connect <i class="fa fa-sign-in"></i></a></li>
-                    </t>
-                    <li t-if="bu.global_state in ['done','running'] or requested_action == 'deathrow'" groups="base.group_user">
-                        <a href="#" data-runbot="rebuild" t-att-data-runbot-build="bu['id']"
-                          title="Retry this build, usefull for false positive">
-                        Rebuild <i class="fa fa-refresh"/>
-                        </a>
-                    </li>
-                    <li t-if="bu.global_state != 'done'" groups="base.group_user">
-                        <a t-if="bu.requested_action != 'deathrow'" href="#" data-runbot="kill" t-att-data-runbot-build="bu['id']">Kill <i class="fa fa-crosshairs"/></a>
-                        <span t-else="" data-runbot="kill" > Killing <i class="fa fa-spinner fa-spin"/> <i class="fa fa-crosshairs"/></span>
-                    </li>
-                    <li t-if="bu.global_state == 'done'" groups="base.group_user">
-                        <a t-if="bu.requested_action != 'wake_up'" href="#" data-runbot="wakeup" t-att-data-runbot-build="bu['id']">Wake up <i class="fa fa-coffee"/></a>
-                        <span t-else="" data-runbot="wakeup" > Waking up <i class="fa fa-spinner fa-spin"/> <i class="fa fa-crosshairs"/></span>
-                    </li>
-
-                    <li t-if="bu.global_state not in ('testing', 'waiting', 'pending')" class="divider"></li>
-                    <li><a t-attf-href="/runbot/build/{{bu['id']}}">Logs <i class="fa fa-file-text-o"/></a></li>
-                    <t t-set="log_url" t-value="'http://%s' % bu.host if bu.host != fqdn else ''"/>
-                    <t t-if="bu.host" t-foreach="bu.log_list.split(',') if bu.log_list else []" t-as="log_name" >
-                      <li><a t-attf-href="{{log_url}}/runbot/static/build/#{bu.dest}/logs/#{log_name}.txt">Full <t t-esc="log_name"/> logs <i class="fa fa-file-text-o"/></a></li>
-                    </t>
-                    <li t-if="bu.coverage and bu.host"><a t-attf-href="http://{{bu.host}}/runbot/static/build/#{bu.dest}/coverage/index.html">Coverage <i class="fa fa-file-text-o"/></a></li>
-                    <li t-if="bu.global_state!='pending'" class="divider"></li>
-                    <!--<li><a t-attf-href="{{br['branch'].branch_url}}"><t t-esc="'Branch ' if not br['branch'].pull_head_name else 'Pull '"/><i class="fa fa-github"/></a></li>
-                    <li><a t-attf-href="https://{{repo.base_url}}/commit/{{bu['name']}}">Commit <i class="fa fa-github"/></a></li>
-                    <li><a t-attf-href="https://{{repo.base_url}}/compare/{{br['branch'].branch_name}}">Compare <i class="fa fa-github"/></a></li>-->
-                    <!-- TODO branch.pull from -->
-                    <li class="divider"></li>
-                    <li groups="runbot.group_runbot_admin"><a t-attf-href="/web/#id={{bu['id']}}&amp;view_type=form&amp;model=runbot.build" target="new">View in backend</a></li>
-                </ul>
+                <t t-call="runbot.build_gear"></t>
             </div>
         </div>
     </template>

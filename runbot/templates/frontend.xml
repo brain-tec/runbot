@@ -143,17 +143,9 @@
         <span t-else="" t-attf-class="btn btn-default disabled" style="width:110px;">
           <span t-esc="slot.trigger_id.name"/>
         </span>
-        <a t-if="bu.local_state=='running'"
-          t-attf-href="http://{{bu.domain}}/?db={{bu.dest}}-all"
-          class="btn btn-primary" title="Sign in on this build"
-          aria-label="Sign in on this build">
-          <i class="fa fa-sign-in fa-fw"/>
-        </a>
-        <a t-if="bu.local_state=='done'"
-          href="#" data-runbot="wakeup" t-att-data-runbot-build="bu.id"
-          t-attf-class="btn btn-default {{'disabled' if bu.requested_action == 'wake_up' else ''}}" title="Wake up this build" aria-label="Wake up this build">
-          <i class="fa fa-coffee fa-fw"/>
-        </a>
+        <t t-if="bu and bu.local_state in ('running', 'done')">
+          <t t-call="runbot.build_gear"/>
+        </t>
         <span t-if="bu and bu.local_state not in ('running', 'done')" class="btn btn-info">
           <i class="fa fa-spinner fa-spin fa-fw"/>
         </span>
@@ -227,8 +219,7 @@
 
                         <div t-attf-class="col-md-6 col-xl-3 bg-{{klass}}-light cell {{'d-none d-xl-block' if batch_index > 1 else ''}}">
                           <div>
-                            <a t-attf-href="/runbot/batch/#{batch.id}" class="fa fa-asterisk"/>
-                            <div class="badge badge-light" t-esc="batch.get_formated_age()"/>
+                            <a t-attf-href="/runbot/batch/#{batch.id}" class="badge badge-light"><t t-esc="batch.get_formated_age()"/></a>
                           </div>
                           <t t-foreach="batch.slot_ids" t-as="slot">
                             <t t-if="slot.build_id">
