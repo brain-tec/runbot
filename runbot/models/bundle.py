@@ -9,13 +9,15 @@ from ..common import dt2time, s2human_long
 
 _logger = logging.getLogger(__name__)
 
+
 class Project(models.Model):
     _name = 'runbot.project'
     _description = 'Project'
 
     name = fields.Char('Category name', required=True, unique=True, help="Name of the base branch")
     trigger_ids = fields.One2many('runbot.trigger', 'project_id', string='Triggers', required=True, unique=True, help="Name of the base branch")
-    group_ids = fields.One2many('runbot.trigger', 'project_id', string='Triggers', required=True, unique=True, help="Name of the base branch")
+    # group_ids = fields.One2many('runbot.trigger', 'project_id', string='Triggers', required=True, unique=True, help="Name of the base branch")
+
 
 class Bundle(models.Model):
     _name = 'runbot.bundle'
