@@ -207,7 +207,6 @@ class Runbot(Controller):
     @o_route(['/runbot/batch/slot/<model("runbot.batch.slot"):slot>/build'], auth='user', type='http')
     def slot_create_build(self, slot=None, **kwargs):
         build = slot.sudo()._create_missing_build()
-        print(build.id)
         return werkzeug.utils.redirect('/runbot/build/%s' % build.id)
 
     @route(['/runbot/commit/<model("runbot.commit"):commit>'], website=True, auth='public', type='http')

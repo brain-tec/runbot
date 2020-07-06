@@ -93,9 +93,6 @@
                         <field string="All saas" name="upgrade_from_all_intermediate_version"/>
                         <field string="Explicit list" name="upgrade_from_version_ids" widget="many2many_tags"/>
                       </group>
-                      <group class="o_group_col_12">
-                        <field string="Versions needed" name="master_reference_versions" widget="many2many_tags"/>
-                      </group>
                       <group string="Upgrade settings" class="o_group_col_12">
                         <field name="upgrade_flat"/>
                         <field name="upgrade_config_id"/>
@@ -105,6 +102,11 @@
                               <field name="db_pattern"/>
                           </tree>
                         </field>
+                      </group>
+                    </group>
+                    <group attrs="{'invisible': [('job_type', 'not in', ('configure_upgrade', 'configure_upgrade_complement'))]}">
+                      <group class="o_group_col_12">
+                        <field string="Versions needed" name="master_reference_versions" widget="many2many_tags"/>
                       </group>
                     </group>
                     <group string="Restore settings" attrs="{'invisible': [('job_type', '!=', 'restore')]}">

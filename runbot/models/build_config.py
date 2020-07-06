@@ -472,13 +472,10 @@ class ConfigStep(models.Model):
 
         for target in valid_targets:
             build._log('', 'Checking upgrade to [%s](%s)' % (target.params_id.version_id.name, target.build_url), log_type='markdown')
-            print('############', upgrade_complement_step)
             for upgrade_db in upgrade_complement_step.upgrade_dbs:
-                print(upgrade_db, upgrade_db.db_pattern)
                 if not upgrade_db.min_target_version_id or upgrade_db.min_target_version_id.number <= target.params_id.version_id.number:
                     # note: here we don't consider the upgrade_db config here
                     dbs = build.database_ids.sorted('db_suffix')
-                    print(dbs)
                     for db in self._filter_upgrade_database(dbs, upgrade_db.db_pattern):
                         child = build._add_child({
                             'upgrade_to_build_id': target.id,
@@ -744,7 +741,6 @@ class ConfigStep(models.Model):
         target_versions = version.browse()
 
         upgrade_complement_step = self.upgrade_complement_trigger_id.upgrade_step_id
-
         if next_versions:
             for next_version in next_versions:
                 if bundle.version_id in upgrade_complement_step._get_upgrade_source_versions(next_version):

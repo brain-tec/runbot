@@ -62,22 +62,17 @@
           </t>
 
           <div t-if="bu.global_state not in ('testing', 'waiting', 'pending')" class="dropdown-divider"></div>
-
-          <a class="dropdown-item" t-attf-href="/runbot/build/{{bu['id']}}">Logs <i class="fa fa-file-text-o"/></a>
           <t t-set="log_url" t-value="'http://%s' % bu.host if bu.host != fqdn else ''"/>
           <t t-if="bu.host" t-foreach="bu.log_list.split(',') if bu.log_list else []" t-as="log_name" >
             <a class="dropdown-item" t-attf-href="{{log_url}}/runbot/static/build/#{bu.dest}/logs/#{log_name}.txt">Full <t t-esc="log_name"/> logs <i class="fa fa-file-text-o"/></a>
           </t>
 
           <li t-if="bu.coverage and bu.host"><a t-attf-href="http://{{bu.host}}/runbot/static/build/#{bu.dest}/coverage/index.html">Coverage <i class="fa fa-file-text-o"/></a></li>
-
-          <div t-if="bu.global_state!='pending'" class="dropdown-divider"></div>
-          <!--<li><a t-attf-href="{{br['branch'].branch_url}}"><t t-esc="'Branch ' if not br['branch'].pull_head_name else 'Pull '"/><i class="fa fa-github"/></a></li>
-          <li><a t-attf-href="https://{{repo.base_url}}/commit/{{bu['name']}}">Commit <i class="fa fa-github"/></a></li>
-          <li><a t-attf-href="https://{{repo.base_url}}/compare/{{br['branch'].branch_name}}">Compare <i class="fa fa-github"/></a></li>-->
           <!-- TODO branch.pull from -->
-          <div class="dropdown-divider"></div>
-          <a groups="runbot.group_runbot_admin" class="dropdown-item" t-attf-href="/web/#id={{bu['id']}}&amp;view_type=form&amp;model=runbot.build" target="new">View in backend</a>
+          <t groups="runbot.group_runbot_admin">
+            <div class="dropdown-divider"></div>
+            <a class="dropdown-item" t-attf-href="/web/#id={{bu['id']}}&amp;view_type=form&amp;model=runbot.build" target="new">View in backend</a>
+          </t>
       </div>
     </template>
 
