@@ -479,6 +479,7 @@ class Batch(models.Model):
             link_type = 'created'
             if (trigger.repo_ids & bundle_repos) or force or bundle.build_all or bundle.sticky: # only auto link build if bundle has a branch for this trigger
                 link_type, build = self._create_build(params)
+                pushed_repo
             self.env['runbot.batch.slot'].create({
                 'batch_id': self.id,
                 'trigger_id': trigger.id,

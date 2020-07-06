@@ -239,7 +239,7 @@ class TestRepo(RunbotCaseMinimalSetup):
         self.assertEqual(last_batch.state, 'ready')
 
         self.assertEqual(2, len(last_batch.slot_ids))
-        self.assertEqual(1, len(last_batch.slot_ids.mapped('build_id')))
+        self.assertEqual(2, len(last_batch.slot_ids.mapped('build_id')))
         # TODO imp
         # Add another branch in another project
         # Add another bundle
