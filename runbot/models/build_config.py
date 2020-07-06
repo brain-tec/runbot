@@ -311,7 +311,15 @@ class ConfigStep(models.Model):
         return self.job_type in ('install_odoo', 'run_odoo', 'restore', 'test_upgrade') or (self.job_type == 'python' and 'docker_run(' in self.python_code)
 
 
-    def _run_run_odoo(self, build, log_path):
+    def _run_run_odoo(self, build, log_path, force=False):
+        if not force:
+            if build.parent_id:
+                build._log('_run_run_odoo', 'build has a parent, skip run')
+                return
+            if build.no_auto_run:
+                build._log('_run_run_odoo', 'build auto run is disabled, skip run')
+                return
+
         exports = build._checkout()
         # update job_start AFTER checkout to avoid build being killed too soon if checkout took some time and docker take some time to start
         build.job_start = now()

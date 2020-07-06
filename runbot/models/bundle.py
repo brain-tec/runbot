@@ -14,10 +14,10 @@ class Project(models.Model):
     _name = 'runbot.project'
     _description = 'Project'
 
-    name = fields.Char('Category name', required=True, unique=True, help="Name of the base branch")
-    trigger_ids = fields.One2many('runbot.trigger', 'project_id', string='Triggers', required=True, unique=True, help="Name of the base branch")
-    # group_ids = fields.One2many('runbot.trigger', 'project_id', string='Triggers', required=True, unique=True, help="Name of the base branch")
+    name = fields.Char('Project name', required=True, unique=True)
+    group_ids = fields.Many2many('res.groups', string='Required groups')
 
+    trigger_ids = fields.One2many('runbot.trigger', 'project_id', string='Triggers')
 
 class Bundle(models.Model):
     _name = 'runbot.bundle'
@@ -29,6 +29,7 @@ class Bundle(models.Model):
 
     # custom behaviour
     no_build = fields.Boolean('No build')
+    no_auto_run = fields.Boolean('No run')
     build_all = fields.Boolean('Force all triggers')
     modules = fields.Char("Modules to install", help="Comma-separated list of modules to install and test.")
 

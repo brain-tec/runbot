@@ -46,7 +46,7 @@ class RepoTrigger(models.Model):
     ci_context = fields.Char("Ci context", default='ci/runbot', tracking=True)
     category_id = fields.Many2one('runbot.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
     version_domain = fields.Char(string="Version domain")
-    group_ids = fields.Many2many('res.groups', string='Limited to groups') #  TODO test
+    # group_ids = fields.Many2many('res.groups', string='Limited to groups') #  TODO should we add this
     hide = fields.Boolean('Hide batch on main page') #  TODO test or remove
 
     upgrade_dumps_trigger_id = fields.Many2one('runbot.trigger', tracking=True)
@@ -218,7 +218,6 @@ class Repo(models.Model):
     # -> not verry usefull, remove it? (iterate on projects or contraints triggers:
     # all trigger where a repo is used must be in the same project.
     modules = fields.Char("Modules to install", help="Comma-separated list of modules to install and test.", tracking=True)
-    group_ids = fields.Many2many('res.groups', string='Limited to groups')
     server_files = fields.Char('Server files', help='Comma separated list of possible server files', tracking=True)  # odoo-bin,openerp-server,openerp-server.py
     manifest_files = fields.Char('Manifest files', help='Comma separated list of possible manifest files', default='__manifest__.py', tracking=True)
     addons_paths = fields.Char('Addons paths', help='Comma separated list of possible addons path', default='', tracking=True)

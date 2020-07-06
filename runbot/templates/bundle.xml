@@ -53,14 +53,14 @@
                                             <samp class="badge badge-info">
                                               <i class="fa fa-fw fa-hashtag" t-if="commit_link.match_type == 'new'"/>
                                                 <i class="fa fa-fw fa-refresh" t-if="commit_link.match_type == 'head'"/>
-                                                <i class="fa fa-fw fa-clock-o" t-if="commit_link.match_type == 'base_match'"/>
-                                                <i class="fa fa-fw fa-code-fork" t-if="commit_link.match_type == 'base_head'"/>
+                                                <i class="fa fa-fw fa-code-fork" t-if="commit_link.match_type == 'base_match'"/>
+                                                <i class="fa fa-fw fa-clock-o" t-if="commit_link.match_type == 'base_head'"/>
                                                 <t t-esc="commit_link.commit_id.dname"/>
                                             </samp>
                                         </a>
                                     </t>
                                 </td>
-                                <t t-if="batch.state=='preparing'"><t t-set="klass">default</t></t>
+                                <t t-set="klass">default</t>
                                 <t t-if="batch.state=='ready'"><t t-set="klass">success</t></t>
                                 <td t-attf-class="bg-{{klass}}-light">
                                     <t t-foreach="batch.slot_ids" t-as="slot">

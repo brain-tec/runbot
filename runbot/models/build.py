@@ -132,6 +132,7 @@ class BuildResult(models.Model):
     # -> display all?
 
     params_id = fields.Many2one('runbot.build.params', required=True, index=True, auto_join=True)
+    no_auto_run = fields.Boolean('No run')
     # could be a default value, but possible to change it to allow duplicate accros branches
 
 
@@ -643,7 +644,7 @@ class BuildResult(models.Model):
                             'port': port,
                         })
                         build._log('wake_up', '**Waking up build**', log_type='markdown', level='SEPARATOR')
-                        self.env['runbot.build.config.step']._run_run_odoo(build, log_path)
+                        self.env['runbot.build.config.step']._run_run_odoo(build, log_path, force=True)
                         # reload_nginx will be triggered by _run_run_odoo
                     except Exception:
                         _logger.exception('Failed to wake up build %s', build.dest)
@@ -1113,4 +1114,4 @@ class BuildResult(models.Model):
                     for build_commit in self.params_id.commit_link_ids:
                         commit = build_commit.commit_id
                         if build_commit.match_type != 'default' and commit.repo_id in trigger.repo_ids:
-                            commit._github_status(trigger.ci_context, state, target_url, desc)
+                            commit._github_status(build, trigger.ci_context, state, target_url, desc)

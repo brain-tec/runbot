@@ -57,7 +57,7 @@ class Commit(models.Model):
         for commit in self:
             commit.dname = '%s:%s' % (commit.repo_id.name, commit.name[:8])
 
-    def _github_status(self, context, state, target_url, description=None):
+    def _github_status(self, build, context, state, target_url, description=None):
         self.ensure_one()
         Status = self.env['runbot.commit.status']
         last_status = Status.search([('commit_id', '=', self.id), ('context', '=', context)], order='id desc', limit=1)
@@ -65,6 +65,7 @@ class Commit(models.Model):
             _logger.info('Skipping already sent status %s:%s for %s', context, state, self.name)
             return
         last_status = Status.create({
+            'build_id': build.id,
             'commit_id': self.id,
             'context': context,
             'state': state,
@@ -82,6 +83,7 @@ class CommitStatus(models.Model):
     commit_id = fields.Many2one('runbot.commit', string='Commit', required=True, index=True)
     context = fields.Char('Context', required=True)
     state = fields.Char('State', required=True)
+    build_id = fields.Many2one('runbot.build', string='Build', index=True)
     target_url = fields.Char('Url')
     description = fields.Char('Description')
     sent_date = fields.Datetime('Sent Date')

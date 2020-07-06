@@ -57,7 +57,7 @@
             <td t-esc="status.sent_date and status.sent_date.strftime('%Y-%m-%d %H:%M:%S') or '—'"></td>
             <td t-esc="status.context"></td>
             <t t-call="runbot.commit_status_state_td"><t t-set="state" t-value="status.state"></t></t>
-            <td><a t-att-href="status.target_url">build <t t-esc="status.target_url.split('/')[-1]" /></a></td>
+            <td><a t-attf-href="/runbot/build/{{status.build_id.id}}">build <t t-esc="status.build_id.id" /></a></td>
           </tr>
         </table>
       </div>

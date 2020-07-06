@@ -6,6 +6,7 @@
           <t t-if="refresh">
             <meta http-equiv="refresh" t-att-content="refresh"/>
           </t>
+          <link rel="stylesheet" type="text/css" href="/runbot/static/src/fontawesome5/css/fontawesome.min.css"/>
         </xpath>
       <xpath expr="//footer" position="replace">
       </xpath>
@@ -211,8 +212,7 @@
                   <div class="col-md-9 col-lg-10">
                     <div class="row">
                       <t t-foreach="bundle.last_batchs" t-as="batch">
-                        <t t-if="batch.state=='preparing'" t-set="klass">default</t>
-                        <t t-if="batch.state=='ready'" t-set="klass">info</t>
+                        <t t-set="klass">info</t>
                         <t t-if="batch.state=='done'" t-set="klass">killed</t>
                         <t t-if="batch.state=='done' and all(slot.build_id.global_result == 'ok' for slot in batch.slot_ids if slot.build_id)" t-set="klass">success</t>
                         <t t-if="batch.state=='done' and any(slot.build_id.global_result in ('ko', 'warn') for slot in batch.slot_ids)" t-set="klass">danger</t>
@@ -221,6 +221,9 @@
                           <div>
                             <a t-attf-href="/runbot/batch/#{batch.id}" class="badge badge-light"><t t-esc="batch.get_formated_age()"/></a>
                           </div>
+                          <t t-if="batch.state=='preparing'">
+                            <i class="fa fa-hourglass-start fa-fw"/> preparing
+                          </t>
                           <t t-foreach="batch.slot_ids" t-as="slot">
                             <t t-if="slot.build_id">
                               <t t-if="(not slot.trigger_id.hide and trigger_display is None) or (trigger_display and slot.trigger_id.id in trigger_display)" 
