@@ -1105,11 +1105,10 @@ class BuildResult(models.Model):
                     _logger.debug("skipping github status for build %s ", build.id)
                     continue
 
-                desc = " (runtime %ss)" % (build.job_time,)
                 runbot_domain = self.env['runbot.runbot']._domain()
-                target_url = "http://%s/runbot/build/%s" % (runbot_domain, build.id)
-
                 trigger = self.params_id.trigger_id
+                target_url = trigger.ci_url or "http://%s/runbot/build/%s" % (runbot_domain, build.id)
+                desc = trigger.ci_description or " (runtime %ss)" % (build.job_time,)
                 if trigger.ci_context:
                     for build_commit in self.params_id.commit_link_ids:
                         commit = build_commit.commit_id

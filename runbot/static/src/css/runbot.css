@@ -95,3 +95,14 @@ body, .table{
 .orphan_child {
     text-decoration: line-through;
 }
+
+.badge-light{
+    border: 1px solid #AAA;
+}
+.arrow{
+    display: none;
+}
+
+.badge-light:hover .arrow{
+    display: inline;
+}

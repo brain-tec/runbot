@@ -19,6 +19,9 @@
                 <field name="hide"/>
                 <field name="upgrade_dumps_trigger_id"/>
                 <field name="upgrade_step_id"/>
+                <field name="ci_context"/>
+                <field name="ci_url"/>
+                <field name="ci_description"/>
               </group>
             </sheet>
           </form>
@@ -34,6 +37,8 @@
                 <field name="category_id"/>
                 <field name="project_id"/>
                 <field name="config_id"/>
+                <field name="ci_context"/>
+                <field name="repo_ids" widget="many2many_tags"/>
             </tree>
         </field>
       </record>

@@ -6,7 +6,6 @@
           <t t-if="refresh">
             <meta http-equiv="refresh" t-att-content="refresh"/>
           </t>
-          <link rel="stylesheet" type="text/css" href="/runbot/static/src/fontawesome5/css/fontawesome.min.css"/>
         </xpath>
       <xpath expr="//footer" position="replace">
       </xpath>
@@ -219,7 +218,7 @@
 
                         <div t-attf-class="col-md-6 col-xl-3 bg-{{klass}}-light cell {{'d-none d-xl-block' if batch_index > 1 else ''}}">
                           <div>
-                            <a t-attf-href="/runbot/batch/#{batch.id}" class="badge badge-light"><t t-esc="batch.get_formated_age()"/></a>
+                            <a t-attf-href="/runbot/batch/#{batch.id}" class="badge badge-light"><t t-esc="batch.get_formated_age()"/> <i class="arrow fa fa-window-maximize"/></a>
                           </div>
                           <t t-if="batch.state=='preparing'">
                             <i class="fa fa-hourglass-start fa-fw"/> preparing

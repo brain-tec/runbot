@@ -51,6 +51,8 @@ class RepoTrigger(models.Model):
 
     upgrade_dumps_trigger_id = fields.Many2one('runbot.trigger', tracking=True)
     upgrade_step_id = fields.Many2one('runbot.build.config.step', compute="_compute_upgrade_step_id", store=True)
+    ci_url = fields.Char("ci url")
+    ci_description = fields.Char("ci description")
 
     @api.depends('upgrade_dumps_trigger_id', 'config_id', 'config_id.step_order_ids.step_id.job_type')
     def _compute_upgrade_step_id(self):
