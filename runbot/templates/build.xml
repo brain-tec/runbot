@@ -33,45 +33,45 @@
       </t>
       <button t-attf-class="btn {{ btnclass }} dropdown-toggle" data-toggle="dropdown" title="Build options" aria-label="Build options" aria-expanded="false"><i class="fa fa-cog fa-fw"/><span class="caret"></span></button>
       <div class="dropdown-menu dropdown-menu-right" role="menu">
-          <a t-if="bu.global_result=='skipped'" groups="runbot.group_runbot_admin" class="dropdown-item" href="#" data-runbot="rebuild" t-att-data-runbot-build="bu['id']">Force Build <i class="fa fa-level-up"></i></a>
+          <a t-if="bu.global_result=='skipped'" groups="runbot.group_runbot_admin" class="dropdown-item" href="#" data-runbot="rebuild" t-att-data-runbot-build="bu['id']"><i class="fa fa-level-up"></i> Force Build</a>
           <t t-if="bu.local_state=='running'">
-              <a class="dropdown-item" t-attf-href="http://{{bu['domain']}}/?db={{bu.dest}}-all">Connect all <i class="fa fa-sign-in"></i></a>
-              <a class="dropdown-item" t-attf-href="http://{{bu['domain']}}/?db={{bu.dest}}-base">Connect base <i class="fa fa-sign-in"></i></a>
-              <a class="dropdown-item" t-attf-href="http://{{bu['domain']}}/">Connect <i class="fa fa-sign-in"></i></a>
+              <a class="dropdown-item" t-attf-href="http://{{bu['domain']}}/?db={{bu.dest}}-all"><i class="fa fa-sign-in"> Connect all</i></a>
+              <a class="dropdown-item" t-attf-href="http://{{bu['domain']}}/?db={{bu.dest}}-base"><i class="fa fa-sign-in"> Connect base</i></a>
+              <a class="dropdown-item" t-attf-href="http://{{bu['domain']}}/"><i class="fa fa-sign-in"></i> Connect</a>
           </t>
           <a class="dropdown-item" t-if="bu.global_state in ['done','running'] or requested_action == 'deathrow'" groups="base.group_user" href="#" data-runbot="rebuild" t-att-data-runbot-build="bu['id']" title="Retry this build, usefull for false positive">
-          Rebuild <i class="fa fa-refresh"/>
+          <i class="fa fa-refresh"/> Rebuild
           </a>
 
           <t t-if="bu.global_state != 'done'" >
             <t t-if="bu.requested_action != 'deathrow'">
-              <a groups="base.group_user" href="#" data-runbot="kill" class="dropdown-item" t-att-data-runbot-build="bu['id']">Kill <i class="fa fa-crosshairs"/></a>
+              <a groups="base.group_user" href="#" data-runbot="kill" class="dropdown-item" t-att-data-runbot-build="bu['id']"><i class="fa fa-crosshairs"/> Kill</a>
             </t>
             <t t-else="">
-              <a groups="base.group_user" data-runbot="kill" class="dropdown-item disabled"> Killing <i class="fa fa-spinner fa-spin"/> <i class="fa fa-crosshairs"/></a>
+              <a groups="base.group_user" data-runbot="kill" class="dropdown-item disabled"> <i class="fa fa-spinner fa-spin"/> Killing<i class="fa fa-crosshairs"/></a>
             </t>
           </t>
 
           <t t-if="bu.global_state == 'done'">
             <t t-if="bu.requested_action != 'wake_up'">
-              <a groups="base.group_user" class="dropdown-item" href="#" data-runbot="wakeup" t-att-data-runbot-build="bu['id']">Wake up <i class="fa fa-coffee"/></a>
+              <a groups="base.group_user" class="dropdown-item" href="#" data-runbot="wakeup" t-att-data-runbot-build="bu['id']"><i class="fa fa-coffee"/> Wake up</a>
             </t>
             <t t-else="">
-               <a groups="base.group_user" class="dropdown-item disabled" data-runbot="wakeup" > Waking up <i class="fa fa-spinner fa-spin"/> <i class="fa fa-crosshairs"/></a>
+               <a groups="base.group_user" class="dropdown-item disabled" data-runbot="wakeup"><i class="fa fa-spinner fa-spin"/> Waking up<i class="fa fa-crosshairs"/></a>
             </t>
           </t>
 
-          <div t-if="bu.global_state not in ('testing', 'waiting', 'pending')" class="dropdown-divider"></div>
+          <div t-if="bu.global_state not in ('testing', 'waiting', 'pending')" groups="base.group_user" class="dropdown-divider"></div>
           <t t-set="log_url" t-value="'http://%s' % bu.host if bu.host != fqdn else ''"/>
           <t t-if="bu.host" t-foreach="bu.log_list.split(',') if bu.log_list else []" t-as="log_name" >
-            <a class="dropdown-item" t-attf-href="{{log_url}}/runbot/static/build/#{bu.dest}/logs/#{log_name}.txt">Full <t t-esc="log_name"/> logs <i class="fa fa-file-text-o"/></a>
+            <a class="dropdown-item" t-attf-href="{{log_url}}/runbot/static/build/#{bu.dest}/logs/#{log_name}.txt"><i class="fa fa-file-text-o"/> Full <t t-esc="log_name"/> logs</a>
           </t>
 
-          <li t-if="bu.coverage and bu.host"><a t-attf-href="http://{{bu.host}}/runbot/static/build/#{bu.dest}/coverage/index.html">Coverage <i class="fa fa-file-text-o"/></a></li>
+          <li t-if="bu.coverage and bu.host"><a t-attf-href="http://{{bu.host}}/runbot/static/build/#{bu.dest}/coverage/index.html"><i class="fa fa-file-text-o"/> Coverage</a></li>
           <!-- TODO branch.pull from -->
           <t groups="runbot.group_runbot_admin">
             <div class="dropdown-divider"></div>
-            <a class="dropdown-item" t-attf-href="/web/#id={{bu['id']}}&amp;view_type=form&amp;model=runbot.build" target="new">View in backend</a>
+            <a class="dropdown-item" t-attf-href="/web/#id={{bu['id']}}&amp;view_type=form&amp;model=runbot.build" target="new"><i class="fa fa-list"/> View in backend</a>
           </t>
       </div>
     </template>

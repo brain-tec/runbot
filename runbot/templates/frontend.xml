@@ -190,7 +190,7 @@
                   <div class="col-md-3 col-lg-2 cell">
                     <div class="one_line">
                       <i t-if="bundle.sticky" class="fa fa-star" style="color: #f0ad4e" />
-                      <a t-attf-href="/runbot/bundle/#{bundle.id}">
+                      <a t-attf-href="/runbot/bundle/#{bundle.id}" title="View Bundle">
                         <b t-esc="bundle.name"/>
                       </a>
                       <br/>
@@ -200,6 +200,7 @@
                           <t t-if="last_category_batch">
                             <t t-if="category.view_id" t-call="{{category.view_id.key}}"/>
                             <a t-else=""
+                              t-attf-title="View last {{category.name}} batch"
                               t-attf-href="/runbot/batch/{{last_category_batch.id}}"
                               t-attf-class="fa fa-{{category.icon}}"
                               />
@@ -218,10 +219,10 @@
 
                         <div t-attf-class="col-md-6 col-xl-3 bg-{{klass}}-light cell {{'d-none d-xl-block' if batch_index > 1 else ''}}">
                           <div>
-                            <a t-attf-href="/runbot/batch/#{batch.id}" class="badge badge-light"><t t-esc="batch.get_formated_age()"/> <i class="arrow fa fa-window-maximize"/></a>
+                            <a t-attf-href="/runbot/batch/#{batch.id}" class="badge badge-light" title="View Batch"><t t-esc="batch.get_formated_age()"/> <i class="arrow fa fa-window-maximize"/></a>
                           </div>
                           <t t-if="batch.state=='preparing'">
-                            <i class="fa fa-hourglass-start fa-fw"/> preparing
+                            <i class="fa fa-cog fa-spin fa-fw"/> preparing
                           </t>
                           <t t-foreach="batch.slot_ids" t-as="slot">
                             <t t-if="slot.build_id">
@@ -235,7 +236,7 @@
                                 <a t-attf-href="/runbot/commit/#{bundle_commit.commit_id.id}">
                                   <span class="badge badge-light" t-esc="bundle_commit.commit_id.dname"/>
                                 </a>
-                                <span title="bundle_commit.commit_id.subject" t-esc="bundle_commit.commit_id.subject"/>
+                                <span t-esc="bundle_commit.commit_id.subject"/>
                               </div>
                             </small>
                           </div>
