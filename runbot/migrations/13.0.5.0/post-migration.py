@@ -208,9 +208,18 @@ def migrate(cr, version):
             })
             bundles[key] = bundle
         bundle = bundles[key]
-        if bundle.is_base and branch.is_pr:
-            _logger.warning('Trying to add pr %s (%s) to base bundle (%s)', branch.name, branch.id, bundle.name)
-            bundle = dummy_bundle
+
+        if branch.is_pr:
+            if bundle.is_base:
+                _logger.warning('Trying to add pr %s (%s) to base bundle (%s)', branch.name, branch.id, bundle.name)
+                bundle = dummy_bundle
+            elif ':' in name:
+                #  handle external PR's
+                base_name = name.split(':')[1].split('-')[0]
+                defined_base_key = (base_name, project_id)
+                if defined_base_key in bundles:
+                    bundle.defined_base_id = bundles[defined_base_key]
+
         branch.bundle_id = bundle
         branch_to_bundle[branch.id] = bundle
         branch_to_version[branch.id] = bundle.version_id.id
