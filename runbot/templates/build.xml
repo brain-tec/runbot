@@ -35,8 +35,8 @@
       <div class="dropdown-menu dropdown-menu-right" role="menu">
           <a t-if="bu.global_result=='skipped'" groups="runbot.group_runbot_admin" class="dropdown-item" href="#" data-runbot="rebuild" t-att-data-runbot-build="bu['id']"><i class="fa fa-level-up"></i> Force Build</a>
           <t t-if="bu.local_state=='running'">
-              <a class="dropdown-item" t-attf-href="http://{{bu['domain']}}/?db={{bu.dest}}-all"><i class="fa fa-sign-in"> Connect all</i></a>
-              <a class="dropdown-item" t-attf-href="http://{{bu['domain']}}/?db={{bu.dest}}-base"><i class="fa fa-sign-in"> Connect base</i></a>
+              <a class="dropdown-item" t-attf-href="http://{{bu['domain']}}/?db={{bu.dest}}-all"><i class="fa fa-sign-in"></i> Connect all</a>
+              <a class="dropdown-item" t-attf-href="http://{{bu['domain']}}/?db={{bu.dest}}-base"><i class="fa fa-sign-in"></i> Connect base</a>
               <a class="dropdown-item" t-attf-href="http://{{bu['domain']}}/"><i class="fa fa-sign-in"></i> Connect</a>
           </t>
           <a class="dropdown-item" t-if="bu.global_state in ['done','running'] or requested_action == 'deathrow'" groups="base.group_user" href="#" data-runbot="rebuild" t-att-data-runbot-build="bu['id']" title="Retry this build, usefull for false positive">
