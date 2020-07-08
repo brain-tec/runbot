@@ -462,14 +462,11 @@ class BuildResult(models.Model):
             # TODO CHECK SLOT BEHAVIOUR
             slots = self.env['runbot.batch.slot'].search([('build_id', '=', self.id)])
             for slot in slots:
-                if slot.link_type == 'matched':
-                    slot.build_id = new_build
-                else:
-                    slot.copy({
-                        'build_id': new_build.id,
-                        'link_type': 'rebuild',
-                    })
-                    slot.active = False
+                slot.copy({
+                    'build_id': new_build.id,
+                    'link_type': 'rebuild',
+                })
+                slot.active = False
         return new_build
 
     def _skip(self, reason=None):
