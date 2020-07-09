@@ -77,7 +77,7 @@ class BuildParameters(models.Model):
             cleaned_vals = {
                 'version_id': param.version_id.id,
                 'project_id': param.project_id.id,
-                'trigger_id': param.project_id.id,
+                'trigger_id': param.trigger_id.id,
                 'extra_params': param.extra_params or '',
                 'config_id': param.config_id.id,
                 'config_data': param.config_data.dict,
