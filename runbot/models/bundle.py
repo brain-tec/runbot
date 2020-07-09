@@ -319,9 +319,11 @@ class Batch(models.Model):
         if build:
             build.killable = False
         else:
+            description = params.trigger_id.description if params.trigger_id.description else False
             link_type = 'created'
             build = self.env['runbot.build'].create({
                 'params_id': params.id,
+                'description': description,
             })
         return link_type, build
 

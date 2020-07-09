@@ -10,6 +10,7 @@
             <sheet>
               <group name="repo_group">
                 <field name="name"/>
+                <field name = "description"/>
                 <field name="category_id" required='1'/>
                 <field name="project_id"/>
                 <field name="repo_ids"/>

@@ -81,6 +81,8 @@ class TestBuildParams(RunbotCaseMinimalSetup):
         self.additionnal_setup()
         self.start_patchers()
 
+        self.trigger_server.description = expected_description = "A nice trigger description"
+
         # A commit is found on the dev remote
         branch_a_name = '10.0-test-something'
         self.push_commit(self.remote_server_dev, branch_a_name, 'nice subject', sha='d0d0caca')
@@ -93,9 +95,10 @@ class TestBuildParams(RunbotCaseMinimalSetup):
         bundle.last_batch._prepare()
         build_slot = bundle.last_batch.slot_ids.filtered(lambda rec: rec.trigger_id == self.trigger_server)
         self.assertEqual(build_slot.build_id.params_id.config_id, self.trigger_server.config_id)
+        self.assertEqual(build_slot.build_id.description, expected_description, "A build description should reflect the trigger description")
 
     def test_custom_trigger_config(self):
-        """Test that a bundle with a custom trigger creates a build with approrioate config"""
+        """Test that a bundle with a custom trigger creates a build with appropriate config"""
         self.additionnal_setup()
         self.start_patchers()
 
