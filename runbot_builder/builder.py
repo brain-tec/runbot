@@ -26,6 +26,7 @@ class RunbotClient():
         from odoo import fields
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
+        signal.signal(signal.SIGQUIT, self.dump_stack)
         host = self.env['runbot.host']._get_current('worker')
         host._bootstrap()
         count = 0
@@ -64,6 +65,10 @@ class RunbotClient():
 
         _logger.info("Interrupt detected")
         self.ask_interrupt.set()
+
+    def dump_stack(self, signal, frame):
+        import odoo
+        odoo.tools.misc.dumpstacks()
 
     def sleep(self, t):
         self.ask_interrupt.wait(t)
