@@ -214,6 +214,7 @@ class Repo(models.Model):
     _inherit = 'mail.thread'
 
     name = fields.Char("Name", unique=True, tracking=True)  # odoo/enterprise/upgrade/security/runbot/design_theme
+    identity_file = fields.Char("Identity File", help="Identity file to use with git/ssh", groups="runbot.group_runbot_admin")
     main_remote_id = fields.Many2one('runbot.remote', "Main remote", tracking=True)
     remote_ids = fields.One2many('runbot.remote', 'repo_id', "Remotes")
     project_id = fields.Many2one('runbot.project', required=True, tracking=True,
@@ -302,7 +303,10 @@ class Repo(models.Model):
     def _git(self, cmd):
         """Execute a git command 'cmd'"""
         self.ensure_one()
-        cmd = ['git', '-C', self.path] + cmd
+        config_args = []
+        if self.identity_file:
+            config_args = ['-c', 'core.sshCommand="ssh -i ~/.ssh/%s"' % self.identity_file]
+        cmd = ['git', '-C', self.path] + config_args + cmd
         _logger.info("git command: %s", ' '.join(cmd))
         return subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode()
 

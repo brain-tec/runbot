@@ -388,6 +388,30 @@ class TestFetch(RunbotCase):
         self.assertEqual(self.fetch_count, 5)
 
 
+class TestIdentityFile(RunbotCase):
+
+        def check_output_helper(self):
+            """Helper that returns a mock for repo._git()"""
+            def mock_check_output(cmd, *args, **kwargs):
+                expected_option = '-c core.sshCommand="ssh -i ~/.ssh/fake_identity"'
+                git_cmd = ' '.join(cmd)
+                self.assertIn(expected_option, git_cmd)
+                return Mock()
+
+            return mock_check_output
+
+        def test_identity_file(self):
+            """test that the identity file is used in git command"""
+
+            self.stop_patcher('git_patcher')
+            self.start_patcher('check_output_patcher', 'odoo.addons.runbot.models.repo.subprocess.check_output', new=self.check_output_helper())
+
+            self.repo_server.identity_file = 'fake_identity'
+
+            with mute_logger("odoo.addons.runbot.models.repo"):
+                self.repo_server._update_fetch_cmd()
+
+
 class TestRepoScheduler(RunbotCase):
 
     def setUp(self):

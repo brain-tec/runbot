@@ -70,6 +70,7 @@
             <sheet>
               <group name="repo">
                 <field name="name"/>
+                <field name="identity_file"/>
                 <field name="sequence"/>
                 <field name="project_id"/>
                 <field name="modules"/>
