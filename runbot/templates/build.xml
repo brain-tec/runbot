@@ -28,16 +28,19 @@
 
     <template id="runbot.build_gear">
       <t t-set="btnclass">btn-default</t>
-      <t t-if="bu.global_state == ['running']">
+      <t t-if="bu.global_state == 'running'">
         <t t-set="btnclass">btn-info</t>
       </t>
-      <button t-attf-class="btn {{ btnclass }} dropdown-toggle" data-toggle="dropdown" title="Build options" aria-label="Build options" aria-expanded="false"><i class="fa fa-cog fa-fw"/><span class="caret"></span></button>
+
+      <button t-attf-class="btn {{ btnclass }} dropdown-toggle" data-toggle="dropdown" title="Build options" aria-label="Build options" aria-expanded="false">
+        <i t-attf-class="fa  {{'fa-spinner' if bu.global_state == 'pending' else 'fa-cog'}} {{'' if bu.global_state == 'done' else 'fa-spin'}} fa-fw"/><span class="caret"></span>
+      </button>
       <div class="dropdown-menu dropdown-menu-right" role="menu">
           <a t-if="bu.global_result=='skipped'" groups="runbot.group_runbot_admin" class="dropdown-item" href="#" data-runbot="rebuild" t-att-data-runbot-build="bu['id']"><i class="fa fa-level-up"></i> Force Build</a>
           <t t-if="bu.local_state=='running'">
-              <a class="dropdown-item" t-attf-href="http://{{bu['domain']}}/?db={{bu.dest}}-all"><i class="fa fa-sign-in"></i> Connect all</a>
-              <a class="dropdown-item" t-attf-href="http://{{bu['domain']}}/?db={{bu.dest}}-base"><i class="fa fa-sign-in"></i> Connect base</a>
-              <a class="dropdown-item" t-attf-href="http://{{bu['domain']}}/"><i class="fa fa-sign-in"></i> Connect</a>
+              <a class="dropdown-item" t-attf-href="http://{{bu.domain}}/?db={{bu.dest}}-all"><i class="fa fa-sign-in"></i> Connect all</a>
+              <a class="dropdown-item" t-attf-href="http://{{bu.domain}}/?db={{bu.dest}}-base"><i class="fa fa-sign-in"></i> Connect base</a>
+              <a class="dropdown-item" t-attf-href="http://{{bu.domain}}/"><i class="fa fa-sign-in"></i> Connect</a>
           </t>
           <a class="dropdown-item" t-if="bu.global_state in ['done','running'] or requested_action == 'deathrow'" groups="base.group_user" href="#" data-runbot="rebuild" t-att-data-runbot-build="bu['id']" title="Retry this build, usefull for false positive">
           <i class="fa fa-refresh"/> Rebuild

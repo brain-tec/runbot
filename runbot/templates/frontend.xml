@@ -135,20 +135,18 @@
     <template id="runbot.slot_button">
       <t t-set="bu" t-value="slot.build_id"/>
       <t t-set="color" t-value="bu.get_color_class()"/>
-      <div t-attf-class="btn-group btn-group-ssm">
-        <i t-attf-class="fa fa-{{slot.fa_link_type()}} btn btn-{{color}} disabled"/>
-        <a t-if="bu" t-attf-href="/runbot/build/#{bu.id}" t-attf-class="btn btn-default" style="width:110px;">
+      <div t-attf-class="btn-group btn-group-ssm slot_button_group">
+        <span t-attf-class="btn btn-{{color}} disabled">
+          <i t-attf-class="fa fa-{{slot.fa_link_type()}}"/>
+        </span>
+        <a t-if="bu" t-attf-href="/runbot/build/#{bu.id}" t-attf-class="btn btn-default slot_name">
           <span t-esc="slot.trigger_id.name"/>
         </a>
-        <span t-else="" t-attf-class="btn btn-default disabled" style="width:110px;">
+        <span t-else="" t-attf-class="btn btn-default disabled slot_name">
           <span t-esc="slot.trigger_id.name"/>
         </span>
-        <t t-if="bu and bu.local_state in ('running', 'done')">
-          <t t-call="runbot.build_gear"/>
-        </t>
-        <span t-if="bu and bu.local_state not in ('running', 'done')" class="btn btn-info">
-          <i class="fa fa-spinner fa-spin fa-fw"/>
-        </span>
+        <a t-if="bu.local_state == 'running'" t-attf-href="http://{{bu.domain}}/" class="fa fa-sign-in btn btn-info"/>
+        <t t-call="runbot.build_gear"/>
         <a t-if="not bu" class="btn btn-default" title="Create build" t-attf-href="/runbot/batch/slot/{{slot.id}}/build"><i class="fa fa-play fa-fw"/></a>
       </div>
     </template>
@@ -224,12 +222,14 @@
                           <t t-if="batch.state=='preparing'">
                             <i class="fa fa-cog fa-spin fa-fw"/> preparing
                           </t>
-                          <t t-foreach="batch.slot_ids" t-as="slot">
-                            <t t-if="slot.build_id">
-                              <t t-if="(not slot.trigger_id.hide and trigger_display is None) or (trigger_display and slot.trigger_id.id in trigger_display)" 
-                                  t-call="runbot.slot_button"/>
+                          <div class="row">
+                            <t t-foreach="batch.slot_ids" t-as="slot">
+                              <t t-if="slot.build_id">
+                                <div t-if="(not slot.trigger_id.hide and trigger_display is None) or (trigger_display and slot.trigger_id.id in trigger_display)" 
+                                    t-call="runbot.slot_button" class="slot_container"/>
+                              </t>
                             </t>
-                          </t>
+                          </div>
                           <div t-if="more">
                             <small>
                               <div t-foreach="batch.commit_link_ids.sorted(lambda cl: (cl.commit_id.repo_id.sequence, cl.commit_id.repo_id.id))" t-as="bundle_commit" class="one_line">
