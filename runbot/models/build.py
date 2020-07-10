@@ -135,9 +135,13 @@ class BuildResult(models.Model):
     no_auto_run = fields.Boolean('No run')
     # could be a default value, but possible to change it to allow duplicate accros branches
 
-
     description = fields.Char('Description', help='Informative description')
     md_description = fields.Char(compute='_compute_md_description', String='MD Parsed Description', help='Informative description markdown parsed')
+
+    # Related fields for convenience
+    version_id = fields.Many2one('runbot.version', related='params_id.version_id', store=True, index=True)
+    config_id = fields.Many2one('runbot.build.config', related='params_id.config_id', store=True, index=True)
+    trigger_id = fields.Many2one('runbot.trigger', related='params_id.trigger_id', store=True, index=True)
 
     # state machine
     global_state = fields.Selection(make_selection(state_order), string='Status', compute='_compute_global_state', store=True)
