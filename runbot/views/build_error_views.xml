@@ -19,8 +19,8 @@
                 <field name="fixing_commit"/>
                 <field name="active"/>
                 <field name="parent_id" />
-                <field name="branch_ids" widget="many2many_tags"/>
-                <field name="repo_ids" widget="many2many_tags"/>
+                <field name="bundle_ids" widget="many2many_tags"/>
+                <field name="trigger_ids" widget="many2many_tags"/>
                 <field name="tag_ids" widget="many2many_tags"/>
                 <field name="first_seen_date"/>
                 <field name="first_seen_build_id"/>

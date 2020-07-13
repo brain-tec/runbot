@@ -28,8 +28,8 @@ class RunbotBuildError(models.Model):
     responsible = fields.Many2one('res.users', 'Assigned fixer', tracking=True)
     fixing_commit = fields.Char('Fixing commit', tracking=True)
     build_ids = fields.Many2many('runbot.build', 'runbot_build_error_ids_runbot_build_rel', string='Affected builds')
-    branch_ids = fields.Many2many('runbot.branch', compute='_compute_branch_ids')
-    repo_ids = fields.Many2many('runbot.repo', compute='_compute_repo_ids')
+    bundle_ids = fields.One2many('runbot.bundle', compute='_compute_bundle_ids')
+    trigger_ids = fields.Many2many('runbot.trigger', compute='_compute_trigger_ids')
     active = fields.Boolean('Error is not fixed', default=True, tracking=True)
     tag_ids = fields.Many2many('runbot.build.error.tag', string='Tags')
     build_count = fields.Integer(compute='_compute_build_counts', string='Nb seen')
@@ -71,14 +71,15 @@ class RunbotBuildError(models.Model):
             build_error.build_count = len(build_error.children_build_ids)
 
     @api.depends('build_ids')
-    def _compute_branch_ids(self):
+    def _compute_bundle_ids(self):
         for build_error in self:
-            build_error.branch_ids = build_error.mapped('build_ids.branch_id')
+            top_parent_builds = build_error.build_ids.mapped(lambda rec: rec and rec._get_top_parent())
+            build_error.bundle_ids = top_parent_builds.mapped('slot_ids').mapped('batch_id.bundle_id')
 
     @api.depends('build_ids')
-    def _compute_repo_ids(self):
+    def _compute_trigger_ids(self):
         for build_error in self:
-            build_error.repo_ids = build_error.mapped('build_ids.repo_id')
+            build_error.trigger_ids = build_error.mapped('build_ids.params_id.trigger_id')
 
     @api.depends('content')
     def _compute_summary(self):
