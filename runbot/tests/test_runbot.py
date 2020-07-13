@@ -1,13 +1,5 @@
 # -*- coding: utf-8 -*-
-import datetime
-from unittest import skip
-from unittest.mock import patch, Mock
-from subprocess import CalledProcessError
-from odoo.tests import common, TransactionCase
-from odoo.tools import mute_logger
 import logging
-import odoo
-import time
 
 from .common import RunbotCase
 

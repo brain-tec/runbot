@@ -1,21 +1,21 @@
 # -*- coding: utf-8 -*-
 from unittest.mock import patch
-from odoo.tests import common
 from .common import RunbotCase
 
 
 class SleepException(Exception):
     ...
 
+
 def sleep(time):
     raise SleepException()
+
 
 class TestCron(RunbotCase):
 
     def setUp(self):
         super(TestCron, self).setUp()
         self.start_patcher('_get_cron_period', 'odoo.addons.runbot.models.runbot.Runbot._get_cron_period', 2)
-
 
     @patch('time.sleep', side_effect=sleep)
     @patch('odoo.addons.runbot.models.repo.Repo._update_batches')
@@ -24,7 +24,7 @@ class TestCron(RunbotCase):
         self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_update_frequency', 1)
         self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_do_fetch', True)
         # TODO fix this, repo disabled
-        self.env['runbot.repo'].search([('id', '!=', self.repo_server.id)]).write({'mode': 'disabled'}) #  disable all other existing repo than repo_server
+        self.env['runbot.repo'].search([('id', '!=', self.repo_server.id)]).write({'mode': 'disabled'})  # disable all other existing repo than repo_server
         try:
             self.Runbot._cron()
         except SleepException:
@@ -41,7 +41,7 @@ class TestCron(RunbotCase):
         self.patchers['fqdn_patcher'].return_value = hostname
         self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_update_frequency', 1)
         self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_do_schedule', True)
-        self.env['runbot.repo'].search([('id', '!=', self.repo_server.id)]).write({'mode': 'disabled'}) #  disable all other existing repo than repo_server
+        self.env['runbot.repo'].search([('id', '!=', self.repo_server.id)]).write({'mode': 'disabled'})  # disable all other existing repo than repo_server
 
         try:
             self.Runbot._cron()
@@ -52,4 +52,4 @@ class TestCron(RunbotCase):
         mock_host_docker_build.assert_called()
         host = self.env['runbot.host'].search([('name', '=', hostname)])
         self.assertTrue(host, 'A new host should have been created')
-        #self.assertGreater(host.psql_conn_count, 0, 'A least one connection should exist on the current psql batch')
+        # self.assertGreater(host.psql_conn_count, 0, 'A least one connection should exist on the current psql batch')

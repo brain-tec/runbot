@@ -14,7 +14,7 @@ class TestBuildConfigStep(RunbotCase):
         self.ConfigStep = self.env['runbot.build.config.step']
         self.Config = self.env['runbot.build.config']
 
-        server_commit = self.Commit.create ({
+        server_commit = self.Commit.create({
             'name': 'dfdfcfcf0000ffffffffffffffffffffffffffff',
             'repo_id': self.repo_server.id
         })
@@ -155,6 +155,7 @@ class TestBuildConfigStep(RunbotCase):
             'name': 'all',
             'job_type': 'install_odoo',
         })
+
         def docker_run(cmd, log_path, *args, **kwargs):
             dest = self.parent_build.dest
             self.assertEqual(cmd.cmd[:2], ['python3', 'server/server.py'])
@@ -166,7 +167,6 @@ class TestBuildConfigStep(RunbotCase):
         self.patchers['docker_run'].side_effect = docker_run
 
         config_step._run_install_odoo(self.parent_build, 'dev/null/logpath')
-
 
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
     def test_install_tags(self, mock_checkout):
@@ -202,7 +202,6 @@ class TestBuildConfigStep(RunbotCase):
         self.patchers['docker_run'].side_effect = docker_run2
         config_step._run_install_odoo(self.parent_build, 'dev/null/logpath')
 
-
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
     def test_db_name(self, mock_checkout):
         config_step = self.ConfigStep.create({
@@ -212,6 +211,7 @@ class TestBuildConfigStep(RunbotCase):
         })
         call_count = 0
         assert_db_name = 'custom'
+
         def docker_run(cmd, log_path, *args, **kwargs):
             db_sufgfix = cmd.cmd[cmd.index('-d')+1].split('-')[-1]
             self.assertEqual(db_sufgfix, assert_db_name)
@@ -262,6 +262,7 @@ docker_run(cmd)
             'sub_command': 'subcommand',
         })
         call_count = 0
+
         def docker_run(cmd, log_path, *args, **kwargs):
             nonlocal call_count
             sub_command = cmd.cmd[cmd.index('server/server.py')+1]
@@ -386,7 +387,7 @@ Initiating shutdown
             ('ERROR', 'Log file not found at the end of test job')
         ])
 
-        #no error but build was already in warn
+        # no error but build was already in warn
         logs = []
         file_content = """
 Loading stuff
@@ -431,4 +432,3 @@ Initiating shutdown
         self.assertEqual(result, {'local_result': 'warning'})
 
 # TODO add generic test to copy_paste _run_* in a python step
-

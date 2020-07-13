@@ -48,7 +48,7 @@ class RepoTrigger(models.Model):
     category_id = fields.Many2one('runbot.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
     version_domain = fields.Char(string="Version domain")
     # group_ids = fields.Many2many('res.groups', string='Limited to groups') #  TODO should we add this
-    hide = fields.Boolean('Hide batch on main page') #  TODO test or remove
+    hide = fields.Boolean('Hide batch on main page')  # TODO test or remove
 
     upgrade_dumps_trigger_id = fields.Many2one('runbot.trigger', tracking=True)
     upgrade_step_id = fields.Many2one('runbot.build.config.step', compute="_compute_upgrade_step_id", store=True)
@@ -67,7 +67,7 @@ class RepoTrigger(models.Model):
 
     def _reference_builds(self, bundle):
         self.ensure_one()
-        if self.upgrade_step_id: # this is an upgrade trigger, add corresponding builds
+        if self.upgrade_step_id:  # this is an upgrade trigger, add corresponding builds
             refs_builds = self.upgrade_step_id._reference_builds(bundle, self.upgrade_dumps_trigger_id)
             return [(4, b.id) for b in refs_builds]
         return []
@@ -76,6 +76,7 @@ class RepoTrigger(models.Model):
         if self.version_domain:
             return safe_eval(self.version_domain)
         return []
+
 
 class Category(models.Model):
     _name = 'runbot.category'
@@ -218,8 +219,8 @@ class Repo(models.Model):
     main_remote_id = fields.Many2one('runbot.remote', "Main remote", tracking=True)
     remote_ids = fields.One2many('runbot.remote', 'repo_id', "Remotes")
     project_id = fields.Many2one('runbot.project', required=True, tracking=True,
-        help="Default bundle project to use when pushing on this repos",
-        default=lambda self: self.env.ref('runbot.main_project', raise_if_not_found=False))
+                                 help="Default bundle project to use when pushing on this repos",
+                                 default=lambda self: self.env.ref('runbot.main_project', raise_if_not_found=False))
     # -> not verry usefull, remove it? (iterate on projects or contraints triggers:
     # all trigger where a repo is used must be in the same project.
     modules = fields.Char("Modules to install", help="Comma-separated list of modules to install and test.", tracking=True)
@@ -455,7 +456,7 @@ class Repo(models.Model):
 
         for ref_name, sha, date, author, author_email, subject, committer, committer_email in refs:
             branch = ref_branches[ref_name]
-            if branch.head_name != sha: # new push on branch
+            if branch.head_name != sha:  # new push on branch
                 _logger.info('repo %s branch %s new commit found: %s', self.name, branch.name, sha)
 
                 commit = self.env['runbot.commit'].search([('name', '=', sha), ('repo_id', '=', self.id)])
@@ -562,7 +563,7 @@ class Repo(models.Model):
         while not success and try_count < 5:
             time.sleep(delay)
             try:
-                self._git(['fetch', '-p', '--all',])
+                self._git(['fetch', '-p', '--all', ])
                 success = True
             except subprocess.CalledProcessError as e:
                 try_count += 1

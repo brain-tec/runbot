@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import fnmatch
-import glob
 import logging
 import pwd
 import re
@@ -49,11 +48,11 @@ class BuildParameters(models.Model):
     version_id = fields.Many2one('runbot.version', required=True, index=True)
     project_id = fields.Many2one('runbot.project', required=True, index=True)  # for access rights
     trigger_id = fields.Many2one('runbot.trigger', index=True)  # for access rights
-    category = fields.Char('Category', index=True) # normal vs nightly vs weekly, ...
+    category = fields.Char('Category', index=True)  # normal vs nightly vs weekly, ...
     # other informations
     extra_params = fields.Char('Extra cmd args')
     config_id = fields.Many2one('runbot.build.config', 'Run Config', required=True,
-        default=lambda self: self.env.ref('runbot.runbot_build_config_default', raise_if_not_found=False), index=True)
+                                default=lambda self: self.env.ref('runbot.runbot_build_config_default', raise_if_not_found=False), index=True)
     config_data = JsonDictField('Config Data')
 
     build_ids = fields.One2many('runbot.build', 'params_id')
@@ -71,7 +70,7 @@ class BuildParameters(models.Model):
         ('unique_fingerprint', 'unique (fingerprint)', 'avoid duplicate params'),
     ]
 
-    #@api.depends('version_id', 'project_id', 'extra_params', 'config_id', 'config_data', 'modules', 'commit_link_ids', 'builds_reference_ids')
+    # @api.depends('version_id', 'project_id', 'extra_params', 'config_id', 'config_data', 'modules', 'commit_link_ids', 'builds_reference_ids')
     def _compute_fingerprint(self):
         for param in self:
             cleaned_vals = {
@@ -125,7 +124,6 @@ class BuildResult(models.Model):
     _parent_store = True
     _order = 'id desc'
     _rec_name = 'id'
-
 
     # all displayed info removed. How to replace that?
     # -> commit corresponding to repo of trigger_id
@@ -441,7 +439,7 @@ class BuildResult(models.Model):
     def _rebuild(self, message=None):
         """Force a rebuild and return a recordset of builds"""
         self.ensure_one()
-        #if self.global_result == 'ok':
+        # if self.global_result == 'ok':
         #    return self
         # TODO don't rebuild if there is a more recent build for this params?
         values = {
@@ -663,7 +661,7 @@ class BuildResult(models.Model):
                 # failfast in case of docker error (triggered in database)
                 if build.triggered_result and not build.active_step.ignore_triggered_result:
                     worst_result = self._get_worst_result([build.triggered_result, build.local_result])
-                    if  worst_result != build.local_result:
+                    if worst_result != build.local_result:
                         build.local_result = build.triggered_result
                         build._github_status()  # failfast
             # check if current job is finished
@@ -772,7 +770,7 @@ class BuildResult(models.Model):
 
     def _get_available_modules(self):
         available_modules = defaultdict(list)
-        #repo_modules = []
+        # repo_modules = []
         for commit in self.env.context.get('defined_commit_ids') or self.params_id.commit_ids:
             for (addons_path, module, manifest_file_name) in commit._get_available_modules():
                 if module in available_modules:
@@ -783,7 +781,7 @@ class BuildResult(models.Model):
                     )
                 else:
                     available_modules[commit.repo_id].append(module)
-        #return repo_modules, available_modules
+        # return repo_modules, available_modules
         return available_modules
 
     def _get_modules_to_test(self, modules_patterns=''):
@@ -1021,7 +1019,6 @@ class BuildResult(models.Model):
         builds_to_scan = self.search([('id', 'in', self.ids), ('local_result', '=', 'ko'), ('build_error_ids', '=', False)])
         ir_logs = self.env['ir.logging'].search([('level', '=', 'ERROR'), ('type', '=', 'server'), ('build_id', 'in', builds_to_scan.ids)])
         BuildError._parse_logs(ir_logs)
-
 
     def is_file(self, file, mode='r'):
         file_path = self._path(file)

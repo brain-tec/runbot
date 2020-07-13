@@ -45,7 +45,6 @@ class TestRepo(RunbotCaseMinimalSetup):
         self.assertEqual(remote.owner, 'somewhere')
         self.assertEqual(remote.repo_name, 'bar')
 
-
     def test_repo_update_batches(self):
         """ Test that when finding new refs in a repo, the missing branches
         are created and new builds are created in pending state
@@ -66,7 +65,7 @@ class TestRepo(RunbotCaseMinimalSetup):
                 'head': {'label': 'dev:%s' % branch_name, 'repo': {'full_name': 'dev/server'}},
             }
 
-        repos = self.repo_addons|self.repo_server
+        repos = self.repo_addons | self.repo_server
 
         first_commit = [(
             'refs/%s/heads/%s' % (self.remote_server_dev.remote_name, branch_name),
@@ -98,13 +97,13 @@ class TestRepo(RunbotCaseMinimalSetup):
 
         # create a addons branch in the same bundle
         self.commit_list[self.repo_addons.id] = [('refs/%s/heads/%s' % (self.remote_addons_dev.remote_name, branch_name),
-            'deadbeef',
-            datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
-            'Marc Bidule',
-            '<marc.bidule@somewhere.com>',
-            'Addons subject',
-            'Marc Bidule',
-            '<marc.bidule@somewhere.com>')]
+                                                  'deadbeef',
+                                                  datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
+                                                  'Marc Bidule',
+                                                  '<marc.bidule@somewhere.com>',
+                                                  'Addons subject',
+                                                  'Marc Bidule',
+                                                  '<marc.bidule@somewhere.com>')]
 
         repos._update_batches()
 
@@ -126,13 +125,13 @@ class TestRepo(RunbotCaseMinimalSetup):
         # create a server pr in the same bundle with the same hash
         self.commit_list[self.repo_server.id] += [
             ('refs/%s/pull/123' % self.remote_server.remote_name,
-            'd0d0caca',
-            datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
-            'Marc Bidule',
-            '<marc.bidule@somewhere.com>',
-            'Another subject',
-            'Marc Bidule',
-            '<marc.bidule@somewhere.com>')]
+             'd0d0caca',
+             datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
+             'Marc Bidule',
+             '<marc.bidule@somewhere.com>',
+             'Another subject',
+             'Marc Bidule',
+             '<marc.bidule@somewhere.com>')]
 
         # Create Batches
         repos._update_batches()
@@ -206,13 +205,13 @@ class TestRepo(RunbotCaseMinimalSetup):
 
         self.commit_list[self.repo_server.id] = [
             ('refs/%s/heads/%s' % (self.remote_server_dev.remote_name, branch_name),
-            'dead1234',
-            datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
-            'Marc Bidule',
-            '<marc.bidule@somewhere.com>',
-            'A last subject',
-            'Marc Bidule',
-            '<marc.bidule@somewhere.com>')]
+             'dead1234',
+             datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
+             'Marc Bidule',
+             '<marc.bidule@somewhere.com>',
+             'A last subject',
+             'Marc Bidule',
+             '<marc.bidule@somewhere.com>')]
 
         repos._update_batches()
 
@@ -244,7 +243,6 @@ class TestRepo(RunbotCaseMinimalSetup):
         # Add another branch in another project
         # Add another bundle
 
-
     @skip('This test is for performances. It needs a lot of real branches in DB to mean something')
     def test_repo_perf_find_new_commits(self):
         self.mock_root.return_value = '/tmp/static'
@@ -258,13 +256,13 @@ class TestRepo(RunbotCaseMinimalSetup):
 
         for i in range(20005):
             self.commit_list[self.repo_server.id].append(['refs/heads/bidon-%05d' % i,
-                                     'd0d0caca %s' % i,
-                                     datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
-                                     'Marc Bidule',
-                                     '<marc.bidule@somewhere.com>',
-                                     'A nice subject',
-                                     'Marc Bidule',
-                                     '<marc.bidule@somewhere.com>'])
+                                                          'd0d0caca %s' % i,
+                                                          datetime.datetime.now().strftime("%Y-%m-%d, %H:%M:%S"),
+                                                          'Marc Bidule',
+                                                          '<marc.bidule@somewhere.com>',
+                                                          'A nice subject',
+                                                          'Marc Bidule',
+                                                          '<marc.bidule@somewhere.com>'])
         inserted_time = time.time()
         _logger.info('Insert took: %ssec', (inserted_time - start_time))
         repo._update_batches()
@@ -277,7 +275,6 @@ class TestRepo(RunbotCaseMinimalSetup):
             repo1 = self.repo_server
             repo2 = self.repo_addons
 
-            count = self.cr.sql_log_count
             with self.assertQueryCount(1):
                 getattr(repo1, setter)(1.1)
             getattr(repo2, setter)(1.2)
@@ -321,7 +318,7 @@ class TestGithub(TransactionCase):
             'repo_id': repo_server.id,
         })
 
-        #self.assertEqual(remote_server._github('/repos/:owner/:repo/statuses/abcdef', dict(), ignore_errors=True), None, 'A repo without token should return None')
+        #  self.assertEqual(remote_server._github('/repos/:owner/:repo/statuses/abcdef', dict(), ignore_errors=True), None, 'A repo without token should return None')
         remote_server.token = 'abc'
 
         import requests
@@ -416,13 +413,11 @@ class TestRepoScheduler(RunbotCase):
 
     def setUp(self):
         # as the _scheduler method commits, we need to protect the database
-        registry = odoo.registry()
         super(TestRepoScheduler, self).setUp()
 
         self.fqdn_patcher = patch('odoo.addons.runbot.models.host.fqdn')
         mock_root = self.patchers['repo_root_patcher']
         mock_root.return_value = '/tmp/static'
-
 
     @patch('odoo.addons.runbot.models.build.BuildResult._kill')
     @patch('odoo.addons.runbot.models.build.BuildResult._schedule')

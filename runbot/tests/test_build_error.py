@@ -1,6 +1,4 @@
 # -*- coding: utf-8 -*-
-from unittest.mock import patch
-from odoo.tests import common
 from odoo.exceptions import ValidationError
 from .common import RunbotCase
 
@@ -53,9 +51,9 @@ class TestBuildError(RunbotCase):
         IrLog.create(log)
         ko_build._parse_logs()
         ok_build._parse_logs()
-        build_error = self.BuildError.search([('build_ids','in', [ko_build.id])])
+        build_error = self.BuildError.search([('build_ids', 'in', [ko_build.id])])
         self.assertIn(ko_build, build_error.build_ids, 'The parsed build should be added to the runbot.build.error')
-        self.assertFalse(self.BuildError.search([('build_ids','in', [ok_build.id])]), 'A successful build should not associated to a runbot.build.error')
+        self.assertFalse(self.BuildError.search([('build_ids', 'in', [ok_build.id])]), 'A successful build should not associated to a runbot.build.error')
 
         # Test that build with same error is added to the errors
         ko_build_same_error = self.create_test_build({'local_result': 'ko'})
@@ -66,7 +64,7 @@ class TestBuildError(RunbotCase):
 
         # Test that line numbers does not interfere with error recognition
         ko_build_diff_number = self.create_test_build({'local_result': 'ko'})
-        rte_diff_numbers = RTE_ERROR.replace('89','100').replace('1062','1000').replace('1046', '4610')
+        rte_diff_numbers = RTE_ERROR.replace('89', '100').replace('1062', '1000').replace('1046', '4610')
         log.update({'build_id': ko_build_diff_number.id, 'message': rte_diff_numbers})
         IrLog.create(log)
         ko_build_diff_number._parse_logs()
@@ -80,10 +78,9 @@ class TestBuildError(RunbotCase):
         IrLog.create(log)
         ko_build_new._parse_logs()
         self.assertNotIn(ko_build_new, build_error.build_ids, 'The parsed build should not be added to a fixed runbot.build.error')
-        new_build_error = self.BuildError.search([('build_ids','in', [ko_build_new.id])])
+        new_build_error = self.BuildError.search([('build_ids', 'in', [ko_build_new.id])])
         self.assertIn(ko_build_new, new_build_error.build_ids, 'The parsed build with a re-apearing error should generate a new runbot.build.error')
         self.assertIn(build_error, new_build_error.error_history_ids, 'The old error should appear in history')
-
 
     def test_build_error_links(self):
         build_a = self.create_test_build({'local_result': 'ko'})

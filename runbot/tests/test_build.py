@@ -8,7 +8,6 @@ from odoo.exceptions import UserError
 from .common import RunbotCase, RunbotCaseMinimalSetup
 
 
-
 def rev_parse(repo, branch_name):
     """
     simulate a rev parse by returning a fake hash of form
@@ -131,7 +130,7 @@ class TestBuildResult(RunbotCase):
     def setUp(self):
         super(TestBuildResult, self).setUp()
 
-        self.server_commit = self.Commit.create ({
+        self.server_commit = self.Commit.create({
             'name': 'dfdfcfcf0000ffffffffffffffffffffffffffff',
             'repo_id': self.repo_server.id
         })

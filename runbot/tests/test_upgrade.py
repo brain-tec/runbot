@@ -1,50 +1,8 @@
 import logging
 from odoo.exceptions import UserError
-from .common import  RunbotCase
+from .common import RunbotCase
 
 _logger = logging.getLogger(__name__)
-
-
-class TestVersions(RunbotCase):
-    def test_version_relations(self):
-        version = self.env['runbot.version']
-        v11 = version._get('11.0')
-        v113 = version._get('saas-11.3')
-        v12 = version._get('12.0')
-        v122 = version._get('saas-12.2')
-        v124 = version._get('saas-12.4')
-        v13 = version._get('13.0')
-        v131 = version._get('saas-13.1')
-        v132 = version._get('saas-13.2')
-        v133 = version._get('saas-13.3')
-        master = version._get('master')
-
-        self.assertEqual(v11.previous_major_version_id, version)
-        self.assertEqual(v11.intermediate_version_ids, version)
-
-        self.assertEqual(v113.previous_major_version_id, v11)
-        self.assertEqual(v113.intermediate_version_ids, version)
-
-        self.assertEqual(v12.previous_major_version_id, v11)
-        self.assertEqual(v12.intermediate_version_ids, v113)
-
-        self.assertEqual(v12.previous_major_version_id, v11)
-        self.assertEqual(v12.intermediate_version_ids, v113)
-        self.assertEqual(v12.next_major_version_id, v13)
-        self.assertEqual(v12.next_intermediate_version_ids, v124|v122)
-
-        self.assertEqual(v13.previous_major_version_id, v12)
-        self.assertEqual(v13.intermediate_version_ids, v124|v122)
-        self.assertEqual(v13.next_major_version_id, master)
-        self.assertEqual(v13.next_intermediate_version_ids, v133|v132|v131)
-
-        self.assertEqual(v132.previous_major_version_id, v13)
-        self.assertEqual(v132.intermediate_version_ids, v131)
-        self.assertEqual(v132.next_major_version_id, master)
-        self.assertEqual(v132.next_intermediate_version_ids, v133)
-
-        self.assertEqual(master.previous_major_version_id, v13)
-        self.assertEqual(master.intermediate_version_ids, v133|v132|v131)
 
 
 class TestUpgradeFlow(RunbotCase):
@@ -96,7 +54,7 @@ class TestUpgradeFlow(RunbotCase):
         })
         self.test_upgrade_config = self.env['runbot.build.config'].create({
             'name': 'Upgrade server',
-            'step_order_ids':[
+            'step_order_ids': [
                 (0, 0, {'step_id': self.step_restore.id}),
                 (0, 0, {'step_id': self.step_test_upgrade.id})
             ]
@@ -165,7 +123,7 @@ class TestUpgradeFlow(RunbotCase):
         })
         self.upgrade_server_config = self.env['runbot.build.config'].create({
             'name': 'Upgrade server',
-            'step_order_ids':[(0, 0, {'step_id': self.step_upgrade_server.id})]
+            'step_order_ids': [(0, 0, {'step_id': self.step_upgrade_server.id})]
         })
         self.trigger_upgrade_server = self.env['runbot.trigger'].create({
             'name': 'Server upgrade',
@@ -192,7 +150,7 @@ class TestUpgradeFlow(RunbotCase):
         })
         self.upgrade_config = self.env['runbot.build.config'].create({
             'name': 'Upgrade',
-            'step_order_ids':[(0, 0, {'step_id': self.step_upgrade.id})]
+            'step_order_ids': [(0, 0, {'step_id': self.step_upgrade.id})]
         })
         self.trigger_upgrade = self.env['runbot.trigger'].create({
             'name': 'Upgrade',
@@ -268,7 +226,6 @@ class TestUpgradeFlow(RunbotCase):
             builds_nigthly[('no_demo', build.params_id.trigger_id)] = no_demo
         batch_nigthly.state = 'done'
 
-
         batch_weekly = bundle._force(self.weekly_category.id)
         self.assertEqual(batch_weekly.category_id, self.weekly_category)
         builds_weekly = {}
@@ -290,9 +247,7 @@ class TestUpgradeFlow(RunbotCase):
         build.local_state = 'done'
         batch_default.state = 'done'
 
-
         return builds_nigthly, builds_weekly
-
 
     def test_all(self):
         # Test setup
@@ -301,12 +256,11 @@ class TestUpgradeFlow(RunbotCase):
         self.assertTrue(self.branch_upgrade.bundle_id.version_id)
         self.assertEqual(self.trigger_upgrade_server.upgrade_step_id, self.step_upgrade_server)
 
-
         with self.assertRaises(UserError):
             self.step_upgrade_server.job_type = 'install_odoo'
             self.trigger_upgrade_server.flush(['upgrade_step_id'])
 
-        #test_configure_upgrade_step(self):
+        # test_configure_upgrade_step(self):
         # TODO test difference sticky/base
 
         # server/addons repos tests
@@ -328,13 +282,12 @@ class TestUpgradeFlow(RunbotCase):
             self.assertEqual(build.params_id.dump_db.db_suffix, db_suffix)
             self.assertEqual(build.params_id.config_id, self.test_upgrade_config)
 
-
         assertOk(b_13_master_demo, upgrade_current_build, self.build_niglty_13, 'demo', 'all', self.trigger_server_nightly)
         assertOk(b_13_master_no_demo, upgrade_current_build, self.build_niglty_13, 'no_demo', 'no-demo-all', self.trigger_server_nightly)
         assertOk(b_133_master_demo, upgrade_current_build, self.build_niglty_133, 'demo', 'all', self.trigger_server_nightly)
         assertOk(b_133_master_no_demo, upgrade_current_build, self.build_niglty_133, 'no_demo', 'no-demo-all', self.trigger_server_nightly)
 
-        self.assertEqual(b_13_master_demo.params_id.commit_ids.repo_id, self.repo_server|self.repo_upgrade)
+        self.assertEqual(b_13_master_demo.params_id.commit_ids.repo_id, self.repo_server | self.repo_upgrade)
 
         # upgrade repos tests
         upgrade_build = batch.slot_ids.filtered(lambda slot: slot.trigger_id == self.trigger_upgrade).build_id
@@ -365,7 +318,7 @@ class TestUpgradeFlow(RunbotCase):
         })
         upgrade_config_nightly = self.env['runbot.build.config'].create({
             'name': 'Upgrade nightly',
-            'step_order_ids':[(0, 0, {'step_id': step_upgrade_nightly.id})]
+            'step_order_ids': [(0, 0, {'step_id': step_upgrade_nightly.id})]
         })
         trigger_upgrade_addons_nightly = self.env['runbot.trigger'].create({
             'name': 'Nigtly upgrade',
@@ -444,7 +397,7 @@ class TestUpgradeFlow(RunbotCase):
         )
         self.assertEqual(
             [b.params_id.dump_db.db_suffix for b in b133_master],
-            ['account', 'l10n_be', 'l10n_ch', 'mail', 'stock'] # is this order ok?
+            ['account', 'l10n_be', 'l10n_ch', 'mail', 'stock']  # is this order ok?
         )
 
         first_build = db_builds[0]
@@ -505,7 +458,7 @@ class TestUpgradeFlow(RunbotCase):
         upgrade_build = upgrade_slot.build_id
         self.assertTrue(upgrade_build)
         self.assertEqual(upgrade_build.params_id.config_id, self.upgrade_server_config)
-        #e should have 2 builds, the nightly roots of 13 and 13.3
+        # we should have 2 builds, the nightly roots of 13 and 13.3
         self.assertEqual(
             upgrade_build.params_id.builds_reference_ids,
             (
@@ -537,7 +490,7 @@ class TestUpgradeFlow(RunbotCase):
 
         config_upgrade_complement = self.env['runbot.build.config'].create({
             'name': 'Stable policy',
-            'step_order_ids':[(0, 0, {'step_id': step_upgrade_complement.id})]
+            'step_order_ids': [(0, 0, {'step_id': step_upgrade_complement.id})]
         })
         trigger_upgrade_complement = self.env['runbot.trigger'].create({  # TODO think about ci for this trigger
             'name': 'Stable policy',
@@ -570,5 +523,4 @@ class TestUpgradeFlow(RunbotCase):
         self.assertEqual(master_child.params_id.dump_db.db_suffix, 'all')
         self.assertEqual(master_child.params_id.config_id, self.test_upgrade_config)
 
-
-        # TODO add versions on test_upgrade_config and check that it does not apply on 13.1 only by calling _reference_batches_complement
+        #  TODO add versions on test_upgrade_config and check that it does not apply on 13.1 only by calling _reference_batches_complement

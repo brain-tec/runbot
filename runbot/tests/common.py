@@ -2,12 +2,12 @@
 import datetime
 
 from odoo.tests.common import TransactionCase
-from odoo.tools import lazy
 from unittest.mock import patch, DEFAULT
 
 import logging
 
 _logger = logging.getLogger(__name__)
+
 
 class RunbotCase(TransactionCase):
 
@@ -148,7 +148,6 @@ class RunbotCase(TransactionCase):
 
         self.start_patcher('_get_py_version', 'odoo.addons.runbot.models.build.BuildResult._get_py_version', 3)
 
-
     def start_patcher(self, patcher_name, patcher_path, return_value=DEFAULT, side_effect=DEFAULT, new=DEFAULT):
 
         def stop_patcher_wrapper():
@@ -213,6 +212,7 @@ class RunbotCase(TransactionCase):
         self.assertEqual(triggers.repo_ids + triggers.dependency_ids, self.remote_addons.repo_id + self.remote_server.repo_id)
 
         self.branch_addons.bundle_id._force()
+
 
 class RunbotCaseMinimalSetup(RunbotCase):
 

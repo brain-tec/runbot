@@ -17,8 +17,8 @@ class TestBranch(RunbotCase):
     def test_pull_request(self):
         mock_github = self.patchers['github_patcher']
         mock_github.return_value = {
-            'base' : {'ref': 'master'},
-            'head' : {'label': 'foo-dev:bar_branch', 'repo': {'full_name': 'foo-dev/bar'}},
+            'base': {'ref': 'master'},
+            'head': {'label': 'foo-dev:bar_branch', 'repo': {'full_name': 'foo-dev/bar'}},
         }
         pr = self.Branch.create({
             'remote_id': self.remote_server.id,
@@ -26,7 +26,7 @@ class TestBranch(RunbotCase):
             'is_pr': True,
         })
         self.assertEqual(pr.name, '12345')
-        #self.assertEqual(pr.branch_name, 'bar_branch') # TODO check juste an idea to recycle branch_name
+        # self.assertEqual(pr.branch_name, 'bar_branch') # TODO check juste an idea to recycle branch_name
         self.assertEqual(pr.branch_url, 'https://example.com/base/server/pull/12345')
         self.assertEqual(pr.target_branch_name, 'master')
         self.assertEqual(pr.pull_head_name, 'foo-dev:bar_branch')

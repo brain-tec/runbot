@@ -261,7 +261,6 @@ class ConfigStep(models.Model):
         return run_method(build, log_path)
 
     def _run_create_build(self, build, log_path):
-        Build = self.env['runbot.build']
         count = 0
         for create_config in self.create_config_ids:
             for _ in range(self.number_builds):
@@ -309,7 +308,6 @@ class ConfigStep(models.Model):
             return False
         self.ensure_one()
         return self.job_type in ('install_odoo', 'run_odoo', 'restore', 'test_upgrade') or (self.job_type == 'python' and 'docker_run(' in self.python_code)
-
 
     def _run_run_odoo(self, build, log_path, force=False):
         if not force:
@@ -458,12 +456,12 @@ class ConfigStep(models.Model):
         param = build.params_id
         version = param.version_id
         builds_references = param.builds_reference_ids
-        builds_references_by_version_id = {b.params_id.version_id.id:b for b in builds_references}
+        builds_references_by_version_id = {b.params_id.version_id.id: b for b in builds_references}
         upgrade_complement_step = self.upgrade_complement_trigger_id.upgrade_step_id
         version_domain = self.upgrade_complement_trigger_id.get_version_domain()
         valid_targets = build.browse()
         next_versions = version.next_major_version_id | version.next_intermediate_version_ids
-        if version_domain: # filter only on version where trigger is enabled
+        if version_domain:  # filter only on version where trigger is enabled
             next_versions = next_versions.filtered_domain(version_domain)
         if next_versions:
             for next_version in next_versions:
@@ -479,7 +477,7 @@ class ConfigStep(models.Model):
                     for db in self._filter_upgrade_database(dbs, upgrade_db.db_pattern):
                         child = build._add_child({
                             'upgrade_to_build_id': target.id,
-                            'upgrade_from_build_id': build, # always current build
+                            'upgrade_from_build_id': build,  # always current build
                             'dump_db': db.id,
                             'config_id': upgrade_complement_step.upgrade_config_id
                         })
@@ -518,13 +516,13 @@ class ConfigStep(models.Model):
         - This step should be alone in a config since this config is recursive
         - A typical upgrade_config_id should have a restore step and a test_upgrade step.
         """
-        assert len(build.parent_path.split('/')) < 6 # small security to avoid recursion loop, 6 is arbitrary
+        assert len(build.parent_path.split('/')) < 6  # small security to avoid recursion loop, 6 is arbitrary
         param = build.params_id
         end = False
         target_builds = False
         source_builds_by_target = {}
         builds_references = param.builds_reference_ids
-        builds_references_by_version_id = {b.params_id.version_id.id:b for b in builds_references}
+        builds_references_by_version_id = {b.params_id.version_id.id: b for b in builds_references}
         if param.upgrade_to_build_id:
             target_builds = param.upgrade_to_build_id
         else:
@@ -555,7 +553,7 @@ class ConfigStep(models.Model):
                     build._add_child({'upgrade_to_build_id': target_build.id})
                 end = True
         if end:
-            return # replace this by a python job friendly solution
+            return  # replace this by a python job friendly solution
 
         for target_build in target_builds:
             if param.upgrade_from_build_id:
@@ -574,7 +572,7 @@ class ConfigStep(models.Model):
                     end = True
 
         if end:
-            return # replace this by a python job friendly solution
+            return  # replace this by a python job friendly solution
 
         assert not param.dump_db
         if not self.upgrade_dbs:
@@ -614,7 +612,7 @@ class ConfigStep(models.Model):
                                 db.name,
                                 db.build_id.build_url,
                                 config_id.name
-                            ) # TODO check markdown
+                            )  # TODO check markdown
                         # TODO log somewhere if no db at all is found for a db_suffix
 
     def _get_upgrade_source_versions(self, target_version):
@@ -634,7 +632,7 @@ class ConfigStep(models.Model):
     def _get_upgrade_source_builds(self, target_version, builds_references_by_version_id):
         versions = self._get_upgrade_source_versions(target_version)
         from_builds = self.env['runbot.build'].browse()
-        for version in versions: 
+        for version in versions:
             from_builds |= builds_references_by_version_id.get(version.id) or self.env['runbot.build'].browse()
         return from_builds.sorted(lambda b: b.params_id.version_id.number)
 
@@ -660,14 +658,14 @@ class ConfigStep(models.Model):
 
         dump_db = build.params_id.dump_db
 
-        migrate_db_name = '%s-%s' % (build.dest, dump_db.db_suffix) # only ok if restore does not force db_suffix
+        migrate_db_name = '%s-%s' % (build.dest, dump_db.db_suffix)  # only ok if restore does not force db_suffix
 
         migrate_cmd = build._cmd()
         migrate_cmd += ['-u all']
         migrate_cmd += ['-d', migrate_db_name]
         migrate_cmd += ['--stop-after-init']
         migrate_cmd += ['--max-cron-threads=0']
-        #migrate_cmd += ['--upgrades-paths', '/%s' % migration_scripts] upgrades-paths is broken, ln is created automatically in sources
+        # migrate_cmd += ['--upgrades-paths', '/%s' % migration_scripts] upgrades-paths is broken, ln is created automatically in sources
 
         build._log('run', 'Start migration build %s' % build.dest)
         timeout = self.cpu_limit
@@ -676,13 +674,13 @@ class ConfigStep(models.Model):
         docker_run(migrate_cmd, log_path, build._path(), build._get_docker_name(), cpu_limit=timeout, ro_volumes=exports)
 
     def _run_restore(self, build, log_path):
-        #exports = build._checkout()
+        # exports = build._checkout()
         params = build.params_id
 
         if 'dump_url' in params.config_data:
             dump_url = params.config_data['dump_url']
             zip_name = dump_url.split('/')[-1]
-            build._log('test-migration', 'Restoring db $$%s$$' % (zip_name), log_type='link', path=dump_url) # TODO replace by markdown
+            build._log('test-migration', 'Restoring db $$%s$$' % (zip_name), log_type='link', path=dump_url)  # TODO replace by markdown
         else:
             download_db_suffix = params.dump_db.db_suffix or self.restore_download_db_suffix
             dump_build = params.dump_db.build_id or build.parent_id
@@ -690,10 +688,10 @@ class ConfigStep(models.Model):
             download_db_name = '%s-%s' % (dump_build.dest, download_db_suffix)
             zip_name = '%s.zip' % download_db_name
             dump_url = '%s%s' % (dump_build.http_log_url(), zip_name)
-            build._log('test-migration', 'Using dump from build %s' % dump_build.id, log_type='subbuild', path=str(dump_build.id)) # TODO replace by markdown
+            build._log('test-migration', 'Using dump from build %s' % dump_build.id, log_type='subbuild', path=str(dump_build.id))  # TODO replace by markdown
 
         restore_suffix = self.restore_rename_db_suffix or params.dump_db.db_suffix
-        assert restore_suffix # TODO check dump_url case
+        assert restore_suffix  # TODO check dump_url case
         restore_db_name = '%s-%s' % (build.dest, restore_suffix)
 
         build._local_pg_createdb(restore_db_name)
@@ -701,7 +699,7 @@ class ConfigStep(models.Model):
             'mkdir /data/build/restore',
             'cd /data/build/restore',
             'wget %s' % dump_url,
-            'unzip -q %s' % zip_name ,
+            'unzip -q %s' % zip_name,
             'echo "### restoring filestore"',
             'mkdir -p /data/build/datadir/filestore/%s' % restore_db_name,
             'mv filestore/* /data/build/datadir/filestore/%s' % restore_db_name,
@@ -763,6 +761,7 @@ class ConfigStep(models.Model):
                 target_refs_bundles |= self.env['runbot.bundle'].search(sticky_domain + [('name', '!=', 'master'), ('version_id.is_major', '=', True)])
 
         source_refs_bundles = self.env['runbot.bundle']
+
         def from_versions(f_bundle):
             nonlocal source_refs_bundles
             if self.upgrade_from_previous_major_version:
@@ -782,7 +781,7 @@ class ConfigStep(models.Model):
             for f_bundle in target_refs_bundles:
                 from_versions(f_bundle)
 
-        return (target_refs_bundles|source_refs_bundles).with_context(
+        return (target_refs_bundles | source_refs_bundles).with_context(
             category_id=category_id
             ).mapped('last_done_batch')
 

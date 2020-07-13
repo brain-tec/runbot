@@ -4,10 +4,11 @@ import time
 import json
 import logging
 
-from odoo import http, tools
+from odoo import http
 from odoo.http import request
 
 _logger = logging.getLogger(__name__)
+
 
 class RunbotHook(http.Controller):
 

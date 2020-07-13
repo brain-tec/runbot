@@ -1,4 +1,4 @@
-from ..common import s2human, s2human_long, dt2time
+from ..common import s2human, s2human_long
 from odoo import models
 from odoo.http import request
 

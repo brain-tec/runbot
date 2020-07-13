@@ -73,7 +73,7 @@ class Branch(models.Model):
         name_to_remote = {}
         prs = self.filtered(lambda branch: branch.is_pr)
         pull_info_dict = {}
-        if not pull_info and len(prs) > 30: # this is arbitrary, we should store # page on remote
+        if not pull_info and len(prs) > 30:  # this is arbitrary, we should store # page on remote
             pr_per_remote = defaultdict(list)
             for pr in prs:
                 pr_per_remote[pr.remote_id].append(pr)
@@ -183,7 +183,7 @@ class Branch(models.Model):
         remote = self.remote_id
         if self.is_pr:
             _logger.info('Getting info for %s', self.name)
-            return remote._github('/repos/:owner/:repo/pulls/%s' % self.name, ignore_errors=False) or {} # TODO catch and send a managable exception
+            return remote._github('/repos/:owner/:repo/pulls/%s' % self.name, ignore_errors=False) or {}  # TODO catch and send a managable exception
         return {}
 
     def ref(self):
@@ -206,6 +206,7 @@ class Branch(models.Model):
         regex = icp.get_param('runbot.runbot_is_base_regex', False)
         if regex:
             return re.match(regex, name)
+
 
 class RefLog(models.Model):
     _name = 'runbot.ref.log'

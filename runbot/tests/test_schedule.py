@@ -1,20 +1,17 @@
 # -*- coding: utf-8 -*-
 import datetime
 from unittest.mock import patch
-from odoo.tests import common
-import odoo
 from .common import RunbotCase
 
 
 class TestSchedule(RunbotCase):
-
 
     @patch('odoo.addons.runbot.models.build.os.path.getmtime')
     @patch('odoo.addons.runbot.models.build.docker_state')
     def test_schedule_mark_done(self, mock_docker_state, mock_getmtime):
         """ Test that results are set even when job_30_run is skipped """
         job_end_time = datetime.datetime.now()
-        mock_getmtime.return_value = job_end_time.timestamp() # looks wrong
+        mock_getmtime.return_value = job_end_time.timestamp()  # looks wrong
 
         params = self.BuildParameters.create({
             'version_id': self.version_13,

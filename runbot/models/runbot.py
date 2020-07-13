@@ -292,7 +292,7 @@ class Runbot(models.AbstractModel):
             to_keep = set()
             repos = self.env['runbot.repo'].search([('mode', '!=', 'disabled')])
             for repo in repos:
-                repo_source = os.path.join(self._root(), 'sources', repo.name, '*') # TODO check source folder
+                repo_source = os.path.join(self._root(), 'sources', repo.name, '*')  # TODO check source folder
                 for source_dir in glob.glob(repo_source):
                     if source_dir not in cannot_be_deleted_path:
                         to_delete.add(source_dir)

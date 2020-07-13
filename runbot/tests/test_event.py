@@ -1,6 +1,4 @@
 # -*- coding: utf-8 -*-
-from unittest.mock import patch
-from odoo.tests import common
 from .common import RunbotCase
 
 

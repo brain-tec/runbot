@@ -5,6 +5,7 @@ from odoo import models, fields, api, tools
 
 _logger = logging.getLogger(__name__)
 
+
 class Version(models.Model):
     _name = 'runbot.version'
     _description = "Version"
@@ -32,12 +33,10 @@ class Version(models.Model):
                 version.number = '.'.join([elem.zfill(2) for elem in re.sub(r'[^0-9\.]', '', version.name).split('.')])
                 version.is_major = all(elem == '00' for elem in version.number.split('.')[1:])
 
-
     def create(self, values):
         model = self.browse()
         model._get_id.clear_cache(model)  # TODO test me
         return super().create(values)
-
 
     def _get(self, name):
         return self.browse(self._get_id(name))
@@ -84,7 +83,7 @@ class Version(models.Model):
                     lambda v, current=version: v.number > current.number
                     )
 
-    #@api.depends('base_bundle_id.is_base', 'base_bundle_id.version_id', 'base_bundle_id.project_id')
+    # @api.depends('base_bundle_id.is_base', 'base_bundle_id.version_id', 'base_bundle_id.project_id')
     @api.depends_context('project_id')
     def _compute_base_bundle_id(self):
         project_id = self.env.context.get('project_id')
@@ -97,6 +96,6 @@ class Version(models.Model):
             ('is_base', '=', True),
             ('project_id', '=', project_id)
         ])
-        bundle_by_version = {bundle.version_id.id:bundle for bundle in bundles}
+        bundle_by_version = {bundle.version_id.id: bundle for bundle in bundles}
         for version in self:
             version.base_bundle_id = bundle_by_version.get(version.id)

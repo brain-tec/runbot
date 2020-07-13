@@ -135,7 +135,6 @@ class RunbotBuildError(models.Model):
                 build.build_error_ids += build_error
             del hash_dict[build_error.fingerprint]
 
-        fixed_errors_dict = {rec.fingerprint: rec for rec in self.env['runbot.build.error'].search([('fingerprint', 'in', list(hash_dict.keys())), ('active', '=', False)])}
         # create an error for the remaining entries
         for fingerprint, logs in hash_dict.items():
             build_error = self.env['runbot.build.error'].create({

@@ -19,6 +19,7 @@ class Project(models.Model):
 
     trigger_ids = fields.One2many('runbot.trigger', 'project_id', string='Triggers')
 
+
 class Bundle(models.Model):
     _name = 'runbot.bundle'
     _description = "Bundle"
@@ -123,7 +124,7 @@ class Bundle(models.Model):
                 WHERE
                     row <= 4
                 ORDER BY row, id desc
-                """, [tuple(self.ids), category_id] # TODO use context ?  make context dependant
+                """, [tuple(self.ids), category_id]  # TODO use context ?  make context dependant
             )
             batchs = self.env['runbot.batch'].browse([r[0] for r in self.env.cr.fetchall()])
             for batch in batchs:
@@ -135,7 +136,7 @@ class Bundle(models.Model):
     @api.depends_context('category_id')
     def _compute_last_done_batch(self):
         if self:
-            #self.env['runbot.batch'].flush()
+            # self.env['runbot.batch'].flush()
             for bundle in self:
                 bundle.last_done_batch = False
             category_id = self.env.context.get('category_id', self.env['ir.model.data'].xmlid_to_res_id('runbot.default_category'))
@@ -222,6 +223,7 @@ class TriggerCustomisation(models.Model):
         )
     ]
 
+
 class Batch(models.Model):
     _name = 'runbot.batch'
     _description = "Bundle batch"
@@ -238,7 +240,7 @@ class Batch(models.Model):
     log_ids = fields.One2many('runbot.batch.log', 'batch_id')
 
     @api.depends('commit_link_ids')
-    def _compute_commit_ids(self): # todo create mixin ?
+    def _compute_commit_ids(self):  # todo create mixin ?
         for batch in self:
             batch.commit_ids = batch.commit_link_ids.commit_id
 
@@ -283,7 +285,7 @@ class Batch(models.Model):
         for batch in self:
             if batch.bundle_id.is_base or batch.state == 'done':
                 continue
-            batch.state = 'skipped' #done?
+            batch.state = 'skipped'  # done?
             batch._log('Skipping batch')
             for slot in batch.slot_ids:
                 slot.skipped = True
@@ -315,7 +317,7 @@ class Batch(models.Model):
         In the case that a very same build already exists that build is returned
         """
         build = self.env['runbot.build'].search([('params_id', '=', params.id), ('parent_id', '=', False)], limit=1, order='id desc')
-        link_type = 'matched' # TODO ditinction between matched, but we have a existing branch (head) or matched
+        link_type = 'matched'  # TODO ditinction between matched, but we have a existing branch (head) or matched
         if build:
             build.killable = False
         else:
@@ -339,9 +341,9 @@ class Batch(models.Model):
             ('project_id', '=', project.id),
             ('category_id', '=', self.category_id.id)
         ]).filtered(
-            lambda t: not t.version_domain or \
-                self.bundle_id.version_id.filtered_domain(t.get_version_domain())
-            )
+                    lambda t: not t.version_domain or \
+                    self.bundle_id.version_id.filtered_domain(t.get_version_domain())
+        )
 
         pushed_repo = self.commit_link_ids.mapped('commit_id.repo_id')
         dependency_repos = triggers.mapped('dependency_ids')
@@ -353,7 +355,7 @@ class Batch(models.Model):
         ######################################
         def fill_missing(branch_commits, match_type):
             if branch_commits:
-                for branch, commit in branch_commits.items(): # branch first in case pr is closed.
+                for branch, commit in branch_commits.items():  # branch first in case pr is closed.
                     nonlocal missing_repos
                     if commit.repo_id in missing_repos:
                         values = {
@@ -370,13 +372,12 @@ class Batch(models.Model):
                         # add warning if different commit are found
                         # add warning if bundle has warnings
 
-
         # CHECK branch heads consistency
         branch_per_repo = {}
         for branch in bundle.branch_ids.sorted('is_pr', reverse=True):
             commit = branch.head
             repo = commit.repo_id
-            if not repo in branch_per_repo:
+            if repo not in branch_per_repo:
                 branch_per_repo[repo] = branch
             elif branch_per_repo[repo].head != branch.head:
                 obranch = branch_per_repo[repo]
@@ -389,7 +390,7 @@ class Batch(models.Model):
         # 1.2 FIND merge_base info for those commits
         #  use last not preparing batch to define previous repos_heads instead of branches heads:
         #  Will allow to have a diff info on base bundle, compare with previous bundle
-        last_base_batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.base_id.id), ('state', '!=', 'preparing'),('category_id', '=', self.category_id.id), ('id', '!=', self.id)], order='id desc', limit=1)
+        last_base_batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.base_id.id), ('state', '!=', 'preparing'), ('category_id', '=', self.category_id.id), ('id', '!=', self.id)], order='id desc', limit=1)
         base_head_per_repo = {commit.repo_id.id: commit for commit in last_base_batch.commit_ids}
         self._update_commits_infos(base_head_per_repo)  # set base_commit, diff infos, ...
 
@@ -424,7 +425,7 @@ class Batch(models.Model):
             fill_missing({branch: branch.head for branch in self.bundle_id.base_id.branch_ids}, 'base_head')
 
         # 3.2 FIND missing commit in master base heads
-        if missing_repos: # this is to get an upgrade branch.
+        if missing_repos:  # this is to get an upgrade branch.
             if not bundle.is_base:
                 self._log('Not all commit found in current version. Fallback on master branches heads.')
             master_bundle = self.env['runbot.version']._get('master').with_context(project_id=self.bundle_id.project_id.id).base_bundle_id
@@ -479,7 +480,7 @@ class Batch(models.Model):
 
             build = self.env['runbot.build']
             link_type = 'created'
-            if (trigger.repo_ids & bundle_repos) or force or bundle.build_all or bundle.sticky: # only auto link build if bundle has a branch for this trigger
+            if (trigger.repo_ids & bundle_repos) or force or bundle.build_all or bundle.sticky:  # only auto link build if bundle has a branch for this trigger
                 link_type, build = self._create_build(params)
             self.env['runbot.batch.slot'].create({
                 'batch_id': self.id,
@@ -524,7 +525,6 @@ class Batch(models.Model):
                     self.warning('Commit for base head %s in %s was created', merge_base_sha, commit.repo_id.name)
                 link_commit.merge_base_commit_id = merge_base_commit.id
 
-
                 ahead, behind = commit.repo_id._git(['rev-list', '--left-right', '--count', '%s...%s' % (commit.name, base_head.name)]).strip().split('\t')
 
                 link_commit.base_ahead = int(ahead)
@@ -558,6 +558,7 @@ class Batch(models.Model):
             'level': level,
         })
 
+
 class BatchLog(models.Model):
     _name = 'runbot.batch.log'
     _description = 'Batch log'
@@ -578,7 +579,7 @@ class BatchSlot(models.Model):
     trigger_id = fields.Many2one('runbot.trigger', index=True)
     build_id = fields.Many2one('runbot.build', index=True)
     params_id = fields.Many2one('runbot.build.params', index=True, required=True)
-    link_type = fields.Selection([('created', 'Build created'), ('matched', 'Existing build matched'), ('rebuild', 'Rebuild')], required=True) # rebuild type?
+    link_type = fields.Selection([('created', 'Build created'), ('matched', 'Existing build matched'), ('rebuild', 'Rebuild')], required=True)  # rebuild type?
     active = fields.Boolean('Attached', default=True)
     skipped = fields.Boolean('Skipped', default=False)
     # rebuild, what to do: since build ccan be in multiple batch:

@@ -45,7 +45,7 @@ class RunbotHost(models.Model):
 
     @api.model_create_single
     def create(self, values):
-        if not 'disp_name' in values:
+        if 'disp_name' not in values:
             values['disp_name'] = values['name']
         return super().create(values)
 

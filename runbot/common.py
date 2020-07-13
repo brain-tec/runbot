@@ -23,8 +23,10 @@ _logger = logging.getLogger(__name__)
 # TODO also checks sec of dest
 dest_reg = re.compile(r'^\d{5}-.+$')
 
+
 class RunbotException(Exception):
     pass
+
 
 def fqdn():
     return socket.getfqdn()
@@ -70,10 +72,12 @@ def rfind(filename, pattern):
                 return True
     return False
 
+
 def time_delta(time):
     if isinstance(time, timedelta):
         return time
     return timedelta(seconds=-time)
+
 
 def s2human(time):
     """Convert a time in second into an human readable string"""
@@ -82,6 +86,7 @@ def s2human(time):
         format="narrow",
         threshold=2.1,
     )
+
 
 def s2human_long(time):
     return format_timedelta(
