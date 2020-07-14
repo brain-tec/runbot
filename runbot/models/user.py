@@ -3,7 +3,7 @@ from odoo import models, fields
 
 
 class User(models.Model):
-    _inherit = 'res.user'
+    _inherit = 'res.users'
 
     # Add default action_id
     action_id = fields.Many2one('ir.actions.actions',
