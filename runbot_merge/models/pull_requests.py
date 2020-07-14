@@ -1,8 +1,9 @@
+# coding: utf-8
+
 import ast
 import base64
 import collections
 import datetime
-import functools
 import io
 import itertools
 import json
@@ -10,7 +11,6 @@ import logging
 import os
 import pprint
 import re
-import sys
 import time
 
 from itertools import takewhile
@@ -64,9 +64,6 @@ class Project(models.Model):
              "of (valid) incoming webhook signatures, failing signatures "
              "will lead to webhook rejection. Should only use ASCII."
     )
-
-    def _create_stagings(self, commit=False):
-        pass
 
     def _check_stagings(self, commit=False):
         for staging in self.search([]).mapped('branch_ids.active_staging_id'):
@@ -217,6 +214,31 @@ class Project(models.Model):
         """, (self.id, name))
         return bool(self.env.cr.rowcount)
 
+class StatusConfiguration(models.Model):
+    _name = 'runbot_merge.repository.status'
+    _description = "required statuses on repositories"
+    _rec_name = 'context'
+    _log_access = False
+
+    context = fields.Char(required=True)
+    repo_id = fields.Many2one('runbot_merge.repository', required=True, ondelete='cascade')
+    branch_ids = fields.Many2many('runbot_merge.branch', 'runbot_merge_repository_status_branch', 'status_id', 'branch_id')
+    prs = fields.Boolean(string="Applies to pull requests", default=True)
+    stagings = fields.Boolean(string="Applies to stagings", default=True)
+
+    def _for_branch(self, branch):
+        assert branch._name == 'runbot_merge.branch', \
+            f'Expected branch, got {branch}'
+        return self.filtered(lambda st: not st.branch_ids or branch in st.branch_ids)
+    def _for_pr(self, pr):
+        assert pr._name == 'runbot_merge.pull_requests', \
+            f'Expected pull request, got {pr}'
+        return self._for_branch(pr.target).filtered('prs')
+    def _for_staging(self, staging):
+        assert staging._name == 'runbot_merge.stagings', \
+            f'Expected staging, got {staging}'
+        return self._for_branch(staging.target).filtered('stagings')
+
 class Repository(models.Model):
     _name = _description = 'runbot_merge.repository'
     _order = 'sequence, id'
@@ -224,11 +246,8 @@ class Repository(models.Model):
     sequence = fields.Integer(default=50)
     name = fields.Char(required=True)
     project_id = fields.Many2one('runbot_merge.project', required=True)
-    required_statuses = fields.Char(
-        help="Comma-separated list of status contexts which must be "\
-        "`success` for a PR or staging to be valid",
-        default='legal/cla,ci/runbot'
-    )
+    status_ids = fields.One2many('runbot_merge.repository.status', 'repo_id', string="Required Statuses")
+
     branch_filter = fields.Char(default='[(1, "=", 1)]', help="Filter branches valid for this repository")
     substitutions = fields.Text(
         "label substitutions",
@@ -236,6 +255,22 @@ class Repository(models.Model):
 
 All substitutions are tentatively applied sequentially to the input.
 """)
+
+    @api.model
+    def create(self, vals):
+        if 'status_ids' in vals:
+            return super().create(vals)
+
+        st = vals.pop('required_statuses', 'legal/cla,ci/runbot')
+        if st:
+            vals['status_ids'] = [(0, 0, {'context': c}) for c in st.split(',')]
+        return super().create(vals)
+
+    def write(self, vals):
+        st = vals.pop('required_statuses', None)
+        if st:
+            vals['status_ids'] = [(5, 0, {})] + [(0, 0, {'context': c}) for c in st.split(',')]
+        return super().write(vals)
 
     def github(self, token_field='github_token'):
         return github.GH(self.project_id[token_field], self.name)
@@ -588,6 +623,7 @@ class PullRequests(models.Model):
     delegates = fields.Many2many('res.partner', help="Delegate reviewers, not intrinsically reviewers but can review this PR")
     priority = fields.Integer(default=2, index=True)
 
+    overrides = fields.Char(required=True, default='{}')
     statuses = fields.Text(compute='_compute_statuses')
     status = fields.Char(compute='_compute_statuses')
     previous_failure = fields.Char(default='{}')
@@ -662,27 +698,28 @@ class PullRequests(models.Model):
                 pr.blocked = 'linked pr %s is not ready' % unready.display_name
                 continue
 
-    @api.depends('head', 'repository.required_statuses')
+    @api.depends('head', 'repository.status_ids')
     def _compute_statuses(self):
         Commits = self.env['runbot_merge.commit']
-        for s in self:
-            c = Commits.search([('sha', '=', s.head)])
-            if not (c and c.statuses):
-                s.status = s.statuses = False
+        for pr in self:
+            c = Commits.search([('sha', '=', pr.head)])
+            st = json.loads(c.statuses or '{}')
+            statuses = {**st, **json.loads(pr.overrides)}
+            if not statuses:
+                pr.status = pr.statuses = False
                 continue
 
-            statuses = json.loads(c.statuses)
-            s.statuses = pprint.pformat(statuses)
+            pr.statuses = pprint.pformat(st)
 
             st = 'success'
-            for ci in filter(None, (s.repository.required_statuses or '').split(',')):
-                v = state_(statuses, ci) or 'pending'
+            for ci in pr.repository.status_ids._for_pr(pr):
+                v = state_(statuses, ci.context) or 'pending'
                 if v in ('error', 'failure'):
                     st = 'failure'
                     break
                 if v == 'pending':
                     st = 'pending'
-            s.status = st
+            pr.status = st
 
     @api.depends('batch_ids.active')
     def _compute_active_batch(self):
@@ -719,21 +756,16 @@ class PullRequests(models.Model):
 
     def _parse_command(self, commandstring):
         for m in re.finditer(
-            r'(\S+?)(?:([+-])|=(\S*))?(?:\s|$)',
+            r'(\S+?)(?:([+-])|=(\S*))?(?=\s|$)',
             commandstring,
         ):
             name, flag, param = m.groups()
-            if name in ('retry', 'check'):
-                yield (name, None)
-            elif name in ('r', 'review'):
-                if flag == '+':
-                    yield ('review', True)
-                elif flag == '-':
-                    yield ('review', False)
+            if name == 'r':
+                name = 'review'
+            if flag in ('+', '-'):
+                yield name, flag == '+'
             elif name == 'delegate':
-                if flag == '+':
-                    yield ('delegate', True)
-                elif param:
+                if param:
                     yield ('delegate', [
                         p.lstrip('#@')
                         for p in param.split(',')
@@ -743,6 +775,8 @@ class PullRequests(models.Model):
                     yield ('priority', int(param))
             elif any(name == k for k, _ in type(self).merge_method.selection):
                 yield ('method', name)
+            else:
+                yield name, param
 
     def _parse_commands(self, author, comment, login):
         """Parses a command string prefixed by Project::github_prefix.
@@ -772,18 +806,18 @@ class PullRequests(models.Model):
 
         commands = dict(
             ps
-            for m in self.repository.project_id._find_commands(comment)
+            for m in self.repository.project_id._find_commands(comment['body'] or '')
             for ps in self._parse_command(m)
         )
 
         if not commands:
             _logger.info("found no commands in comment of %s (%s) (%s)", author.github_login, author.display_name,
-                 utils.shorten(comment, 50)
+                 utils.shorten(comment['body'] or '', 50)
             )
             return 'ok'
 
         Feedback = self.env['runbot_merge.pull_requests.feedback']
-        if not is_author:
+        if not (is_author or 'override' in commands):
             # no point even parsing commands
             _logger.info("ignoring comment of %s (%s): no ACL to %s",
                           login, name, self.display_name)
@@ -896,6 +930,27 @@ class PullRequests(models.Model):
                         'pull_request': self.number,
                         'message':"Merge method set to %s" % explanation
                     })
+            elif command == 'override':
+                overridable = author.override_rights\
+                    .filtered(lambda r: r.repository_id == self.repository)\
+                    .mapped('context')
+                if param in overridable:
+                    self.overrides = json.dumps({
+                        **json.loads(self.overrides),
+                        param: {
+                            'state': 'success',
+                            'target_url': comment['html_url'],
+                            'description': f"Overridden by @{author.github_login}",
+                        },
+                    })
+                    c = self.env['runbot_merge.commit'].search([('sha', '=', self.head)])
+                    if c:
+                        c.to_check = True
+                    else:
+                        c.create({'sha': self.head, 'statuses': '{}'})
+                    ok = True
+                else:
+                    msg = "You are not allowed to do that."
 
             _logger.info(
                 "%s %s(%s) on %s by %s (%s)",
@@ -944,18 +999,19 @@ class PullRequests(models.Model):
         # targets
         failed = self.browse(())
         for pr in self:
-            required = filter(None, (pr.repository.required_statuses or '').split(','))
+            required = pr.repository.status_ids._for_pr(pr).mapped('context')
+            sts = {**statuses, **json.loads(pr.overrides)}
 
             success = True
             for ci in required:
-                st = state_(statuses, ci) or 'pending'
+                st = state_(sts, ci) or 'pending'
                 if st == 'success':
                     continue
 
                 success = False
                 if st in ('error', 'failure'):
                     failed |= pr
-                    pr._notify_ci_new_failure(ci, to_status(statuses.get(ci.strip(), 'pending')))
+                    pr._notify_ci_new_failure(ci, to_status(sts.get(ci.strip(), 'pending')))
             if success:
                 oldstate = pr.state
                 if oldstate == 'opened':
@@ -1438,7 +1494,7 @@ class Commit(models.Model):
     def _auto_init(self):
         res = super(Commit, self)._auto_init()
         self._cr.execute("""
-            CREATE INDEX IF NOT EXISTS runbot_merge_unique_statuses 
+            CREATE INDEX IF NOT EXISTS runbot_merge_unique_statuses
             ON runbot_merge_commit
             USING hash (sha)
         """)
@@ -1523,10 +1579,9 @@ class Stagings(models.Model):
             }
             # maps commits to the statuses they need
             required_statuses = [
-                (head, repos[repo].required_statuses.split(','))
+                (head, repos[repo].status_ids._for_staging(s).mapped('context'))
                 for repo, head in json.loads(s.heads).items()
                 if not repo.endswith('^')
-                if repos[repo].required_statuses
             ]
             # maps commits to their statuses
             cmap = {
