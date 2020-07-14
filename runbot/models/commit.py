@@ -75,6 +75,24 @@ class Commit(models.Model):
         last_status._send()
 
 
+class RunbotCommitLink(models.Model):
+    _name = 'runbot.commit.link'
+    _description = "Build commit"
+
+    commit_id = fields.Many2one('runbot.commit', 'Commit', required=True, index=True)
+    # Link info
+    match_type = fields.Selection([('new', 'New head of branch'), ('head', 'Head of branch'), ('base_head', 'Found on base branch'), ('base_match', 'Found on base branch')])  # HEAD, DEFAULT
+    branch_id = fields.Many2one('runbot.branch', string='Found in branch')  # Shouldn't be use for anything else than display
+
+    base_commit_id = fields.Many2one('runbot.commit', 'Base head commit', index=True)
+    merge_base_commit_id = fields.Many2one('runbot.commit', 'Merge Base commit', index=True)
+    base_behind = fields.Integer('# commits behind base')
+    base_ahead = fields.Integer('# commits ahead base')
+    file_changed = fields.Integer('# file changed')
+    diff_add = fields.Integer('# line added')
+    diff_remove = fields.Integer('# line removed')
+
+
 class CommitStatus(models.Model):
     _name = 'runbot.commit.status'
     _description = 'Commit status'

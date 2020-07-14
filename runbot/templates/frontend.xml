@@ -1,157 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
   <data>
-    <template id="runbot.layout" inherit_id="website.layout" name="Custom website layout">
-        <xpath expr="//head/meta[last()]" position="after">
-          <t t-if="refresh">
-            <meta http-equiv="refresh" t-att-content="refresh"/>
-          </t>
-        </xpath>
-      <xpath expr="//footer" position="replace">
-      </xpath>
-      <xpath expr="//nav[hasclass('navbar')]" position="replace">
-        <nav class="navbar navbar-expand-md navbar-light bg-light">
-          <a t-if="project" t-att-href="qu(search=search)">
-            <b style="color:#777;">
-              <t t-esc="project.name"/>
-            </b>
-          </a>
-          <button type="button" class="navbar-toggler" data-toggle="collapse" data-target="#top_menu_collapse">
-            <span class="navbar-toggler-icon"/>
-          </button>
-          <div class="collapse navbar-collapse" id="top_menu_collapse">
-            <ul class="nav navbar-nav ml-auto text-right" id="top_menu">
-              <t t-if="projects">
-                <t t-foreach="projects" t-as="l_project">
-                  <li class="nav-item">
-                    <a class="nav-link" t-att-href="qu('/runbot/%s' % slug(l_project), search=search)">
-                      <t t-esc="l_project.name"/>
-                    </a>
-                  </li>
-                </t>
-              </t>
-              <li class="nav-item divider"/>
-              <li class="nav-item dropdown">
-                <a href="#" class="nav-link dropdown-toggle" data-toggle="dropdown">
-                  <i class="fa fa-gear"/>
-                </a>
-                <div class="dropdown-menu" role="menu">
-                  <form class="px-4 py-3" method="post" action="/runbot/submit">
-                    <input type="hidden" name="save" value="1"></input>
-                    <input type="hidden" name="redirect" t-att-value="current_path"></input>
-                    <div class="text-nowrap">
-                      <input type="checkbox" name="more" t-att-checked="more"></input>
-                      <label for="more"> More info</label>
-                    </div>
-                    <div class="text-nowrap">
-                      <input type="checkbox" name="keep_search" t-att-checked="keep_search"></input>
-                      <label for="keep_search"> Persistent search</label>
-                    </div>
-                    <hr class="separator"/>
-                    <div class="text-nowrap">
-                      <label for="filter_mode"> Filter</label>
-                      <select class="form-control" name="filter_mode">
-                        <option value="all" t-att-selected="filter_mode=='all'">All</option>
-                        <option value="sticky" t-att-selected="filter_mode=='sticky'">Sticky only</option>
-                        <option value="nosticky" t-att-selected="filter_mode=='nosticky'">Dev only</option>
-                      </select>
-                    </div>
-                    <div t-if="categories" class="text-nowrap">
-                      <label for="category"> Category</label>
-                      <select class="form-control" name="category">
-                        <option t-foreach="categories" t-as="category" t-att-value="category.id" t-esc="category.name" t-att-selected="category.id==active_category_id"/>
-                      </select>
-                    </div>
-                    <hr class="separator"/>
-                    <t t-if="triggers">
-                      <input type="hidden" name="update_triggers" t-att-value="project.id"></input>
-                      <t t-foreach="triggers" t-as="trigger">
-                        <div class="text-nowrap">
-                          <input type="checkbox" t-attf-name="trigger_{{trigger.id}}" t-att-checked="trigger_display is None or trigger.id in trigger_display"></input>
-                          <label t-attf-for="trigger_{{trigger.id}}" t-esc="trigger.name"/>
-                        </div>
-                      </t>
-                    </t>
-
-                    <button type="submit" class="btn btn-primary">Save</button>
-                  </form>
-                </div>
-              </li>
-              <li class="nav-item divider" t-ignore="true"/>
-              <li class="nav-item dropdown" t-ignore="true" t-if="not user_id._is_public()">
-                <a href="#" class="nav-link dropdown-toggle" data-toggle="dropdown">
-                  <b>
-                    <span t-esc="user_id.name[:23] + '...' if user_id.name and len(user_id.name) &gt; 25 else user_id.name"/>
-                  </b>
-                </a>
-                <div class="dropdown-menu js_usermenu" role="menu">
-                  <a class="dropdown-item" id="o_logout" role="menuitem" t-attf-href="/web/session/logout?redirect=/">Logout</a>
-                  <a class="dropdown-item" role="menuitem" t-attf-href="/web">Web</a>
-                </div>
-              </li>
-              <li class="nav-item dropdown" t-ignore="true" t-else="">
-                <b><a class="nav-link" t-attf-href="/web/login?redirect=/">Login</a></b>
-              </li>
-            </ul>
-            <t t-raw="nav_form or ''">
-            </t>
-          </div>
-        </nav>
-      </xpath>
-    </template>
-
-    <!-- remove black bar with app switcher -->
-    <template id="inherits_no_black_bar" inherit_id="website.user_navbar" name="Inherits No black user_navbar">
-      <xpath expr="//nav[@id='oe_main_menu_navbar']" position="attributes">
-        <attribute name="groups">base.group_website_publisher</attribute>
-      </xpath>
-      <xpath expr="//t[@t-set='body_classname']" position="attributes">
-        <attribute name="t-value">'o_connected_user' if env['ir.ui.view'].user_has_groups('base.group_website_publisher') else None</attribute>
-      </xpath>
-    </template>
-
-    <template id="runbot.slots_infos" name="Hosts slot nb pending/testing/slots">
-      <span t-attf-class="badge badge-{{pending_level}}">
-        Pending:
-        <t t-esc="pending_total"/>
-      </span>
-      <t t-set="testing" t-value="hosts_data._total_testing()"/>
-      <t t-set="workers" t-value="hosts_data._total_workers()"/>
-      <t t-set="klass">success</t>
-      <t t-if="not workers" t-set="klass">danger</t>
-      <t t-else="">
-        <t t-if="int(testing)/workers > 0" t-set="klass">info</t>
-        <t t-if="int(testing)/workers > 0.75" t-set="klass">warning</t>
-        <t t-if="int(testing)/workers >= 1" t-set="klass">danger</t>
-      </t>
-      <span t-attf-class="badge badge-{{klass}}">
-        Testing:
-        <t t-esc="testing"/>
-        /
-        <t t-esc="workers"/>
-      </span>
-    </template>
-
-    <template id="runbot.slot_button">
-      <t t-set="bu" t-value="slot.build_id"/>
-      <t t-set="color" t-value="bu.get_color_class()"/>
-      <div t-attf-class="btn-group btn-group-ssm slot_button_group">
-        <span t-attf-class="btn btn-{{color}} disabled">
-          <i t-attf-class="fa fa-{{slot.fa_link_type()}}"/>
-        </span>
-        <a t-if="bu" t-attf-href="/runbot/build/#{bu.id}" t-attf-class="btn btn-default slot_name">
-          <span t-esc="slot.trigger_id.name"/>
-        </a>
-        <span t-else="" t-attf-class="btn btn-default disabled slot_name">
-          <span t-esc="slot.trigger_id.name"/>
-        </span>
-        <a t-if="bu.local_state == 'running'" t-attf-href="http://{{bu.domain}}/" class="fa fa-sign-in btn btn-info"/>
-        <t t-call="runbot.build_gear"/>
-        <a t-if="not bu" class="btn btn-default" title="Create build" t-attf-href="/runbot/batch/slot/{{slot.id}}/build"><i class="fa fa-play fa-fw"/></a>
-      </div>
-    </template>
-
-
     <template id="runbot.bundles">
       <t t-call='web.frontend_layout'>
         <t t-set="nav_form">
@@ -179,11 +28,6 @@
                 <h1>No project</h1>
               </div>
               <div t-else="">
-                <!-- test optimisation to compute last_done_batch in batch
-                <t t-set="sticky_bundles" t-value="bundles.filtered('sticky')"/>
-                <t t-esc="[sticky_bundles.with_context(category_id=category.id).last_done_batch for category in categories]"/>-->
-                <!-- not working...-->
-
                 <div t-foreach="bundles" t-as="bundle" class="row">
                   <div class="col-md-3 col-lg-2 cell">
                     <div class="one_line">
@@ -217,16 +61,20 @@
 
                         <div t-attf-class="col-md-6 col-xl-3 bg-{{klass}}-light cell {{'d-none d-xl-block' if batch_index > 1 else ''}}">
                           <div>
-                            <a t-attf-href="/runbot/batch/#{batch.id}" class="badge badge-light" title="View Batch"><t t-esc="batch.get_formated_age()"/> <i class="arrow fa fa-window-maximize"/></a>
+                            <a t-attf-href="/runbot/batch/#{batch.id}" class="badge badge-light" title="View Batch">
+                              <t t-esc="batch.get_formated_age()"/>
+                              <i class="arrow fa fa-window-maximize"/>
+                            </a>
                           </div>
                           <t t-if="batch.state=='preparing'">
-                            <i class="fa fa-cog fa-spin fa-fw"/> preparing
+                            <i class="fa fa-cog fa-spin fa-fw"/>
+                            preparing
                           </t>
                           <div class="row">
                             <t t-foreach="batch.slot_ids" t-as="slot">
                               <t t-if="slot.build_id">
-                                <div t-if="(not slot.trigger_id.hide and trigger_display is None) or (trigger_display and slot.trigger_id.id in trigger_display)" 
-                                    t-call="runbot.slot_button" class="slot_container"/>
+                                <div t-if="(not slot.trigger_id.hide and trigger_display is None) or (trigger_display and slot.trigger_id.id in trigger_display)"
+                                  t-call="runbot.slot_button" class="slot_container"/>
                               </t>
                             </t>
                           </div>
