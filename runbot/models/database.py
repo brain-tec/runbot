@@ -3,7 +3,7 @@ from odoo import models, fields
 _logger = logging.getLogger(__name__)
 
 
-class RunbotDatabase(models.Model):
+class Database(models.Model):
     _name = 'runbot.database'
     _description = "Database"
 

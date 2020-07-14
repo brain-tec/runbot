@@ -28,7 +28,7 @@ def _sanitize(name):
 # -- Project group: forbid acces to all related ressources (commit, build, bundle, batch, ...)
 
 
-class RepoTrigger(models.Model):
+class Trigger(models.Model):
     """
     List of repo parts that must be part of the same bundle
     """
@@ -76,15 +76,6 @@ class RepoTrigger(models.Model):
         if self.version_domain:
             return safe_eval(self.version_domain)
         return []
-
-
-class Category(models.Model):
-    _name = 'runbot.category'
-    _description = 'Trigger category'
-
-    name = fields.Char("Name")
-    icon = fields.Char("Font awesome icon")
-    view_id = fields.Many2one('ir.ui.view', "Link template")
 
 
 class Remote(models.Model):

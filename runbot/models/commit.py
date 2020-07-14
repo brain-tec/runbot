@@ -75,7 +75,7 @@ class Commit(models.Model):
         last_status._send()
 
 
-class RunbotCommitLink(models.Model):
+class CommitLink(models.Model):
     _name = 'runbot.commit.link'
     _description = "Build commit"
 

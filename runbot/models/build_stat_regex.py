@@ -12,7 +12,7 @@ VALUE_PATTERN = r"\(\?P\<value\>.+\)"  # used to verify value group pattern
 _logger = logging.getLogger(__name__)
 
 
-class RunbotBuildStatRegex(models.Model):
+class BuildStatRegex(models.Model):
     """ A regular expression to extract a float/int value from  a log file
         The regulare should contain a named group like '(?P<value>.+)'.
         The result will be a key/value like {name: value}

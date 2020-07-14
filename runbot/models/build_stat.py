@@ -5,7 +5,7 @@ from odoo import models, fields, api, tools
 _logger = logging.getLogger(__name__)
 
 
-class RunbotBuildStat(models.Model):
+class BuildStat(models.Model):
     _name = "runbot.build.stat"
     _description = "Statistics"
     _sql_constraints = [

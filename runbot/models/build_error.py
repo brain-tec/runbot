@@ -10,7 +10,7 @@ from odoo.exceptions import ValidationError
 _logger = logging.getLogger(__name__)
 
 
-class RunbotBuildError(models.Model):
+class BuildError(models.Model):
 
     _name = "runbot.build.error"
     _description = "Build error"
@@ -170,7 +170,7 @@ class RunbotBuildError(models.Model):
         return ['-%s' % tag for tag in self.test_tags_list()]
 
 
-class RunbotBuildErrorTag(models.Model):
+class BuildErrorTag(models.Model):
 
     _name = "runbot.build.error.tag"
     _description = "Build error tag"
@@ -179,7 +179,7 @@ class RunbotBuildErrorTag(models.Model):
     error_ids = fields.Many2many('runbot.build.error', string='Errors')
 
 
-class RunbotErrorRegex(models.Model):
+class ErrorRegex(models.Model):
 
     _name = "runbot.error.regex"
     _description = "Build error regex"
