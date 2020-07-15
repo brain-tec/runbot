@@ -275,6 +275,20 @@ class Runbot(Controller):
         }
         return request.render("runbot.build", context)
 
+    @route([
+        '/runbot/branch/<model("runbot.branch"):branch>',
+        ], website=True, auth='public', type='http')
+    def branch(self, branch=None, **kwargs):
+        commit_links_ids = request.env['runbot.commit.link'].search([('branch_id', '=', branch.id)])
+        context = {
+            'branch': branch,
+            'commit_links_ids': commit_links_ids,
+            'project': branch.remote_id.repo_id.project_id,
+            'title': 'Branch %s' % branch.name
+            }
+
+        return request.render('runbot.branch', context)
+
     @route('/runbot/glances', type='http', auth='public', website=True)
     def glances(self, **kwargs):
         bundles = request.env['runbot.bundle'].search([('sticky', '=', True)]) # NOTE we dont filter on project

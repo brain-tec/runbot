@@ -23,6 +23,7 @@
         'templates/assets.xml',
         'templates/badge.xml',
         'templates/batch.xml',
+        'templates/branch.xml',
         'templates/build.xml',
         'templates/bundle.xml',
         'templates/commit.xml',
