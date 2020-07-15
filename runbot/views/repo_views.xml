@@ -163,7 +163,6 @@
         <field name="view_mode">tree,form</field>
     </record>
 
-    <menuitem name="Runbot" id="runbot_menu_root"/>
     <menuitem id="runbot_menu_repos_main" name="Repos" parent="runbot_menu_root"/>
     <menuitem
        id="runbot_menu_repos"
