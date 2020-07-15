@@ -114,7 +114,7 @@ class TestBuildParams(RunbotCaseMinimalSetup):
         bundle = self.Bundle.search([('name', '=', branch_a_name), ('project_id', '=', self.project.id)])
 
         # create a custom trigger with the custom config linked to the bundle
-        self.env['runbot.trigger.custom'].create({
+        self.env['runbot.bundle.trigger.custom'].create({
             'trigger_id': self.trigger_server.id,
             'bundle_id': bundle.id,
             'config_id': custom_config.id

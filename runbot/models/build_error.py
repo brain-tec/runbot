@@ -63,7 +63,7 @@ class BuildError(models.Model):
         if 'active' in vals:
             for build_error in self:
                 (build_error.child_ids - self).write({'active': vals['active']})
-        return super(RunbotBuildError, self).write(vals)
+        return super(BuildError, self).write(vals)
 
     @api.depends('build_ids')
     def _compute_build_counts(self):

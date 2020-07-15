@@ -32,8 +32,8 @@ class TestCron(RunbotCase):
         mock_update_batches.assert_called()
 
     @patch('time.sleep', side_effect=sleep)
-    @patch('odoo.addons.runbot.models.host.RunbotHost._docker_build')
-    @patch('odoo.addons.runbot.models.host.RunbotHost._bootstrap')
+    @patch('odoo.addons.runbot.models.host.Host._docker_build')
+    @patch('odoo.addons.runbot.models.host.Host._bootstrap')
     @patch('odoo.addons.runbot.models.runbot.Runbot._scheduler')
     def test_cron_build(self, mock_scheduler, mock_host_bootstrap, mock_host_docker_build, *args):
         """ test that cron_fetch_and_build do its work """

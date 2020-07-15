@@ -140,9 +140,9 @@ class RunbotCase(TransactionCase):
         self.start_patcher('_local_cleanup_patcher', 'odoo.addons.runbot.models.build.BuildResult._local_cleanup')
         self.start_patcher('_local_pg_dropdb_patcher', 'odoo.addons.runbot.models.build.BuildResult._local_pg_dropdb')
 
-        self.start_patcher('set_psql_conn_count', 'odoo.addons.runbot.models.host.RunbotHost.set_psql_conn_count', None)
+        self.start_patcher('set_psql_conn_count', 'odoo.addons.runbot.models.host.Host.set_psql_conn_count', None)
         self.start_patcher('reload_nginx', 'odoo.addons.runbot.models.runbot.Runbot._reload_nginx', None)
-        self.start_patcher('update_commits_infos', 'odoo.addons.runbot.models.bundle.Batch._update_commits_infos', None)
+        self.start_patcher('update_commits_infos', 'odoo.addons.runbot.models.batch.Batch._update_commits_infos', None)
         self.start_patcher('_local_pg_createdb', 'odoo.addons.runbot.models.build.BuildResult._local_pg_createdb', True)
         self.start_patcher('getmtime', 'odoo.addons.runbot.common.os.path.getmtime', datetime.datetime.now().timestamp())
 
@@ -228,4 +228,4 @@ class RunbotCaseMinimalSetup(RunbotCase):
         self.start_patcher('repo_get_fetch_head_time_patcher', 'odoo.addons.runbot.models.repo.Repo._get_fetch_head_time')
         self.patchers['repo_get_fetch_head_time_patcher'].side_effect = counter()
         self.start_patcher('repo_update_patcher', 'odoo.addons.runbot.models.repo.Repo._update')
-        self.start_patcher('batch_update_commits_infos', 'odoo.addons.runbot.models.bundle.Batch._update_commits_infos')
+        self.start_patcher('batch_update_commits_infos', 'odoo.addons.runbot.models.batch.Batch._update_commits_infos')
