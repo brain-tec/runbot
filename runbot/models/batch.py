@@ -3,8 +3,7 @@ import logging
 import datetime
 import subprocess
 
-from collections import defaultdict
-from odoo import models, fields, api, tools
+from odoo import models, fields, api
 from ..common import dt2time, s2human_long
 
 _logger = logging.getLogger(__name__)

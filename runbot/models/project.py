@@ -1,5 +1,6 @@
 from odoo import models, fields
 
+
 class Project(models.Model):
     _name = 'runbot.project'
     _description = 'Project'
@@ -8,6 +9,7 @@ class Project(models.Model):
     group_ids = fields.Many2many('res.groups', string='Required groups')
 
     trigger_ids = fields.One2many('runbot.trigger', 'project_id', string='Triggers')
+
 
 class Category(models.Model):
     _name = 'runbot.category'
