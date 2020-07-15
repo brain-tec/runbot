@@ -54,7 +54,7 @@
                 </t>
               </table>
               <table class="table table-condensed table-stripped" style="table-layout: initial;">
-                <tr t-foreach='reflogs' t-as='reflog'>
+                <tr t-foreach='reflog_ids' t-as='reflog'>
                   <td t-esc="reflog.date"/>
                   <td t-esc="reflog.branch_id.remote_id.short_name"/>
                   <td t-esc="reflog.branch_id.name"/>

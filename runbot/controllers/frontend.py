@@ -279,10 +279,10 @@ class Runbot(Controller):
         '/runbot/branch/<model("runbot.branch"):branch>',
         ], website=True, auth='public', type='http')
     def branch(self, branch=None, **kwargs):
-        commit_links_ids = request.env['runbot.commit.link'].search([('branch_id', '=', branch.id)])
+        reflog_ids = request.env['runbot.reflog'].search([('branch_id', '=', branch.id)])
         context = {
             'branch': branch,
-            'commit_links_ids': commit_links_ids,
+            'reflog_ids': reflog_ids,
             'project': branch.remote_id.repo_id.project_id,
             'title': 'Branch %s' % branch.name
             }
