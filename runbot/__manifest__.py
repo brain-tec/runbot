@@ -16,9 +16,9 @@
         'data/runbot_error_regex_data.xml',
         'data/website_data.xml',
 
+        'security/runbot_security.xml',
         'security/ir.model.access.csv',
         'security/ir.rule.csv',
-        'security/runbot_security.xml',
 
         'templates/assets.xml',
         'templates/badge.xml',
