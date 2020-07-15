@@ -51,14 +51,19 @@ body, .table{
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.cell {
-    border-bottom:1px solid #dee2e6;
-    border-right:1px solid #dee2e6;
+.batch_tile {
+    padding: 6px;
 }
 .branch_time {
     float:right;
     margin-left:10px;
 }
+
+
+:root {
+  --info-light: #d9edf7;
+}
+
 
 .bg-success-light {
     background-color: #dff0d8;
@@ -67,7 +72,7 @@ body, .table{
     background-color: #f2dede;
 }
 .bg-info-light {
-    background-color: #d9edf7;
+    background-color: var(--info-light);
 }
 
 .text-info{
@@ -107,13 +112,9 @@ body, .table{
     display: inline;
 }
 
-.slot_container{
-    flex:0 0 50%;
-}
-
 .slot_button_group {
     display: flex;
-    padding: 0 5px;
+    padding: 0 1px;
 }
 
 .slot_button_group .btn {
@@ -121,10 +122,81 @@ body, .table{
 }
 
 .slot_button_group .btn.slot_name {
-    width:105px;
+    width: 80px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     flex: 1 1 auto;
     text-align: left;
+}
+
+.batch_header {
+    padding: 6px;
+    padding-bottom: 0px;
+}
+
+.batch_slots {
+    display: flex;
+    flex-wrap: wrap;
+    padding: 6px;
+}
+
+.batch_commits {
+    background-color: white;
+}
+
+.batch_commits {
+    padding: 2px;
+}
+
+.match_type_new {
+    background-color: var(--info-light);
+}
+.batch_row {
+    .slot_container{
+        flex: 1 0 200px;
+        padding: 0 4px;
+    }
+    .slot_filler {
+        width: 100px;
+        height: 0px;
+        flex: 1 0 200px;
+        padding: 0 4px;
+    }
+}
+.bundle_row {
+    border-bottom: 1px solid var(--gray);
+    .batch_commits {
+        font-size: 80%;
+    }
+    .slot_container{
+        flex:1 0 50%;
+    }
+    .slot_filler {
+        flex:1 0 50%;
+    }
+    .more {
+        .batch_commits {
+            display: block;
+        }
+    }
+    .nomore {
+        .batch_commits {
+            display: none;
+            padding:8px;
+        }
+    }
+    .batch_tile:hover {
+        .batch_commits {
+            display: block;
+            position: absolute;
+            bottom: 1px;
+            transform: translateY(100%);
+            z-index: 100;
+            border: 1px solid rgba(0, 0, 0, 0.125);
+            border-radius: 0.2rem;
+            box-sizing: border-box;
+            margin-left:-1px;
+        }
+    }
 }

@@ -39,6 +39,7 @@ class Hook(http.Controller):
             pr_number = payload.get('pull_request', {}).get('number', '')
             branch = request.env['runbot.branch'].sudo().search([('remote_id', '=', remote.id), ('name', '=', 'refs/pull/%s' % pr_number)])
             branch._compute_branch_infos(payload.get('pull_request', {}))
+            # TODO add closed/open to branch info and catch
         else:
             _logger.debug('Ignoring unsupported hook %s %s', event, payload.get('action', ''))
         return ""
