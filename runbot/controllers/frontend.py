@@ -279,12 +279,14 @@ class Runbot(Controller):
         '/runbot/branch/<model("runbot.branch"):branch>',
         ], website=True, auth='public', type='http')
     def branch(self, branch=None, **kwargs):
-        reflog_ids = request.env['runbot.reflog'].search([('branch_id', '=', branch.id)])
+        pr_branch = branch.bundle_id.branch_ids.filtered(lambda rec: not rec.is_pr and rec.id != branch.id and rec.remote_id.repo_id == rec.remote_id.repo_id)
+        branch_pr = branch.bundle_id.branch_ids.filtered(lambda rec: rec.is_pr and rec.id != branch.id and rec.remote_id.repo_id == rec.remote_id.repo_id)
         context = {
             'branch': branch,
-            'reflog_ids': reflog_ids,
             'project': branch.remote_id.repo_id.project_id,
-            'title': 'Branch %s' % branch.name
+            'title': 'Branch %s' % branch.name,
+            'pr_branch': pr_branch,
+            'branch_pr': branch_pr
             }
 
         return request.render('runbot.branch', context)

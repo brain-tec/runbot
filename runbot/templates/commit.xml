@@ -29,7 +29,11 @@
               <tr>
                 <td>Name</td>
                 <td>
-                  <a t-att-href="'' if not reflogs else 'https://%s/commit/%s' % (reflogs[0].branch_id.remote_id.base_url, commit.name)" t-esc="commit.name"/>
+                  <t t-esc="commit.name"/>
+                  <div class="btn-group" role="group">
+                    <a t-att-href="'' if not reflogs else 'https://%s/commit/%s' % (reflogs[0].branch_id.remote_id.base_url, commit.name)" class="btn btn-sm text-left" title="View Commit on Github"><i class="fa fa-github"/></a>
+                    <a groups="runbot.group_runbot_admin" class="btn btn-sm fa fa-list text-left" t-attf-href="/web/#id={{commit.id}}&amp;view_type=form&amp;model=runbot.commit" target="new" title="View Commit in Backend"/>
+                  </div>
                 </td>
               </tr>
               <tr>
@@ -93,7 +97,7 @@
               <tr t-foreach='reflogs' t-as='reflog'>
                 <td t-esc="reflog.date"/>
                 <td t-esc="reflog.branch_id.remote_id.short_name"/>
-                <td t-esc="reflog.branch_id.name"/>
+                <td><a t-attf-href="/runbot/branch/{{reflog.branch_id.id}}" t-esc="reflog.branch_id.name" title="View Branch Details"/></td>
               </tr>
             </table>
           </div>
