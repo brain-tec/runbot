@@ -14,3 +14,10 @@ class Database(models.Model):
     def _compute_db_suffix(self):
         for record in self:
             record.db_suffix = record.name.replace('%s-' % record.build_id.dest, '')
+
+    @api.model_create_single
+    def create(self, values):
+        res = self.search([('name', '=', values['name']), ('build_id', '=', values['build_id'])])
+        if res:
+            return res
+        return super().create(values)

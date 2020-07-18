@@ -564,7 +564,7 @@ class ConfigStep(models.Model):
                 for upgrade_db in self.upgrade_dbs:
                     if not upgrade_db.min_target_version_id or upgrade_db.min_target_version_id.number <= target.params_id.version_id.number:
                         config_id = upgrade_db.config_id
-                        dump_builds = build.search([('id', 'child_of', source.id), ('params_id.config_id', '=', config_id.id)])
+                        dump_builds = build.search([('id', 'child_of', source.id), ('params_id.config_id', '=', config_id.id), ('orphan_result', '=', false))
                         # this search is not optimal
                         if not dump_builds:
                             build._log('_run_configure_upgrade', 'No child build found with config %s in %s' % (config_id.name, source.id), level='ERROR')
