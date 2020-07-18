@@ -202,7 +202,7 @@
                 <t t-set="btnclass">btn-info</t>
             </t>
             <button t-attf-class="btn {{ btnclass }} dropdown-toggle" data-toggle="dropdown" title="Build options" aria-label="Build options" aria-expanded="false">
-                <i t-attf-class="fa  {{'fa-spinner' if bu.global_state == 'pending' else 'fa-cog'}} {{'' if bu.global_state == 'done' else 'fa-spin'}} fa-fw"/>
+                <i t-attf-class="fa  {{'fa-spinner' if bu.global_state == 'pending' else 'fa-cog'}} {{'' if bu.global_state in ('done', 'running') else 'fa-spin'}} fa-fw"/>
                 <span class="caret"/>
             </button>
             <div class="dropdown-menu dropdown-menu-right" role="menu">
