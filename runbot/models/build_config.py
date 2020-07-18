@@ -160,12 +160,9 @@ class ConfigStep(models.Model):
 
     upgrade_config_id = fields.Many2one('runbot.build.config',string='Upgrade Config', tracking=True, index=True)
     upgrade_dbs = fields.One2many('runbot.config.step.upgrade.db', 'step_id', tracking=True)
-    master_reference_versions = fields.One2many('runbot.version', compute='_compute_master_reference_versions')
 
     restore_download_db_suffix = fields.Char('Download db suffix')
     restore_rename_db_suffix = fields.Char('Rename db suffix')
-
-    upgrade_complement_trigger_id = fields.Many2one('runbot.trigger')
 
     @api.constrains('python_code')
     def _check_python_code(self):
@@ -187,21 +184,6 @@ class ConfigStep(models.Model):
             self.install_modules = '-*'
             self.test_enable = False
             self.create_db = False
-
-    @api.depends('upgrade_to_master',
-                 'upgrade_to_current',
-                 'upgrade_to_major_versions',
-                 'upgrade_to_all_versions',
-                 'upgrade_to_version_ids',
-                 'upgrade_from_previous_major_version',
-                 'upgrade_from_last_intermediate_version',
-                 'upgrade_from_all_intermediate_version',
-                 'upgrade_from_version_ids')
-    def _compute_master_reference_versions(self):
-        for record in self:
-            record.master_reference_versions = self._reference_batches(
-                self.env.ref('runbot.bundle_master'), self.env.ref('runbot.default_category').id
-                ).mapped('bundle_id.version_id')
 
     @api.depends('name', 'custom_db_name')
     def _compute_db_name(self):
@@ -447,7 +429,7 @@ class ConfigStep(models.Model):
     def _run_configure_upgrade_complement(self, build, *args):
         """
         Parameters:
-            - upgrade_complement_trigger_id:  a configure_upgradestep
+            - upgrade_dumps_trigger_id:  a configure_upgradestep
 
         A complement aims to test the exact oposite of an upgrade trigger.
         Ignore configs an categories: only focus on versions.
@@ -456,8 +438,8 @@ class ConfigStep(models.Model):
         version = param.version_id
         builds_references = param.builds_reference_ids
         builds_references_by_version_id = {b.params_id.version_id.id: b for b in builds_references}
-        upgrade_complement_step = self.upgrade_complement_trigger_id.upgrade_step_id
-        version_domain = self.upgrade_complement_trigger_id.get_version_domain()
+        upgrade_complement_step = build.params_id.trigger_id.upgrade_dumps_trigger_id.upgrade_step_id
+        version_domain = build.params_id.trigger_id.upgrade_dumps_trigger_id.get_version_domain()
         valid_targets = build.browse()
         next_versions = version.next_major_version_id | version.next_intermediate_version_ids
         if version_domain:  # filter only on version where trigger is enabled
@@ -712,8 +694,9 @@ class ConfigStep(models.Model):
             ])
         docker_run(cmd, log_path, build._path(), build._get_docker_name(), cpu_limit=self.cpu_limit)
 
-    def _reference_builds(self, bundle, upgrade_dumps_trigger_id):
-        refs_batches = self._reference_batches(bundle, upgrade_dumps_trigger_id.category_id.id)
+    def _reference_builds(self, bundle, trigger):
+        upgrade_dumps_trigger_id = trigger.upgrade_dumps_trigger_id
+        refs_batches = self._reference_batches(bundle, trigger)
         refs_builds = refs_batches.mapped('slot_ids').filtered(
             lambda slot: slot.trigger_id == upgrade_dumps_trigger_id
             ).mapped('build_id')
@@ -724,19 +707,21 @@ class ConfigStep(models.Model):
     def _is_upgrade_step(self):
         return self.job_type in ('configure_upgrade', 'configure_upgrade_complement')
 
-    def _reference_batches(self, bundle, category_id):
+    def _reference_batches(self, bundle, trigger):
         if self.job_type == 'configure_upgrade_complement':
-            return self._reference_batches_complement(bundle, category_id)
+            return self._reference_batches_complement(bundle, trigger)
         else:
-            return self._reference_batches_upgrade(bundle, category_id)
+            return self._reference_batches_upgrade(bundle, trigger.upgrade_dumps_trigger_id.category_id.id)
 
-    def _reference_batches_complement(self, bundle, category_id):
+    def _reference_batches_complement(self, bundle, trigger):
         # TODO factorize with step logic
+        category_id = trigger.upgrade_dumps_trigger_id.category_id.id
         version = bundle.version_id
         next_versions = version.next_major_version_id | version.next_intermediate_version_ids  # TODO filter on trigger version
         target_versions = version.browse()
 
-        upgrade_complement_step = self.upgrade_complement_trigger_id.upgrade_step_id
+        upgrade_complement_step = trigger.upgrade_dumps_trigger_id.upgrade_step_id
+
         if next_versions:
             for next_version in next_versions:
                 if bundle.version_id in upgrade_complement_step._get_upgrade_source_versions(next_version):

@@ -44,7 +44,7 @@ class Trigger(models.Model):
     version_domain = fields.Char(string="Version domain")
     hide = fields.Boolean('Hide batch on main page')  # TODO adapt and fix (cla, ...)
 
-    upgrade_dumps_trigger_id = fields.Many2one('runbot.trigger', tracking=True)
+    upgrade_dumps_trigger_id = fields.Many2one('runbot.trigger', string= 'Template/complement trigger', tracking=True)
     upgrade_step_id = fields.Many2one('runbot.build.config.step', compute="_compute_upgrade_step_id", store=True)
     ci_url = fields.Char("ci url")
     ci_description = fields.Char("ci description")
@@ -62,7 +62,7 @@ class Trigger(models.Model):
     def _reference_builds(self, bundle):
         self.ensure_one()
         if self.upgrade_step_id:  # this is an upgrade trigger, add corresponding builds
-            refs_builds = self.upgrade_step_id._reference_builds(bundle, self.upgrade_dumps_trigger_id)
+            refs_builds = self.upgrade_step_id._reference_builds(bundle, self)
             return [(4, b.id) for b in refs_builds]
         return []
 
