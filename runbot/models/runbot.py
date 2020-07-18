@@ -209,8 +209,6 @@ class Runbot(models.AbstractModel):
         update_frequency = int(get_param('runbot.runbot_update_frequency', default=10))
         runbot_do_fetch = get_param('runbot.runbot_do_fetch')
         runbot_do_schedule = get_param('runbot.runbot_do_schedule')
-        if not runbot_do_fetch and not runbot_do_schedule:
-            timeout = min(timeout, 10)
         host = self.env['runbot.host']._get_current()
         host.set_psql_conn_count()
         host.last_start_loop = fields.Datetime.now()
