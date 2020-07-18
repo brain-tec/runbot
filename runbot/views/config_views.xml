@@ -100,6 +100,7 @@
                           <tree editable="bottom">
                               <field name="config_id"/>
                               <field name="db_pattern"/>
+                              <field name="min_target_version_id"/>
                           </tree>
                         </field>
                       </group>
