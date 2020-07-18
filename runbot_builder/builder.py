@@ -27,7 +27,7 @@ class RunbotClient():
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
         signal.signal(signal.SIGQUIT, self.dump_stack)
-        host = self.env['runbot.host']._get_current('worker')
+        host = self.env['runbot.host']._get_current()
         host._bootstrap()
         count = 0
         while True:
