@@ -224,16 +224,15 @@ class Runbot(models.AbstractModel):
             self._docker_cleanup()
         _logger.info('Starting loop')
         while time.time() - start_time < timeout:
-            if runbot_do_fetch:
                 repos = self.env['runbot.repo'].search([('mode', '!=', 'disabled')])
 
                 processing_batch = self.env['runbot.batch'].search([('state', 'in', ('preparing', 'ready'))], order='id asc')
                 preparing_batch = processing_batch.filtered(lambda b: b.state == 'preparing')
-
                 self._commit()
-                for repo in repos:
-                    repo._update_batches(bool(preparing_batch))
-                    self._commit()
+                if runbot_do_fetch:
+                    for repo in repos:
+                        repo._update_batches(bool(preparing_batch))
+                        self._commit()
                 if processing_batch:
                     _logger.info('starting processing of %s batches', len(processing_batch))
                     for batch in processing_batch:
