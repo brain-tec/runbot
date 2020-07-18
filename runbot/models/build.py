@@ -215,20 +215,16 @@ class BuildResult(models.Model):
     @api.depends('children_ids.global_state', 'local_state')
     def _compute_global_state(self):
         for record in self:
-            if record.global_state == 'done' and self.local_state == 'done':
-                # avoid to recompute if done, mostly important whith many orphan childrens
-                record.global_state = 'done'
-            else:
-                waiting_score = record._get_state_score('waiting')
-                children_ids = [child for child in record.children_ids if not child.orphan_result]
-                if record._get_state_score(record.local_state) > waiting_score and children_ids:  # if finish, check children
-                    children_state = record._get_youngest_state([child.global_state for child in children_ids])
-                    if record._get_state_score(children_state) > waiting_score:
-                        record.global_state = record.local_state
-                    else:
-                        record.global_state = 'waiting'
-                else:
+            waiting_score = record._get_state_score('waiting')
+            children_ids = [child for child in record.children_ids if not child.orphan_result]
+            if record._get_state_score(record.local_state) > waiting_score and children_ids:  # if finish, check children
+                children_state = record._get_youngest_state([child.global_state for child in children_ids])
+                if record._get_state_score(children_state) > waiting_score:
                     record.global_state = record.local_state
+                else:
+                    record.global_state = 'waiting'
+            else:
+                record.global_state = record.local_state
 
     @api.depends('gc_delay', 'job_end')
     def _compute_gc_date(self):
