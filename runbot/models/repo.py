@@ -32,6 +32,9 @@ class Trigger(models.Model):
     _inherit = 'mail.thread'
     _description = 'Triggers'
 
+    _order = 'sequence, id'
+
+    sequence = fields.Integer('Sequence', required=True)
     name = fields.Char("Repo trigger descriptions")
     description = fields.Char("Description", help="Informative description")
     project_id = fields.Many2one('runbot.project', string="Project id", required=True)  # main/security/runbot
