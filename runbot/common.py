@@ -19,7 +19,7 @@ from odoo.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT
 
 _logger = logging.getLogger(__name__)
 
-dest_reg = re.compile(r'^\d{5}-.+$')
+dest_reg = re.compile(r'^\d{5,}-.+$')
 
 
 class RunbotException(Exception):
