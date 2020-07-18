@@ -636,7 +636,7 @@ class ConfigStep(models.Model):
                 if commit.repo_id not in commit_repo_ids:
                     commit_ids |= commit
             build._log('', 'Adding sources from build [%s](%s)' % (target.id, target.build_url), log_type='markdown')
-        build = build.with_context(defined_commit_ids=target_commit_ids)
+        build = build.with_context(defined_commit_ids=commit_ids)
         exports = build._checkout()
 
         dump_db = build.params_id.dump_db
