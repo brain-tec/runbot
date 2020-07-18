@@ -35,7 +35,7 @@ class Trigger(models.Model):
     _order = 'sequence, id'
 
     sequence = fields.Integer('Sequence')
-    name = fields.Char("Repo trigger descriptions")
+    name = fields.Char("Name")
     description = fields.Char("Description", help="Informative description")
     project_id = fields.Many2one('runbot.project', string="Project id", required=True)  # main/security/runbot
     repo_ids = fields.Many2many('runbot.repo', relation='runbot_trigger_triggers', string="Triggers", domain="[('project_id', '=', project_id)]")
