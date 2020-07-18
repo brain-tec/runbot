@@ -569,9 +569,9 @@ class ConfigStep(models.Model):
                         if not dump_builds:
                             build._log('_run_configure_upgrade', 'No child build found with config %s in %s' % (config_id.name, source.id), level='ERROR')
                         dbs = dump_builds.database_ids.sorted('db_suffix')
-                        valid_databases = self._filter_upgrade_database(dbs, upgrade_db.db_pattern)
+                        valid_databases = list(self._filter_upgrade_database(dbs, upgrade_db.db_pattern))
 
-                        _logger.warning(valid_databases)
+                        _logger.warning('%s %s %s', valid_databases, dbs, upgrade_db.db_pattern)
                         if not valid_databases:
                             build._log('_run_configure_upgrade', 'No datase found for pattern %s' % (upgrade_db.db_pattern), level='ERROR')
                         for db in valid_databases:
