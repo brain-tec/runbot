@@ -672,7 +672,7 @@ class ConfigStep(models.Model):
             zip_name = '%s.zip' % download_db_name
             dump_url = '%s%s' % (dump_build.http_log_url(), zip_name)
             build._log('test-migration', 'Using dump from build %s' % dump_build.id, log_type='subbuild', path=str(dump_build.id))  # TODO replace by markdown
-
+            build._log('test-migration', '[template](%s)' % dump_url, log_type='markdown')
         restore_suffix = self.restore_rename_db_suffix or params.dump_db.db_suffix
         assert restore_suffix  # TODO check dump_url case
         restore_db_name = '%s-%s' % (build.dest, restore_suffix)
