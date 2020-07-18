@@ -280,7 +280,7 @@ class Runbot(models.AbstractModel):
             _logger.info('Source cleaning')
             # we can remove a source only if no build are using them as name or rependency_ids aka as commit
             cannot_be_deleted_builds = self.env['runbot.build'].search([('host', '=', fqdn()), ('local_state', '!=', 'done')])
-            cannot_be_deleted_builds += cannot_be_deleted_builds.mapped('params_id.builds_reference_ids')
+            cannot_be_deleted_builds |= cannot_be_deleted_builds.mapped('params_id.builds_reference_ids')
             cannot_be_deleted_path = set()
             for build in cannot_be_deleted_builds:
                 for build_commit in build.params_id.commit_link_ids:
