@@ -224,22 +224,22 @@ class Runbot(models.AbstractModel):
             self._docker_cleanup()
         _logger.info('Starting loop')
         while time.time() - start_time < timeout:
-                repos = self.env['runbot.repo'].search([('mode', '!=', 'disabled')])
+            repos = self.env['runbot.repo'].search([('mode', '!=', 'disabled')])
 
-                processing_batch = self.env['runbot.batch'].search([('state', 'in', ('preparing', 'ready'))], order='id asc')
-                preparing_batch = processing_batch.filtered(lambda b: b.state == 'preparing')
-                self._commit()
-                if runbot_do_fetch:
-                    for repo in repos:
-                        repo._update_batches(bool(preparing_batch))
-                        self._commit()
-                if processing_batch:
-                    _logger.info('starting processing of %s batches', len(processing_batch))
-                    for batch in processing_batch:
-                        batch._process()
-                        self._commit()
-                    _logger.info('end processing')
-                self._commit()
+            processing_batch = self.env['runbot.batch'].search([('state', 'in', ('preparing', 'ready'))], order='id asc')
+            preparing_batch = processing_batch.filtered(lambda b: b.state == 'preparing')
+            self._commit()
+            if runbot_do_fetch:
+                for repo in repos:
+                    repo._update_batches(bool(preparing_batch))
+                    self._commit()
+            if processing_batch:
+                _logger.info('starting processing of %s batches', len(processing_batch))
+                for batch in processing_batch:
+                    batch._process()
+                    self._commit()
+                _logger.info('end processing')
+            self._commit()
             if runbot_do_schedule:
                 sleep_time = self._scheduler_loop_turn(host, update_frequency)
                 self.sleep(sleep_time)
