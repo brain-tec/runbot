@@ -1051,20 +1051,21 @@ class BuildResult(models.Model):
         return s2human(self.build_age)
 
     def get_color_class(self):
-        if self.global_state == 'pending':
-            return 'default'
-        if self.global_state in ('testing', 'waiting'):
-            return 'info'
 
         if self.global_result == 'ko':
             return 'danger'
         if self.global_result == 'warn':
             return 'warning'
+
+        if self.global_state == 'pending':
+            return 'default'
+        if self.global_state in ('testing', 'waiting'):
+            return 'info'
+
         if self.global_result == 'ok':
             return 'success'
-        if self.global_result == 'skipped':
-            return 'default'
-        if self.global_result in ('killed', 'manually_killed'):
+
+        if self.global_result in ('skipped', 'killed', 'manually_killed'):
             return 'killed'
 
     def _github_status(self):
