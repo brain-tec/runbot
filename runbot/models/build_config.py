@@ -451,14 +451,10 @@ class ConfigStep(models.Model):
 
         for target in valid_targets:
             build._log('', 'Checking upgrade to [%s](%s)' % (target.params_id.version_id.name, target.build_url), log_type='markdown')
-            _logger.warning(upgrade_complement_step)
             for upgrade_db in upgrade_complement_step.upgrade_dbs:
-                _logger.warning(upgrade_db)
                 if not upgrade_db.min_target_version_id or upgrade_db.min_target_version_id.number <= target.params_id.version_id.number:
                     # note: here we don't consider the upgrade_db config here
                     dbs = build.database_ids.sorted('db_suffix')
-                    _logger.warning('%s -- %s', dbs, dbs.mapped('name'))
-                    _logger.warning(upgrade_db.db_pattern)
                     for db in self._filter_upgrade_database(dbs, upgrade_db.db_pattern):
                         _logger.warning(db)
                         child = build._add_child({
@@ -710,6 +706,7 @@ class ConfigStep(models.Model):
             ).mapped('build_id')
         # should we filter on active? implicit. On match type? on skipped ?
         # is last_"done"_batch enough?
+        # TODO active test false and take last done/running build limit 1 -> in case of rebuild
         return refs_builds
 
     def _is_upgrade_step(self):
