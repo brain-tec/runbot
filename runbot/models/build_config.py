@@ -631,10 +631,10 @@ class ConfigStep(models.Model):
         commit_ids = build.params_id.commit_ids
         target_commit_ids = target.params_id.commit_ids
         if commit_ids != target_commit_ids:
-            target_repo_ids = target_commit_ids.mapped('repo_id')
-            for commit in commit_ids:
-                if commit.repo_id not in target_repo_ids:
-                    target_commit_ids |= commit
+            commit_repo_ids = commit_ids.mapped('repo_id')
+            for commit in target_commit_ids:
+                if commit.repo_id not in commit_repo_ids:
+                    commit_ids |= commit
             build._log('', 'Adding sources from build [%s](%s)' % (target.id, target.build_url), log_type='markdown')
         build = build.with_context(defined_commit_ids=target_commit_ids)
         exports = build._checkout()
