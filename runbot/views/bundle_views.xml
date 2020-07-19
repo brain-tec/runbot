@@ -30,6 +30,7 @@
                     <field name="defined_base_id"/>
                     <field name="version_id"/>
                     <field name="no_build"/>
+                    <field name="no_auto_run"/>
                     <field name="priority"/>
                     <field name="build_all"/>
                     <field name="branch_ids">

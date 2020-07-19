@@ -112,6 +112,7 @@ class Batch(models.Model):
                 'params_id': params.id,
                 'description': description,
                 'build_type': 'normal' if self.category_id == self.env.ref('runbot.default_category') else 'scheduled',
+                'no_auto_run': self.bundle_id.no_auto_run,
             })
         return link_type, build
 
