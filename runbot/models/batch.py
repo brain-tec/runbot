@@ -111,6 +111,7 @@ class Batch(models.Model):
             build = self.env['runbot.build'].create({
                 'params_id': params.id,
                 'description': description,
+                'build_type': 'scheduled' if self.category_id == self.env.ref('runbot.default_category') else 'normal',
             })
         return link_type, build
 

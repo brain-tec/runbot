@@ -178,7 +178,7 @@ class BuildResult(models.Model):
     build_type = fields.Selection([('scheduled', 'This build was automatically scheduled'),
                                    ('rebuild', 'This build is a rebuild'),
                                    ('normal', 'normal build'),
-                                   ('indirect', 'Automatic rebuild'),
+                                   ('indirect', 'Automatic rebuild'), # TODO cleanup remove
                                    ],
                                   default='normal',
                                   string='Build type')
