@@ -692,10 +692,10 @@ class BuildResult(models.Model):
 
             build.write(build_values)
             if ending_build:
-                build._github_status()
                 if not build.local_result:  # Set 'ok' result if no result set (no tests job on build)
                     build.local_result = 'ok'
                     build._logger("No result set, setting ok by default")
+                build._github_status()
             build._run_job()
 
     def _run_job(self):
@@ -1076,7 +1076,7 @@ class BuildResult(models.Model):
             elif build.params_id.config_id == build.params_id.trigger_id.config_id: 
                 if build.global_result in ('ko', 'warn'):
                     state = 'failure'
-                elif build.global_state == 'testing':
+                elif build.global_state in ('pending', 'testing'):
                     state = 'pending'
                 elif build.global_state in ('running', 'done'):
                     state = 'error'
