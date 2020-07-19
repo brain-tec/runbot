@@ -37,7 +37,7 @@
                   </td>
                 </tr>
                 <t t-if="branch.is_pr">
-                  <tr>
+                  <tr t-if="pr_branch">
                     <td>Pull Head Name</td>
                     <td><a t-attf-href="/runbot/branch/{{pr_branch.id}}" t-esc="branch.pull_head_name" title="View PR Details"/></td>
                   </tr>
