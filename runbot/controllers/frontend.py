@@ -25,6 +25,7 @@ def route(routes, **kw):
         def response_wrap(*args, **kwargs):
             projects = request.env['runbot.project'].search([])
             more = request.httprequest.cookies.get('more', False) == '1'
+            filter_mode = request.httprequest.cookies.get('filter_mode', 'all')
             keep_search = request.httprequest.cookies.get('keep_search', False) == '1'
             cookie_search = request.httprequest.cookies.get('search', '')
             refresh = kwargs.get('refresh', False)
@@ -49,6 +50,7 @@ def route(routes, **kw):
             response.qcontext['search'] = search
             response.qcontext['current_path'] = request.httprequest.full_path
             response.qcontext['refresh'] = refresh
+            response.qcontext['filter_mode'] = filter_mode
             response.qcontext['qu'] = QueryURL('/runbot/%s' % (slug(project)), path_args=['search'], search=search, refresh=refresh)
             if 'title' not in response.qcontext:
                 response.qcontext['title'] = 'Runbot %s' % project.name or ''
