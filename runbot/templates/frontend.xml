@@ -76,8 +76,9 @@
       <div t-attf-class="batch_tile {{'more' if more else 'nomore'}}">
         <div t-attf-class="card bg-{{klass}}-light">
           <div class="batch_header">
-            <a t-attf-href="/runbot/batch/#{batch.id}" t-attf-class="badge badge-light" title="View Batch">
+            <a t-attf-href="/runbot/batch/#{batch.id}" t-attf-class="badge badge-{{'warning' if batch.has_warning else 'light'}}" title="View Batch">
               <t t-esc="batch.get_formated_age()"/>
+              <i class="fa fa-exclamation-triangle" t-if="batch.has_warning"/>
               <i class="arrow fa fa-window-maximize"/>
             </a>
           </div>
