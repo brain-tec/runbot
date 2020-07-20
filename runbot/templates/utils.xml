@@ -139,7 +139,7 @@
             <t t-set="bu" t-value="slot.build_id"/>
             <t t-set="color" t-value="bu.get_color_class()"/>
             <div t-attf-class="btn-group btn-group-ssm slot_button_group">
-                <span t-attf-class="btn btn-{{color}} disabled">
+                <span t-attf-class="btn btn-{{color}} disabled" t-att-title="slot.link_type">
                     <i t-attf-class="fa fa-{{slot.fa_link_type()}}"/>
                 </span>
                 <a t-if="bu" t-attf-href="/runbot/build/#{bu.id}" t-attf-class="btn btn-default slot_name">
