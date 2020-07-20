@@ -126,7 +126,15 @@ class Runbot(Controller):
                 domain.append(('sticky', '=', False))
 
             if search:
-                search_domain = expression.OR([[('name', 'like', search_elem)] for search_elem in search.split("|")])
+                search_terms = {elem.strip() for elem in search.split('|')}
+                pr_search_terms = {elem for elem in search_terms if elem.isnumeric()}
+                bundle_search_terms = search_terms - pr_search_terms
+                search_domain = [[('name', 'like', search_elem)] for search_elem in bundle_search_terms]
+                if pr_search_terms:
+                    pr_branch_ids = request.env['runbot.branch'].search([('is_pr', '=', True), ('name', 'in', list(pr_search_terms))])
+                    pr_search_domain = [[('id', '=', pr.bundle_id.id)] for pr in pr_branch_ids]
+                    search_domain += pr_search_domain
+                search_domain = expression.OR(search_domain)
                 domain = expression.AND([domain, search_domain])
 
             e = expression.expression(domain, request.env['runbot.bundle'])
