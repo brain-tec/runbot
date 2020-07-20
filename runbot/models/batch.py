@@ -23,6 +23,7 @@ class Batch(models.Model):
     age = fields.Integer(compute='_compute_age', string='Build age')
     category_id = fields.Many2one('runbot.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
     log_ids = fields.One2many('runbot.batch.log', 'batch_id')
+    has_warning = fields.Boolean("Has warning")
 
     @api.depends('commit_link_ids')
     def _compute_commit_ids(self):
@@ -117,6 +118,10 @@ class Batch(models.Model):
         return link_type, build
 
     def _prepare(self):
+        for level, message in self.bundle_id.consistency_warning():
+            if level == "warning":
+                self.warning("Bundle warning: %s" % message)
+
         self.state = 'ready'
         _logger.info('Preparing batch %s', self.id)
 
@@ -335,6 +340,7 @@ class Batch(models.Model):
                 self.warning('Commit info failed between %s and %s', commit.name, base_head.name)
 
     def warning(self, message, *args):
+        self.has_warning = True
         _logger.warning('batch %s: ' + message, self.id, *args)
         self._log(message, *args, level='WARNING')
 
