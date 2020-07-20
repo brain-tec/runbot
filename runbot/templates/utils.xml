@@ -197,8 +197,8 @@
         </template>
 
         <template id="runbot.build_menu">
-            <button t-attf-class="btn dropdown-toggle" data-toggle="dropdown" title="Build options" aria-label="Build options" aria-expanded="false">
-                <i t-attf-class="fa {{'fa-spinner' if bu.global_state == 'pending' else 'fa-cog'}} {{'' if bu.global_state in ('done', 'running') else 'fa-spin'}} fa-fw"/>
+            <button t-attf-class="btn btn-default dropdown-toggle" data-toggle="dropdown" title="Build options" aria-label="Build options" aria-expanded="false">
+                <i t-attf-class="fa  {{'fa-spinner' if bu.global_state == 'pending' else 'fa-cog'}} {{'' if bu.global_state in ('done', 'running') else 'fa-spin'}} fa-fw"/>
                 <span class="caret"/>
             </button>
             <div class="dropdown-menu dropdown-menu-right" role="menu">
