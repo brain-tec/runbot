@@ -49,7 +49,7 @@
                                         <i class="fa fa-fw fa-clock-o" t-if="commit_link.match_type == 'base_head'" title="This commit is the head of a base branch"/>
                                         <span class="label" t-esc="commit.dname"/>
                                     </a>
-                                    <a t-att-href="'https://%s/commit/%s' % (commit_link.branch_id.remote_id.base_url, commit_link.commit_id.name)" class="btn btn-sm text-left" title="View Commit on Github"><i class="fa fa-github"/></a>
+                                    <a t-att-href="'https://%s/commit/%s' % (commit_link.branch_id.remote_id.base_url, commit_link.commit_id.name)" class="badge badge-light" title="View Commit on Github"><i class="fa fa-github"/></a>
                                     <small t-if="commit_link.match_type and commit_link.match_type.startswith('base')">
                                         from base:
                                         <span t-esc="commit_link.branch_id.name"/>
