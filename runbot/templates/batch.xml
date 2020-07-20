@@ -44,7 +44,7 @@
                                     <span/>
                                     <a t-attf-href="/runbot/commit/#{commit.id}">
                                         <i class="fa fa-fw fa-hashtag" t-if="commit_link.match_type == 'new'" title="This commit is a new head"/>
-                                        <i class="fa fa-fw fa-link" t-if="commit_link.match_type == 'head'" title="This commit is a existing head"/>
+                                        <i class="fa fa-fw fa-link" t-if="commit_link.match_type == 'head'" title="This commit is an existing head from bundle branches"/>
                                         <i class="fa fa-fw fa-code-fork" t-if="commit_link.match_type == 'base_match'" title="This commit is matched from a base batch with matching merge_base"/>
                                         <i class="fa fa-fw fa-clock-o" t-if="commit_link.match_type == 'base_head'" title="This commit is the head of a base branch"/>
                                         <span class="label" t-esc="commit.dname"/>
