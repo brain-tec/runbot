@@ -10,6 +10,9 @@
                                 <span class="text-center" style="font-size: 18px;">
                                     <t t-esc="bundle.name"/>
                                     <i t-if="bundle.sticky" class="fa fa-star" style="color: #f0ad4e" />
+                                    <a groups="runbot.group_user" t-attf-href="/web/#id={{bundle.id}}&amp;view_type=form&amp;model=runbot.bundle" class="btn btn-default btn-sm" target="new" title="View in Backend">
+                                      <i class="fa fa-list"/>
+                                    </a>
                                 </span>
                                 <span class="pull-right">
                                     <t t-call="website.pager" />
@@ -64,7 +67,6 @@
                             <div class="batch_row" t-foreach="batchs" t-as="batch">
                                 <t t-call="runbot.batch_tile"/>
                             </div>
-                            
                         </div>
                     </div>
                 </div>

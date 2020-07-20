@@ -50,6 +50,7 @@
                         </t>
                       </t>
                     </div>
+                    <t t-call="runbot.branch_github_menu"/>
                   </div>
                   <div class="col-md-9 col-lg-10">
                     <div class="row no-gutters">
