@@ -75,6 +75,7 @@
                     <a t-attf-href="/runbot/commit/{{build_commit.commit_id.id}}">
                       <t t-esc="build_commit.commit_id.dname"/>
                     </a>
+                    <a t-att-href="'https://%s/commit/%s' % (build_commit.branch_id.remote_id.base_url, build_commit.commit_id.name)" class="btn btn-sm text-left" title="View Commit on Github"><i class="fa fa-github"/></a>
                     <t t-if="build_commit.match_type in ('default', 'pr_target', 'prefix') ">
                       from base branch
                       <br/>
