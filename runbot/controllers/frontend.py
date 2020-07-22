@@ -293,8 +293,10 @@ class Runbot(Controller):
         return request.render('runbot.branch', context)
 
     @route('/runbot/glances', type='http', auth='public', website=True)
-    def glances(self, **kwargs):
-        bundles = request.env['runbot.bundle'].search([('sticky', '=', True)]) # NOTE we dont filter on project
+    @route('/runbot/glances/<int:project_id>', type='http', auth='public', website=True)
+    def glances(self, project_id=None, **kwargs):
+        project_ids = [project_id] if project_id else self.env['runbot.project'].search([]).ids # search for access rights
+        bundles = request.env['runbot.bundle'].search([('sticky', '=', True), ('project_id', 'in', project_ids)])
         pending = self._pending()
         qctx = {
             'pending_total': pending[0],
