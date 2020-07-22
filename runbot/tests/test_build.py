@@ -83,7 +83,7 @@ class TestBuildParams(RunbotCaseMinimalSetup):
         self.trigger_server.description = expected_description = "A nice trigger description"
 
         # A commit is found on the dev remote
-        branch_a_name = '10.0-test-something'
+        branch_a_name = 'master-test-something'
         self.push_commit(self.remote_server_dev, branch_a_name, 'nice subject', sha='d0d0caca')
 
         # batch preparation
@@ -102,7 +102,7 @@ class TestBuildParams(RunbotCaseMinimalSetup):
         self.start_patchers()
 
         # A commit is found on the dev remote
-        branch_a_name = '10.0-test-something'
+        branch_a_name = 'master-test-something'
         self.push_commit(self.remote_server_dev, branch_a_name, 'nice subject', sha='d0d0caca')
         # batch preparation
         self.repo_server._update_batches()
@@ -435,7 +435,7 @@ class TestGc(RunbotCaseMinimalSetup):
         })
 
         # A commit is found on the dev remote
-        branch_a_name = '10.0-test-something'
+        branch_a_name = 'master-test-something'
         self.push_commit(self.remote_server_dev, branch_a_name, 'nice subject', sha='d0d0caca')
 
         # batch preparation
@@ -451,7 +451,7 @@ class TestGc(RunbotCaseMinimalSetup):
         self.assertEqual(build_a.global_state, 'pending')
 
         # now another commit is found in another branch
-        branch_b_name = '11.0-test-other-thing'
+        branch_b_name = 'master-test-other-thing'
         self.push_commit(self.remote_server_dev, branch_b_name, 'other subject', sha='cacad0d0')
         self.repo_server._update_batches()
         bundle_b = self.env['runbot.bundle'].search([('name', '=', branch_b_name)])

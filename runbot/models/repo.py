@@ -69,7 +69,13 @@ class Trigger(models.Model):
         self.ensure_one()
         if self.upgrade_step_id:  # this is an upgrade trigger, add corresponding builds
             custom_config = next((trigger_custom.config_id for trigger_custom in bundle.trigger_custom_ids if trigger_custom.trigger_id == self), False)
+            _logger.warning('_reference_builds')
+            _logger.warning(custom_config.name)
+            _logger.warning(custom_config.name)
+            _logger.warning(bundle.trigger_custom_ids)
+            _logger.warning(bundle.self)
             step = self._upgrade_step_from_config(custom_config) if custom_config else self.upgrade_step_id
+            _logger.warning(step.name)
             refs_builds = step._reference_builds(bundle, self)
             return [(4, b.id) for b in refs_builds]
         return []
