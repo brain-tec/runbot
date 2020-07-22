@@ -3261,18 +3261,17 @@ class TestLabelling:
 
             c = repo.make_commit(m, 'replace file contents', None, tree={'a': 'some other content'})
             pr = repo.make_pr(title='gibberish', body='blahblah', target='master', head=c)
+        env.run_crons('runbot_merge.feedback_cron')
+        assert pr.labels == {'seen 🙂', '☐ legal/cla', '☐ ci/runbot'},\
+            "required statuses should be labelled as pending"
 
-        [pr_id] = env['runbot_merge.pull_requests'].search([
-            ('repository.name', '=', repo.name),
-            ('number', '=', pr.number),
-        ])
         with repo:
             repo.post_status(c, 'success', 'legal/cla')
             repo.post_status(c, 'success', 'ci/runbot')
 
         env.run_crons()
 
-        assert pr.labels == {'seen 🙂', 'CI 🤖'}
+        assert pr.labels == {'seen 🙂', 'CI 🤖', '☑ legal/cla', '☑ ci/runbot'}
         with repo:
             # desync state and labels
             pr.labels.remove('CI 🤖')
@@ -3280,7 +3279,7 @@ class TestLabelling:
             pr.post_comment('hansen r+', config['role_reviewer']['token'])
         env.run_crons()
 
-        assert pr.labels == {'seen 🙂', 'CI 🤖', 'r+ 👌', 'merging 👷'},\
+        assert pr.labels == {'seen 🙂', 'CI 🤖', 'r+ 👌', 'merging 👷', '☑ legal/cla', '☑ ci/runbot'},\
             "labels should be resynchronised"
 
     def test_other_tags(self, env, repo, config):
@@ -3295,20 +3294,16 @@ class TestLabelling:
             # "foreign" labels
             pr.labels.update(('L1', 'L2'))
 
-        [pr_id] = env['runbot_merge.pull_requests'].search([
-            ('repository.name', '=', repo.name),
-            ('number', '=', pr.number),
-        ])
         with repo:
             repo.post_status(c, 'success', 'legal/cla')
             repo.post_status(c, 'success', 'ci/runbot')
         env.run_crons()
 
-        assert pr.labels == {'seen 🙂', 'CI 🤖', 'L1', 'L2'}, "should not lose foreign labels"
+        assert pr.labels == {'seen 🙂', 'CI 🤖', '☑ legal/cla', '☑ ci/runbot', 'L1', 'L2'}, "should not lose foreign labels"
 
         with repo:
             pr.post_comment('hansen r+', config['role_reviewer']['token'])
         env.run_crons()
 
-        assert pr.labels == {'seen 🙂', 'CI 🤖', 'r+ 👌', 'merging 👷', 'L1', 'L2'},\
+        assert pr.labels == {'seen 🙂', 'CI 🤖', 'r+ 👌', 'merging 👷', '☑ legal/cla', '☑ ci/runbot', 'L1', 'L2'},\
             "should not lose foreign labels"
