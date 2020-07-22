@@ -173,7 +173,7 @@ class Batch(models.Model):
                 branch_per_repo[repo] = branch
             elif branch_per_repo[repo].head != branch.head:
                 obranch = branch_per_repo[repo]
-                self.warning("Branch %s and branch %s in repo %s don't have the same head: %s ≠ %s", branch.dname, obranch.dname, repo.name, branch.head.name, obranch.head.name)
+                self._log("Branch %s and branch %s in repo %s don't have the same head: %s ≠ %s", branch.dname, obranch.dname, repo.name, branch.head.name, obranch.head.name)
 
         # 1.1 FIND missing commit in bundle heads
         if missing_repos:

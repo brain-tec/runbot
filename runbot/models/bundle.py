@@ -193,7 +193,7 @@ class Bundle(models.Model):
                 else:
                     warnings.append(('warning', 'PR %s targeting wrong version: %s (expecting %s)' % (branch.dname, branch.target_branch_name, self.base_id.name)))
             elif not branch.is_pr and not branch.name.startswith(self.base_id.name) and not self.defined_base_id:
-                warnings.append(('warning', 'Branch %s not strating with version name (%s)' % (branch.dname, self.base_id.name)))
+                warnings.append(('warning', 'Branch %s not starting with version name (%s)' % (branch.dname, self.base_id.name)))
         return warnings
 
 
