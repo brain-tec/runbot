@@ -146,7 +146,7 @@ class Remote(models.Model):
         return res
 
     def _github(self, url, payload=None, ignore_errors=False, nb_tries=2, recursive=False):
-        generator = self._github_generator(url, payload=payload, ignore_errors=ignore_errors, nb_tries=nb_tries, recursive=recursive)
+        generator = self.sudo()._github_generator(url, payload=payload, ignore_errors=ignore_errors, nb_tries=nb_tries, recursive=recursive)
         if recursive:
             return generator
         result = list(generator)
