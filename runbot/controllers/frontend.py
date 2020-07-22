@@ -12,7 +12,7 @@ from werkzeug.exceptions import NotFound, Forbidden
 from odoo.addons.http_routing.models.ir_http import slug
 from odoo.addons.website.controllers.main import QueryURL
 
-from odoo.http import Controller, request, route as o_route
+from odoo.http import Controller, Response, request, route as o_route
 from odoo.osv import expression
 
 _logger = logging.getLogger(__name__)
@@ -34,26 +34,26 @@ def route(routes, **kw):
             kwargs['projects'] = projects
 
             response = f(*args, **kwargs)
+            if isinstance(response, Response):
+                if keep_search and cookie_search and 'search' not in kwargs:
+                    search = cookie_search
+                else:
+                    search = kwargs.get('search', '')
+                if keep_search and cookie_search != search:
+                    response.set_cookie('search', search)
 
-            if keep_search and cookie_search and 'search' not in kwargs:
-                search = cookie_search
-            else:
-                search = kwargs.get('search', '')
-            if keep_search and cookie_search != search:
-                response.set_cookie('search', search)
+                project = response.qcontext.get('project') or projects[0]
 
-            project = response.qcontext.get('project') or projects[0]
-
-            response.qcontext['projects'] = projects
-            response.qcontext['more'] = more
-            response.qcontext['keep_search'] = keep_search
-            response.qcontext['search'] = search
-            response.qcontext['current_path'] = request.httprequest.full_path
-            response.qcontext['refresh'] = refresh
-            response.qcontext['filter_mode'] = filter_mode
-            response.qcontext['qu'] = QueryURL('/runbot/%s' % (slug(project)), path_args=['search'], search=search, refresh=refresh)
-            if 'title' not in response.qcontext:
-                response.qcontext['title'] = 'Runbot %s' % project.name or ''
+                response.qcontext['projects'] = projects
+                response.qcontext['more'] = more
+                response.qcontext['keep_search'] = keep_search
+                response.qcontext['search'] = search
+                response.qcontext['current_path'] = request.httprequest.full_path
+                response.qcontext['refresh'] = refresh
+                response.qcontext['filter_mode'] = filter_mode
+                response.qcontext['qu'] = QueryURL('/runbot/%s' % (slug(project)), path_args=['search'], search=search, refresh=refresh)
+                if 'title' not in response.qcontext:
+                    response.qcontext['title'] = 'Runbot %s' % project.name or ''
 
             return response
         return response_wrap
@@ -126,15 +126,7 @@ class Runbot(Controller):
                 domain.append(('sticky', '=', False))
 
             if search:
-                search_terms = {elem.strip() for elem in search.split('|')}
-                pr_search_terms = {elem for elem in search_terms if elem.isnumeric()}
-                bundle_search_terms = search_terms - pr_search_terms
-                search_domain = [[('name', 'like', search_elem)] for search_elem in bundle_search_terms]
-                if pr_search_terms:
-                    pr_branch_ids = request.env['runbot.branch'].search([('is_pr', '=', True), ('name', 'in', list(pr_search_terms))])
-                    pr_search_domain = [[('id', '=', pr.bundle_id.id)] for pr in pr_branch_ids]
-                    search_domain += pr_search_domain
-                search_domain = expression.OR(search_domain)
+                search_domain = expression.OR([[('name', 'like', search_elem)] for search_elem in search.split("|")])
                 domain = expression.AND([domain, search_domain])
 
             e = expression.expression(domain, request.env['runbot.bundle'])
