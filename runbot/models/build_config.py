@@ -456,6 +456,7 @@ class ConfigStep(models.Model):
                     # note: here we don't consider the upgrade_db config here
                     dbs = build.database_ids.sorted('db_suffix')
                     for db in self._filter_upgrade_database(dbs, upgrade_db.db_pattern):
+                        _logger.warning(db)
                         child = build._add_child({
                             'upgrade_to_build_id': target.id,
                             'upgrade_from_build_id': build,  # always current build
@@ -558,6 +559,7 @@ class ConfigStep(models.Model):
         assert not param.dump_db
         if not self.upgrade_dbs:
             build._log('configure_upgrade', 'No upgrade dbs defined in step %s' % self.name, level='WARN')
+        _logger.warning(source_builds_by_target)
         for target, sources in source_builds_by_target.items():
             for source in sources:
                 for upgrade_db in self.upgrade_dbs:
@@ -569,6 +571,8 @@ class ConfigStep(models.Model):
                             build._log('_run_configure_upgrade', 'No child build found with config %s in %s' % (config_id.name, source.id), level='ERROR')
                         dbs = dump_builds.database_ids.sorted('db_suffix')
                         valid_databases = list(self._filter_upgrade_database(dbs, upgrade_db.db_pattern))
+
+                        _logger.warning('%s %s %s', valid_databases, dbs, upgrade_db.db_pattern)
                         if not valid_databases:
                             build._log('_run_configure_upgrade', 'No datase found for pattern %s' % (upgrade_db.db_pattern), level='ERROR')
                         for db in valid_databases:
