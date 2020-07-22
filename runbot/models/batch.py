@@ -375,7 +375,7 @@ class BatchSlot(models.Model):
     link_type = fields.Selection([('created', 'Build created'), ('matched', 'Existing build matched'), ('rebuild', 'Rebuild')], required=True)  # rebuild type?
     active = fields.Boolean('Attached', default=True)
     skipped = fields.Boolean('Skipped', default=False)
-    # rebuild, what to do: since build ccan be in multiple batch:
+    # rebuild, what to do: since build can be in multiple batch:
     # - replace for all batch?
     # - only available on batch and replace for batch only?
     # - create a new bundle batch will new linked build?
