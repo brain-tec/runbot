@@ -57,15 +57,20 @@ class Trigger(models.Model):
         for trigger in self:
             trigger.upgrade_step_id = False
             if trigger.upgrade_dumps_trigger_id:
-                upgrade_step = next((step_order.step_id for step_order in trigger.config_id.step_order_ids if step_order.step_id._is_upgrade_step()), False)
-                if not upgrade_step:
-                    raise UserError('Upgrade trigger should have a config with step of type Configure Upgrade')
-                trigger.upgrade_step_id = upgrade_step
+                trigger.upgrade_step_id = self._upgrade_step_from_config(trigger.config_id)
+
+    def _upgrade_step_from_config(self, config):
+        upgrade_step = next((step_order.step_id for step_order in config.step_order_ids if step_order.step_id._is_upgrade_step()), False)
+        if not upgrade_step:
+            raise UserError('Upgrade trigger should have a config with step of type Configure Upgrade')
+        return upgrade_step
 
     def _reference_builds(self, bundle):
         self.ensure_one()
         if self.upgrade_step_id:  # this is an upgrade trigger, add corresponding builds
-            refs_builds = self.upgrade_step_id._reference_builds(bundle, self)
+            custom_config = next((trigger_custom.config_id for trigger_custom in bundle.trigger_custom_ids if trigger_custom.trigger_id == self), False)
+            step = self._upgrade_step_from_config(custom_config) if custom_config else self.upgrade_step_id
+            refs_builds = step._reference_builds(bundle, self)
             return [(4, b.id) for b in refs_builds]
         return []
 
