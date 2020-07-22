@@ -17,6 +17,7 @@ RUN set -x ; \
     libsasl2-dev \
     libxslt1-dev \
     node-less \
+    ocrmypdf \
     python \
     python-dev \
     python-pip \
