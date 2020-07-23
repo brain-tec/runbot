@@ -45,7 +45,7 @@ class Hook(http.Controller):
                 ('project_id', '=', branch.remote_id.repo_id.project_id.id)
             ])
             if base:
-                _logger.info('Changing base of bundle %s to %s(%s)' % branch.bundle_id, base.name, base.id)
+                _logger.info('Changing base of bundle %s to %s(%s)', branch.bundle_id, base.name, base.id)
                 branch.bundle_id.defined_base_id = base.id
         else:
             _logger.debug('Ignoring unsupported hook %s %s', event, payload.get('action', ''))
