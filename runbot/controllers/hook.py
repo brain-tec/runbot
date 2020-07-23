@@ -39,7 +39,7 @@ class Hook(http.Controller):
             branch = request.env['runbot.branch'].sudo().search([('remote_id', '=', remote.id), ('name', '=', pr_number)])
             branch._compute_branch_infos(payload.get('pull_request', {}))
             _logger.info('retargeting %s to %s', branch.name, branch.target_branch_name)
-            base = self.env['runbot.bundle'].search([
+            base = request.env['runbot.bundle'].search([
                 ('name', '=', branch.target_branch_name),
                 ('is_base', '=', True),
                 ('project_id', '=', branch.remote_id.repo_id.project_id)
