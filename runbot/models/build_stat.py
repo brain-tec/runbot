@@ -72,7 +72,7 @@ class RunbotBuildStatSql(models.Model):
         self._cr.execute(
             """ CREATE OR REPLACE VIEW runbot_build_stat_sql AS (
             SELECT
-                row_number() OVER() AS id,
+                (stat.id::bigint*(2^32)+bun.id::bigint) AS id,
                 stat.id AS stat_id,
                 stat.key AS key,
                 stat.value AS value,

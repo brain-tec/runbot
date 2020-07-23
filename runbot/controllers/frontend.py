@@ -139,7 +139,7 @@ class Runbot(Controller):
                     (case when sticky then 1 when sticky is null then 2 else 2 end),
                     case when sticky then version_number end collate "C" desc,
                     last_batch desc
-                LIMIT 100""".format(where_clause=where_clause), where_params)
+                LIMIT 40""".format(where_clause=where_clause), where_params)
             bundles = env['runbot.bundle'].browse([r[0] for r in env.cr.fetchall()])
 
             category_id = int(request.httprequest.cookies.get('category') or 0) or request.env['ir.model.data'].xmlid_to_res_id('runbot.default_category')
