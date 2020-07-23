@@ -42,7 +42,7 @@ class Hook(http.Controller):
             base = request.env['runbot.bundle'].search([
                 ('name', '=', branch.target_branch_name),
                 ('is_base', '=', True),
-                ('project_id', '=', branch.remote_id.repo_id.project_id)
+                ('project_id', '=', branch.remote_id.repo_id.project_id.id)
             ])
             if base:
                 _logger.info('Changing base of bundle %s to %s(%s)' % branch.bundle_id, base.name, base.id)
