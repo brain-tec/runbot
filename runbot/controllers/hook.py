@@ -38,13 +38,14 @@ class Hook(http.Controller):
             pr_number = payload.get('pull_request', {}).get('number', '')
             branch = request.env['runbot.branch'].sudo().search([('remote_id', '=', remote.id), ('name', '=', pr_number)])
             branch._compute_branch_infos(payload.get('pull_request', {}))
-
+            _logger.info('retargeting %s to %s', branch.name, branch.target_branch_name)
             base = self.env['runbot.bundle'].search([
                 ('name', '=', branch.target_branch_name),
                 ('is_base', '=', True),
                 ('project_id', '=', branch.remote_id.repo_id.project_id)
             ])
             if base:
+                _logger.info('Changing base of bundle %s to %s(%s)' % branch.bundle_id, base.name, base.id)
                 branch.bundle_id.defined_base_id = base.id
         else:
             _logger.debug('Ignoring unsupported hook %s %s', event, payload.get('action', ''))
