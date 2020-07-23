@@ -264,12 +264,10 @@
                         logs
                     </a>
                 </t>
-                <li t-if="bu.coverage and bu.host">
-                    <a t-attf-href="http://{{bu.host}}/runbot/static/build/#{bu.dest}/coverage/index.html">
-                        <i class="fa fa-file-text-o"/>
-                        Coverage
-                    </a>
-                </li>
+                <a t-if="bu.coverage and bu.host" class="dropdown-item" t-attf-href="http://{{bu.host}}/runbot/static/build/#{bu.dest}/coverage/index.html">
+                    <i class="fa fa-file-text-o"/>
+                    Coverage
+                </a>
                 <t groups="runbot.group_runbot_admin">
                     <div class="dropdown-divider"/>
                     <a class="dropdown-item" t-attf-href="/web/#id={{bu['id']}}&amp;view_type=form&amp;model=runbot.build" target="new">
