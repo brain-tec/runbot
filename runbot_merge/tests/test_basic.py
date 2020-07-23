@@ -39,7 +39,7 @@ def test_trivial_flow(env, repo, page, users, config):
     ])
     assert pr.state == 'opened'
     env.run_crons()
-    assert pr1.labels == {'seen 🙂'}
+    assert pr1.labels == {'seen 🙂', '☐ legal/cla', '☐ ci/runbot'}
     # nothing happened
 
     with repo:
@@ -54,7 +54,7 @@ def test_trivial_flow(env, repo, page, users, config):
     env.run_crons()
     assert pr.state == 'validated'
 
-    assert pr1.labels == {'seen 🙂', 'CI 🤖'}
+    assert pr1.labels == {'seen 🙂', 'CI 🤖', '☑ ci/runbot', '☑ legal/cla'}
 
     with repo:
         pr1.post_comment('hansen r+ rebase-merge', config['role_reviewer']['token'])
@@ -64,7 +64,7 @@ def test_trivial_flow(env, repo, page, users, config):
 
     env.run_crons()
     assert pr.staging_id
-    assert pr1.labels == {'seen 🙂', 'CI 🤖', 'r+ 👌', 'merging 👷'}
+    assert pr1.labels == {'seen 🙂', 'CI 🤖', 'r+ 👌', 'merging 👷', '☑ ci/runbot', '☑ legal/cla'}
 
     with repo:
         # get head of staging branch
@@ -87,16 +87,14 @@ def test_trivial_flow(env, repo, page, users, config):
     p = html.fromstring(page('/runbot_merge'))
     s = p.cssselect('.staging div.dropdown li')
     assert len(s) == 2
-    assert s[0].get('class') == 'bg-success'
-    assert s[0][0].text.strip() == '{}: ci/runbot'.format(repo.name)
-    assert s[1].get('class') == 'bg-danger'
-    assert s[1][0].text.strip() == '{}: ci/lint'.format(repo.name)
+    assert s[1].get('class') == 'bg-success'
+    assert s[1][0].text.strip() == '{}: ci/runbot'.format(repo.name)
 
     assert re.match('^force rebuild', staging_head.message)
 
     assert st.state == 'success'
     assert pr.state == 'merged'
-    assert pr1.labels == {'seen 🙂', 'CI 🤖', 'r+ 👌', 'merged 🎉'}
+    assert pr1.labels == {'seen 🙂', 'CI 🤖', 'r+ 👌', 'merged 🎉', '☑ ci/runbot', '☑ legal/cla'}
 
     master = repo.commit('heads/master')
     # with default-rebase, only one parent is "known"
@@ -358,7 +356,7 @@ def test_staging_conflict(env, repo, config):
         ('number', '=', pr2.number)
     ])
     assert p_2.state == 'ready', "PR2 should not have been staged since there is a pending staging for master"
-    assert pr2.labels == {'seen 🙂', 'CI 🤖', 'r+ 👌'}
+    assert pr2.labels == {'seen 🙂', 'CI 🤖', 'r+ 👌', '☑ ci/runbot', '☑ legal/cla'}
 
     staging_head = repo.commit('heads/staging.master')
     with repo:
@@ -434,7 +432,7 @@ def test_staging_merge_fail(env, repo, users, config):
         ('number', '=', prx.number)
     ])
     assert pr1.state == 'error'
-    assert prx.labels == {'seen 🙂', 'error 🙅'}
+    assert prx.labels == {'seen 🙂', 'error 🙅', '☑ legal/cla', '☑ ci/runbot'}
     assert prx.comments == [
         (users['reviewer'], 'hansen r+ rebase-merge'),
         (users['user'], 'Merge method set to rebase and merge, using the PR as merge commit message'),
@@ -816,7 +814,7 @@ def test_close_staged(env, repo, config):
     assert not pr.staging_id
     assert not env['runbot_merge.stagings'].search([])
     assert pr.state == 'closed'
-    assert prx.labels == {'seen 🙂', 'closed 💔'}
+    assert prx.labels == {'seen 🙂', 'closed 💔', '☑ ci/runbot', '☑ legal/cla'}
 
 def test_forward_port(env, repo, config):
     with repo:
