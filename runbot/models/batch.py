@@ -196,7 +196,8 @@ class Batch(models.Model):
             batches = self.env['runbot.batch'].search([
                 ('bundle_id', '=', bundle.base_id.id),
                 ('commit_link_ids', 'in', link_commit.ids),
-                ('state', '!=', 'preparing')
+                ('state', '!=', 'preparing'),
+                ('category_id', '=', self.category_id.id)
             ])
             if batches:
                 batches = batches.sorted(lambda b: (len(b.commit_ids & merge_base_commits), b.id), reverse=True)
