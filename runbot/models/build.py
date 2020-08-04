@@ -984,7 +984,7 @@ class BuildResult(models.Model):
             if next_index >= len(step_ids):  # final job, build is done
                 return {'active_step': False, 'local_state': 'done'}
             new_step = step_ids[next_index]  # job to do, state is job_state (testing or running)
-            if new_step.filter_domain and not self.filtered_domain(safe_eval(new_step.filter_domain)):
+            if new_step.domain_filter and not self.filtered_domain(safe_eval(new_step.domain_filter)):
                 next_index += 1
                 continue
             break
