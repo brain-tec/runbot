@@ -24,7 +24,8 @@ class Config(models.Model):
     _description = "Build config"
     _inherit = "mail.thread"
 
-    name = fields.Char('Config name', required=True, unique=True, tracking=True, help="Unique name for config please use trigram as postfix for custom configs")
+    name = fields.Char('Config name', required=True, tracking=True, help="Unique name for config please use trigram as postfix for custom configs")
+
     description = fields.Char('Config description')
     step_order_ids = fields.One2many('runbot.build.config.step.order', 'config_id', copy=True)
     protected = fields.Boolean('Protected', default=False, tracking=True)
@@ -99,6 +100,7 @@ class ConfigStep(models.Model):
 
     # general info
     name = fields.Char('Step name', required=True, unique=True, tracking=True, help="Unique name for step please use trigram as postfix for custom step_ids")
+    domain_filter = fields.Char('Domain filter', tracking=True)
     job_type = fields.Selection([
         ('install_odoo', 'Test odoo'),
         ('run_odoo', 'Run odoo'),

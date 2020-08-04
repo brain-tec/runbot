@@ -15,6 +15,7 @@ from odoo import models, fields, api
 from odoo.exceptions import UserError, ValidationError
 from odoo.http import request
 from odoo.tools import appdirs
+from odoo.tools.safe_eval import safe_eval
 from collections import defaultdict
 from psycopg2 import sql
 from subprocess import CalledProcessError
@@ -978,10 +979,15 @@ class BuildResult(models.Model):
             return {'active_step': False, 'local_state': 'done'}
 
         next_index = step_ids.index(self.active_step) + 1 if self.active_step else 0
-        if next_index >= len(step_ids):  # final job, build is done
-            return {'active_step': False, 'local_state': 'done'}
 
-        new_step = step_ids[next_index]  # job to do, state is job_state (testing or running)
+        while True:
+            if next_index >= len(step_ids):  # final job, build is done
+                return {'active_step': False, 'local_state': 'done'}
+            new_step = step_ids[next_index]  # job to do, state is job_state (testing or running)
+            if new_step.filter_domain and not self.filtered_domain(safe_eval(new_step.filter_domain)):
+                next_index += 1
+                continue
+            break
         return {'active_step': new_step.id, 'local_state': new_step._step_state()}
 
     def _get_py_version(self):
