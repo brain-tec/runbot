@@ -589,11 +589,10 @@ class ConfigStep(models.Model):
                                 'config_id': self.upgrade_config_id
                             })
 
-                            child.description = 'Testing migration from %s to %s using db [%s](%s) (%s)' % (
+                            child.description = 'Testing migration from %s to %s using db %s (%s)' % (
                                 source.params_id.version_id.name,
                                 target.params_id.version_id.name,
                                 db.name,
-                                db.build_id.build_url,
                                 config_id.name
                             )
                         # TODO log somewhere if no db at all is found for a db_suffix
@@ -670,8 +669,7 @@ class ConfigStep(models.Model):
             download_db_name = '%s-%s' % (dump_build.dest, download_db_suffix)
             zip_name = '%s.zip' % download_db_name
             dump_url = '%s%s' % (dump_build.http_log_url(), zip_name)
-            build._log('test-migration', 'Using dump from build %s' % dump_build.id, log_type='subbuild', path=str(dump_build.id))  # TODO replace by markdown
-            build._log('test-migration', '[template](%s)' % dump_url, log_type='markdown')
+            build._log('test-migration', 'Restoring dump [%s](%s) from build [%s](%s)' % (zip_name, dump_url, dump_build.id, dump_build.build_url), log_type='markdown')
         restore_suffix = self.restore_rename_db_suffix or params.dump_db.db_suffix
         assert restore_suffix  # TODO check dump_url case
         restore_db_name = '%s-%s' % (build.dest, restore_suffix)

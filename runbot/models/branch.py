@@ -66,6 +66,8 @@ class Branch(models.Model):
                     branch.reference_name = name
                 else:
                     branch.reference_name = branch.pull_head_name  # repo is not known, not in repo list must be an external pr, so use complete label
+                    #if ':patch-' in branch.pull_head_name:
+                    #    branch.reference_name = '%s~%s' % (branch.pull_head_name, branch.name)
             else:
                 branch.reference_name = branch.name
 
