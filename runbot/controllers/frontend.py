@@ -343,7 +343,7 @@ class Runbot(Controller):
             '/runbot/errors/<int:error_id>'], type='http', auth='user', website=True)
     def build_errors(self, error_id=None, **kwargs):
         build_errors = request.env['runbot.build.error'].search([('random', '=', True), ('parent_id', '=', False)]).filtered(lambda rec: len(rec.children_build_ids) > 1)
-        build_errors = build_errors.sorted(lambda rec: rec.last_seen_date, reverse=True)
+        build_errors = build_errors.sorted(lambda rec: (rec.last_seen_date.date(), rec.build_count), reverse=True)
 
         qctx = {
             'build_errors': build_errors,
