@@ -32,6 +32,7 @@
         'templates/git.xml',
         'templates/nginx.xml',
         'templates/utils.xml',
+        'templates/build_error.xml',
 
         'views/branch_views.xml',
         'views/build_error_views.xml',

@@ -29,6 +29,8 @@ def route(routes, **kw):
             keep_search = request.httprequest.cookies.get('keep_search', False) == '1'
             cookie_search = request.httprequest.cookies.get('search', '')
             refresh = kwargs.get('refresh', False)
+            nb_build_errors = request.env['runbot.build.error'].search_count([('random', '=', True), ('parent_id', '=', False)])
+            nb_assigned_errors = request.env['runbot.build.error'].search_count([('random', '=', True), ('parent_id', '=', False), ('responsible', '=', request.env.user.id)])
 
             kwargs['more'] = more
             kwargs['projects'] = projects
@@ -54,6 +56,8 @@ def route(routes, **kw):
                 response.qcontext['qu'] = QueryURL('/runbot/%s' % (slug(project)), path_args=['search'], search=search, refresh=refresh)
                 if 'title' not in response.qcontext:
                     response.qcontext['title'] = 'Runbot %s' % project.name or ''
+                response.qcontext['nb_build_errors'] = nb_build_errors
+                response.qcontext['nb_assigned_errors'] = nb_assigned_errors
 
             return response
         return response_wrap
@@ -334,3 +338,15 @@ class Runbot(Controller):
             'title': 'monitoring'
         }
         return request.render(view_id if view_id else "runbot.monitoring", qctx)
+
+    @route(['/runbot/errors',
+            '/runbot/errors/<int:error_id>'], type='http', auth='user', website=True)
+    def build_errors(self, error_id=None, **kwargs):
+        build_errors = request.env['runbot.build.error'].search([('random', '=', True), ('parent_id', '=', False)]).filtered(lambda rec: len(rec.children_build_ids) > 1)
+        build_errors = build_errors.sorted(lambda rec: rec.last_seen_date, reverse=True)
+
+        qctx = {
+            'build_errors': build_errors,
+            'title': 'Build Errors'
+        }
+        return request.render('runbot.build_error', qctx)

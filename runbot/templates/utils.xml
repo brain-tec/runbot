@@ -79,22 +79,38 @@
                                 </div>
                             </li>
                             <li class="nav-item divider" t-ignore="true"/>
-                            <li class="nav-item dropdown" t-ignore="true" t-if="not user_id._is_public()">
-                                <a href="#" class="nav-link dropdown-toggle" data-toggle="dropdown">
+                            <t t-if="not user_id._is_public()">
+                                <t t-if="nb_assigned_errors and nb_assigned_errors > 0">
+                                    <li class="nav-item divider"/>
+                                    <li class="nav-item">
+                                        <a href="/runbot/errors" class="nav-link text-danger" t-attf-title="You have {{nb_assigned_errors}} random bug assigned"><i class="fa fa-bug"/><t t-esc="nb_assigned_errors"/></a>
+                                    </li>
+                                </t>
+                                <t t-elif="nb_build_errors and nb_build_errors > 0">
+                                    <li class="nav-item divider"/>
+                                    <li class="nav-item">
+                                        <a href="/runbot/errors" class="nav-link" title="Random Bugs"><i class="fa fa-bug"/></a>
+                                    </li>
+                                </t>
+                                <li class="nav-item dropdown" t-ignore="true">
+                                    <a href="#" class="nav-link dropdown-toggle" data-toggle="dropdown">
+                                        <b>
+                                            <span t-esc="user_id.name[:23] + '...' if user_id.name and len(user_id.name) &gt; 25 else user_id.name"/>
+                                        </b>
+                                    </a>
+                                    <div class="dropdown-menu js_usermenu" role="menu">
+                                        <a class="dropdown-item" id="o_logout" role="menuitem" t-attf-href="/web/session/logout?redirect=/">Logout</a>
+                                        <a class="dropdown-item" role="menuitem" t-attf-href="/web">Web</a>
+                                    </div>
+                                </li>
+                            </t>
+                            <t t-else="">
+                                <li class="nav-item dropdown" t-ignore="true">
                                     <b>
-                                        <span t-esc="user_id.name[:23] + '...' if user_id.name and len(user_id.name) &gt; 25 else user_id.name"/>
+                                        <a class="nav-link" t-attf-href="/web/login?redirect=/">Login</a>
                                     </b>
-                                </a>
-                                <div class="dropdown-menu js_usermenu" role="menu">
-                                    <a class="dropdown-item" id="o_logout" role="menuitem" t-attf-href="/web/session/logout?redirect=/">Logout</a>
-                                    <a class="dropdown-item" role="menuitem" t-attf-href="/web">Web</a>
-                                </div>
-                            </li>
-                            <li class="nav-item dropdown" t-ignore="true" t-else="">
-                                <b>
-                                    <a class="nav-link" t-attf-href="/web/login?redirect=/">Login</a>
-                                </b>
-                            </li>
+                                </li>
+                            </t>
                         </ul>
                         <t t-raw="nav_form or ''">
                         </t>
