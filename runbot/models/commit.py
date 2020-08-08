@@ -63,7 +63,7 @@ class Commit(models.Model):
             _logger.info('Skipping already sent status %s:%s for %s', context, state, self.name)
             return
         last_status = Status.create({
-            'build_id': build.id,
+            'build_id': build.id if build else False,
             'commit_id': self.id,
             'context': context,
             'state': state,
