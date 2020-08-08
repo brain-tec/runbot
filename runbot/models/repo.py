@@ -232,6 +232,7 @@ class Repo(models.Model):
     get_ref_time = fields.Float('Last refs db update', compute='_compute_get_ref_time')
     trigger_ids = fields.Many2many('runbot.trigger', relation='runbot_trigger_triggers', readonly=True)
     forbidden_regex = fields.Char('Forbidden regex', help="Regex that forid bundle creation if branch name is matching", tracking=True)
+    invalid_branch_message = fields.Char('Forbidden branch message', tracking=True)
 
     def _compute_get_ref_time(self):
         self.env.cr.execute("""

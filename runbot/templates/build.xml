@@ -212,6 +212,8 @@
                 <th>Type</th>
                 <th>Message</th>
               </tr>
+
+              <t t-set="commit_link_per_name" t-value="{commit_link.commit_id.repo_id.name:commit_link for commit_link in build.params_id.commit_link_ids}"/>
               <t t-foreach="build.sudo().log_ids" t-as="l">
                 <t t-set="subbuild" t-value="(([child for child in build.children_ids if child.id == int(l.path)] if l.type == 'subbuild' else False) or [build.browse()])[0]"/>
                 <t t-set="logclass" t-value="dict(CRITICAL='danger', ERROR='danger', WARNING='warning', OK='success', SEPARATOR='separator').get(l.level)"/>
@@ -239,13 +241,17 @@
                           <t t-esc="l.path"/>
                         </a>
                       </t>
-                      <a t-else="">
-                        <t t-esc="l.name"/>
-                        :
-                        <t t-esc="l.line"/>
-                      </a>
-                      <t t-esc="l.func"/>
-                      <!--  t-attf-href="https://{{repo.base_url}}/blob/{{build['name']}}/{{l.path}}#L{{l.line}}" -->
+                      <t t-else="">
+                        <t t-set="repo_name" t-value="l.path.replace('/data/build/', '').split('/')[0] "/>
+                        <t t-set="href" t-value=""/>
+                        <t t-if="repo_name in commit_link_per_name">
+                          <t t-set="repo_base_url" t-value="commit_link_per_name[repo_name].branch_id.remote_id.base_url if repo_name in commit_link_per_name else ''"/>
+                          <t t-set="commit_hash" t-value="commit_link_per_name[repo_name].commit_id.name if repo_name in commit_link_per_name else ''"/>
+                          <t t-set="path" t-value="l.path.replace('/data/build/%s/' % repo_name, '')"/>
+                          <t t-set="href" t-value="'https://%s/blob/%s/%s#L%s' % (repo_base_url, commit_hash, path, l.line)"/>
+                        </t>
+                        <a t-att-href="href" t-att-title="l.func"><t t-esc="l.name"/>:<t t-esc="l.line"/></a>
+                      </t>
                     </t>
                     <t t-if="l.type == 'link' and len(l.message.split('$$')) == 3">
                       <t t-set="message" t-value="l.message.split('$$')"/>
@@ -281,12 +287,7 @@
                                 <td t-att-class="dict(CRITICAL='danger', ERROR='danger', WARNING='warning', OK='success', SEPARATOR='separator').get(sl.level)">
                                   <t t-if="sl.type == 'server'">
                                     <!--t-attf-href="https://{{repo.base_url}}/blob/{{build['name']}}/{{sl.path}}#L{{sl.line}}"-->
-                                    <a>
-                                      <t t-esc="sl.name"/>
-                                      :
-                                      <t t-esc="sl.line"/>
-                                    </a>
-                                    <t t-esc="sl.func"/>
+                                    <a t-att-title="sl.func"><t t-esc="sl.name"/>:<t t-esc="sl.line"/></a>
                                   </t>
                                   <t t-if="'\n' not in sl.message" t-esc="sl.message"/>
                                   <pre t-if="'\n' in sl.message" style="margin:0;padding:0; border: none;">
