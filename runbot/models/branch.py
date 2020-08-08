@@ -147,7 +147,6 @@ class Branch(models.Model):
             elif name and branch.remote_id and branch.remote_id.repo_id._is_branch_forbidden(name):
                 _logger.warning('Trying to add a forbidden branch, falling back on dummy bundle')
                 bundle = dummy
-                branch.head._github_status(False, "Branch naming", 'failure', False, branch.remote_id.repo_id.invalid_branch_message or "This branch name is incorrect. Branch name should be prefixed with a valid version")
             elif bundle.is_base and branch.is_pr:
                 _logger.warning('Trying to add pr to base bundle, falling back on dummy bundle')
                 bundle = dummy

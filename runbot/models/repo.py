@@ -466,6 +466,10 @@ class Repo(models.Model):
                         'date': dateutil.parser.parse(date[:19]),
                     })
                 branch.head = commit
+                if branch.reference_name and branch.remote_id and branch.remote_id.repo_id._is_branch_forbidden(branch.reference_name ):
+                    message = "This branch name is incorrect. Branch name should be prefixed with a valid version"
+                    message = branch.remote_id.repo_id.invalid_branch_message or message
+                    branch.head._github_status(False, "Branch naming", 'failure', False, message)
 
                 if not self.trigger_ids:
                     continue
