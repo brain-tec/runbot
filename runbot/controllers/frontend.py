@@ -31,7 +31,7 @@ def route(routes, **kw):
             refresh = kwargs.get('refresh', False)
             nb_build_errors = request.env['runbot.build.error'].search_count([('random', '=', True), ('parent_id', '=', False)])
             nb_assigned_errors = request.env['runbot.build.error'].search_count([('random', '=', True), ('parent_id', '=', False), ('responsible', '=', request.env.user.id)])
-
+            # TODO for assigned why not all assigned?
             kwargs['more'] = more
             kwargs['projects'] = projects
 
@@ -242,7 +242,7 @@ class Runbot(Controller):
         if status != last_status:
             raise Forbidden("Only the last status can be resent")
         if last_status.sent_date and (datetime.datetime.now() - last_status.sent_date).seconds > 60:  # ensure at least 60sec between two resend
-            new_status = status.copy()
+            new_status = status.sudo().copy()
             new_status.description = 'Status resent by %s' % request.env.user.name
             new_status._send()
             _logger.info('github status %s resent by %s', status_id, request.env.user.name)

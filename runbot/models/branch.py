@@ -33,9 +33,7 @@ class Branch(models.Model):
     branch_url = fields.Char(compute='_compute_branch_url', string='Branch url', readonly=1)
     dname = fields.Char('Display name', compute='_compute_dname', search='_search_dname')
 
-    # alive = fields.Boolean('Alive', default=True)
-    # TODO branch exist or not, pr is open or not. Should replace old _is_on_remote behaviour
-
+    alive = fields.Boolean('Alive', default=True)
 
     # TODO add constrains head.repo_id == branch.remote_id.repo_id
 

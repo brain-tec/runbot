@@ -150,6 +150,9 @@ class Batch(models.Model):
                 for branch, commit in branch_commits.items():  # branch first in case pr is closed.
                     nonlocal missing_repos
                     if commit.repo_id in missing_repos:
+                        if not branch.alive:
+                            self._log("Skipping dead branch %s" % branch.name)
+                            continue
                         values = {
                             'commit_id': commit.id,
                             'match_type': match_type,
@@ -161,19 +164,19 @@ class Batch(models.Model):
                         self.write({'commit_link_ids': [(0, 0, values)]})
                         missing_repos -= commit.repo_id
                         # TODO manage multiple branch in same repo: chose best one and
-                        # add warning if different commit are found
                         # add warning if bundle has warnings
 
         # CHECK branch heads consistency
         branch_per_repo = {}
-        for branch in bundle.branch_ids.sorted('is_pr', reverse=True):
-            commit = branch.head
-            repo = commit.repo_id
-            if repo not in branch_per_repo:
-                branch_per_repo[repo] = branch
-            elif branch_per_repo[repo].head != branch.head:
-                obranch = branch_per_repo[repo]
-                self._log("Branch %s and branch %s in repo %s don't have the same head: %s ≠ %s", branch.dname, obranch.dname, repo.name, branch.head.name, obranch.head.name)
+        for branch in bundle.branch_ids.sorted(lambda b: (b.head.id, b.is_pr), reverse=True):
+            if branch.alive:
+                commit = branch.head
+                repo = commit.repo_id
+                if repo not in branch_per_repo:
+                    branch_per_repo[repo] = branch
+                elif branch_per_repo[repo].head != branch.head and branch.alive:
+                    obranch = branch_per_repo[repo]
+                    self._log("Branch %s and branch %s in repo %s don't have the same head: %s ≠ %s", branch.dname, obranch.dname, repo.name, branch.head.name, obranch.head.name)
 
         # 1.1 FIND missing commit in bundle heads
         if missing_repos:
@@ -273,7 +276,7 @@ class Batch(models.Model):
 
             build = self.env['runbot.build']
             link_type = 'created'
-            if (trigger.repo_ids & bundle_repos) or bundle.build_all or bundle.sticky:  # only auto link build if bundle has a branch for this trigger
+            if ((trigger.repo_ids & bundle_repos) or bundle.build_all or bundle.sticky) and not trigger.manual:  # only auto link build if bundle has a branch for this trigger
                 link_type, build = self._create_build(params)
             self.env['runbot.batch.slot'].create({
                 'batch_id': self.id,

@@ -18,6 +18,7 @@
                 <field name="pull_head_name"/>
                 <field name="target_branch_name"/>
                 <field name="head"/>
+                <field name="alive"/>
               </group>
             </sheet>
           </form>

@@ -46,6 +46,7 @@ class Trigger(models.Model):
     category_id = fields.Many2one('runbot.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
     version_domain = fields.Char(string="Version domain")
     hide = fields.Boolean('Hide batch on main page')  # TODO adapt and fix (cla, ...)
+    manual = fields.Boolean('Only start trigger manually', default=False)
 
     upgrade_dumps_trigger_id = fields.Many2one('runbot.trigger', string= 'Template/complement trigger', tracking=True)
     upgrade_step_id = fields.Many2one('runbot.build.config.step', compute="_compute_upgrade_step_id", store=True)
@@ -466,10 +467,16 @@ class Repo(models.Model):
                         'date': dateutil.parser.parse(date[:19]),
                     })
                 branch.head = commit
+                branch.alive = True
+                # Not perfect, il some case a pr can be closed but still visible in repo.
+                # The head wont change but on creation the branch will be set alive even if git into said pr is closed
+                # It is still better to have false open than false closed
+
                 if branch.reference_name and branch.remote_id and branch.remote_id.repo_id._is_branch_forbidden(branch.reference_name ):
                     message = "This branch name is incorrect. Branch name should be prefixed with a valid version"
                     message = branch.remote_id.repo_id.invalid_branch_message or message
                     branch.head._github_status(False, "Branch naming", 'failure', False, message)
+                    # todo add check to send status only if commit is not head of another branch?
 
                 if not self.trigger_ids:
                     continue
@@ -566,6 +573,7 @@ class Repo(models.Model):
                 delay = delay * 1.5 if delay else 0.5
                 if try_count > 4:
                     message = 'Failed to fetch repo %s: %s' % (self.name, e.output.decode())
+                    # TODO log on host chatter + runbot.warning
                     _logger.exception(message)
                     host = self.env['runbot.host']._get_current()
                     host.disable()
