@@ -306,7 +306,7 @@ class Repo(models.Model):
             config_args = ['-c', 'core.sshCommand="ssh -i %s/.ssh/%s"' % (str(Path.home()), self.identity_file)]
         cmd = ['git', '-C', self.path] + config_args + cmd
         _logger.info("git command: %s", ' '.join(cmd))
-        return subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode()
+        return subprocess.check_output(' '.join(cmd), shell=True, stderr=subprocess.STDOUT).decode()
 
     def _git_export(self, sha):
         """Export a git repo into a sources"""
