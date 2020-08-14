@@ -54,7 +54,7 @@
                   </div>
                   <div class="col-md-9 col-lg-10">
                     <div class="row no-gutters">
-                      <div t-foreach="bundle.last_batchs" t-as="batch" class="col-md-6 col-xl-3 {{'d-none d-xl-block' if batch_index > 1 else ''}}">
+                      <div t-foreach="bundle.last_batchs" t-as="batch" t-attf-class="col-md-6 col-xl-3 {{'d-none d-xl-block' if batch_index > 1 else ''}}">
                         <t t-call="runbot.batch_tile"/>
                       </div>
                     </div>

@@ -9,6 +9,8 @@ import time
 import dateutil
 import requests
 
+from pathlib import Path
+
 from odoo import models, fields, api
 from ..common import os, RunbotException
 from odoo.exceptions import UserError
@@ -301,7 +303,7 @@ class Repo(models.Model):
         self.ensure_one()
         config_args = []
         if self.identity_file:
-            config_args = ['-c', 'core.sshCommand="ssh -i ~/.ssh/%s"' % self.identity_file]
+            config_args = ['-c', 'core.sshCommand="ssh -i %s/.ssh/%s"' % (str(Path.home()), self.identity_file)]
         cmd = ['git', '-C', self.path] + config_args + cmd
         _logger.info("git command: %s", ' '.join(cmd))
         return subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode()

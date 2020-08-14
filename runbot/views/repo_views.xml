@@ -19,6 +19,7 @@
                 <field name="config_id"/>
                 <field name="version_domain" widget="domain" options="{'model': 'runbot.version', 'in_dialog': True}"/>
                 <field name="hide"/>
+                <field name="manual"/>
                 <field name="upgrade_dumps_trigger_id"/>
                 <field name="upgrade_step_id"/>
                 <field name="ci_context"/>
