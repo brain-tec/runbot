@@ -78,7 +78,7 @@
                 <td>
                   <a t-att-href="status.target_url">
                     build
-                    <t t-esc="status.target_url.split('/')[-1]" />
+                    <t t-if="status.target_url" t-esc="status.target_url.split('/')[-1]" />
                   </a>
                 </td>
                 <td groups="runbot.group_user">
