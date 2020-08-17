@@ -9,10 +9,11 @@ _logger = logging.getLogger(__name__)
 class Version(models.Model):
     _name = 'runbot.version'
     _description = "Version"
-    _order = 'number desc,id'
+    _order = 'sequence desc, number desc,id'
 
     name = fields.Char('Version name')
     number = fields.Char('Version number', compute='_compute_version_number', store=True, help="Usefull to sort by version")
+    sequence = fields.Integer('sequence')
     is_major = fields.Char('Is major version', compute='_compute_version_number', store=True)
 
     base_bundle_id = fields.Many2one('runbot.bundle', compute='_compute_base_bundle_id')
@@ -52,7 +53,7 @@ class Version(models.Model):
 
     @api.depends('is_major', 'number')
     def _compute_version_relations(self):
-        all_versions = self.search([], order='number')
+        all_versions = self.search([], order='sequence, number')
         for version in self:
             version.previous_major_version_id = next(
                 (
