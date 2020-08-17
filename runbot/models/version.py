@@ -63,7 +63,7 @@ class Version(models.Model):
                 ), self.browse())
             if version.previous_major_version_id:
                 version.intermediate_version_ids = all_versions.filtered(
-                    lambda v, current=version: v.number > current.previous_major_version_id.number and v.number < current.number and not v.sequence <= current.sequence and v.sequence >= current.previous_major_version_id.sequence
+                    lambda v, current=version: v.number > current.previous_major_version_id.number and v.number < current.number and v.sequence <= current.sequence and v.sequence >= current.previous_major_version_id.sequence
                     )
             else:
                 version.intermediate_version_ids = all_versions.filtered(
