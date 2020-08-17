@@ -232,6 +232,7 @@ class Repo(models.Model):
                             default='poll',
                             string="Mode", required=True, help="hook: Wait for webhook on /runbot/hook/<id> i.e. github push event", tracking=True)
     hook_time = fields.Float('Last hook time', compute='_compute_hook_time')
+    last_processed_hook_time = fields.Float('Last processed hook time')
     get_ref_time = fields.Float('Last refs db update', compute='_compute_get_ref_time')
     trigger_ids = fields.Many2many('runbot.trigger', relation='runbot_trigger_triggers', readonly=True)
     forbidden_regex = fields.Char('Forbidden regex', help="Regex that forid bundle creation if branch name is matching", tracking=True)
@@ -550,8 +551,9 @@ class Repo(models.Model):
         if not force and os.path.isfile(fname_fetch_head):
             fetch_time = os.path.getmtime(fname_fetch_head)
             if repo.mode == 'hook':
-                if not repo.hook_time or repo.hook_time < fetch_time:
+                if not repo.hook_time and repo.last_processed_hook_time and repo.hook_time <= repo.last_processed_hook_time:
                     return False
+                repo.last_processed_hook_time = repo.hook_time
             if repo.mode == 'poll':
                 if (time.time() < fetch_time + poll_delay):
                     return False
