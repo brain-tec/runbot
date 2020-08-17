@@ -59,29 +59,29 @@ class Version(models.Model):
                 (
                     v
                     for v in reversed(all_versions)
-                    if v.is_major and v.number < version.number
+                    if v.is_major and v.number < version.number and v.sequence <= version.sequence # TODO FIXME
                 ), self.browse())
             if version.previous_major_version_id:
                 version.intermediate_version_ids = all_versions.filtered(
-                    lambda v, current=version: v.number > current.previous_major_version_id.number and v.number < current.number
+                    lambda v, current=version: v.number > current.previous_major_version_id.number and v.number < current.number and not v.sequence <= current.sequence and v.sequence >= current.previous_major_version_id.sequence
                     )
             else:
                 version.intermediate_version_ids = all_versions.filtered(
-                    lambda v, current=version: v.number < current.number
+                    lambda v, current=version: v.number < current.number and v.sequence <= current.sequence
                     )
             version.next_major_version_id = next(
                 (
                     v
                     for v in all_versions
-                    if (v.is_major or v.name == 'master') and v.number > version.number
+                    if (v.is_major or v.name == 'master') and v.number > version.number and v.sequence >= version.sequence
                 ), self.browse())
             if version.next_major_version_id:
                 version.next_intermediate_version_ids = all_versions.filtered(
-                    lambda v, current=version: v.number < current.next_major_version_id.number and v.number > current.number
+                    lambda v, current=version: v.number < current.next_major_version_id.number and v.number > current.number and v.sequence <= current.next_major_version_id.sequence and v.sequence >= current.sequence
                     )
             else:
                 version.next_intermediate_version_ids = all_versions.filtered(
-                    lambda v, current=version: v.number > current.number
+                    lambda v, current=version: v.number > current.number and v.sequence >= current.sequence
                     )
 
     # @api.depends('base_bundle_id.is_base', 'base_bundle_id.version_id', 'base_bundle_id.project_id')
