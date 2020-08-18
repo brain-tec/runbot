@@ -134,7 +134,8 @@ class CommitStatus(models.Model):
                             _logger.debug(
                                 "github updating %s status %s to %s in repo %s",
                                 status['context'], commit_name, status['state'], remote.name)
-                            remote._github('/repos/:owner/:repo/statuses/%s' % commit_name, status, ignore_errors=True)
+                            r = remote._github('/repos/:owner/:repo/statuses/%s' % commit_name, status, ignore_errors=True)
+                            _logger.debug(r)
                             self.sent_date = fields.Datetime.now()
                 except:
                     _logger.exception('Something went wrong sending notification for %s', commit_name)
