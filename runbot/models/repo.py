@@ -551,7 +551,7 @@ class Repo(models.Model):
         if not force and os.path.isfile(fname_fetch_head):
             fetch_time = os.path.getmtime(fname_fetch_head)
             if repo.mode == 'hook':
-                if not repo.hook_time and repo.last_processed_hook_time and repo.hook_time <= repo.last_processed_hook_time:
+                if not repo.hook_time or (repo.last_processed_hook_time and repo.hook_time <= repo.last_processed_hook_time):
                     return False
                 repo.last_processed_hook_time = repo.hook_time
             if repo.mode == 'poll':
