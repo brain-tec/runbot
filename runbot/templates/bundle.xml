@@ -39,7 +39,7 @@
                                                           <a t-att-href="branch.branch_url" class="btn btn-default text-left" title="View Branch on Github"><i class="fa fa-github"/></a>
                                                           <a groups="runbot.group_runbot_admin" class="btn btn-default fa fa-list text-left" t-attf-href="/web/#id={{branch.id}}&amp;view_type=form&amp;model=runbot.branch" target="new" title="View Branch in Backend"/>
                                                           <a href="#" t-esc="branch.remote_id.short_name" class="btn btn-default disabled text-left"/>
-                                                          <a t-attf-href="/runbot/branch/{{branch.id}}" class="btn btn-default text-left" title="View Branch Details"/><t t-esc="branch.name"/> <i t-if="not branch.alive" title="deleted/closed" class="fa fa-ban text-danger"/></a>
+                                                          <a t-attf-href="/runbot/branch/{{branch.id}}" class="btn btn-default text-left" title="View Branch Details"><t t-esc="branch.name"/> <i t-if="not branch.alive" title="deleted/closed" class="fa fa-ban text-danger"/></a>
                                                       </div>
                                                   </div>
                                                 </small>
