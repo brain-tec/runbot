@@ -289,7 +289,7 @@ class BuildResult(models.Model):
             build.job = build.active_step.name
 
     def copy_data(self, default=None):
-        values = super().copy_data(default)[0]
+        values = super().copy_data(default)[0] or {}
         values = {key: value for key, value in values.items() if (key in COPY_WHITELIST or key in default)}
         values.update({
             'host': 'PAUSED',  # hack to keep the build in pending waiting for a manual update. Todo: add a paused flag instead
@@ -339,7 +339,7 @@ class BuildResult(models.Model):
         for build in self:
             build.build_end = now()
             if build.parent_id and build.parent_id.local_state in ('running', 'done'):
-                    build.parent_id.update_build_end()
+                build.parent_id.update_build_end()
 
     @api.depends('params_id.version_id.name')
     def _compute_dest(self):

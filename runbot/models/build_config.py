@@ -147,7 +147,7 @@ class ConfigStep(models.Model):
     # upgrade
     # 1. define target
     upgrade_to_master = fields.Boolean() # upgrade niglty + (future migration? no, need last master, not nightly master)
-    upgrade_to_current = fields.Boolean() # upgrade_odoo case # TODO if checked, no other should be checked
+    upgrade_to_current = fields.Boolean(help="If checked, only upgrade to current will be used, other options will be ignored")
     upgrade_to_major_versions = fields.Boolean() # upgrade (no master)
     upgrade_to_all_versions = fields.Boolean() # upgrade niglty (no master)
     upgrade_to_version_ids = fields.Many2many('runbot.version', relation='runbot_upgrade_to_version_ids', string='Forced version to use as target')
@@ -652,7 +652,9 @@ class ConfigStep(models.Model):
         timeout = self.cpu_limit
 
         migrate_cmd.finals.append(['psql', migrate_db_name, '-c', '"SELECT id, name, state FROM ir_module_module WHERE state NOT IN (\'installed\', \'uninstalled\', \'uninstallable\') AND name NOT LIKE \'test_%\' "', '>', '/data/build/logs/modules_states.txt'])
-        docker_run(migrate_cmd, log_path, build._path(), build._get_docker_name(), cpu_limit=timeout, ro_volumes=exports)
+        
+        env_variables = self.additionnal_env.split(',') if self.additionnal_env else []
+        docker_run(migrate_cmd, log_path, build._path(), build._get_docker_name(), cpu_limit=timeout, ro_volumes=exports, env_variables=env_variables)
 
     def _run_restore(self, build, log_path):
         # exports = build._checkout()
@@ -661,7 +663,7 @@ class ConfigStep(models.Model):
         if 'dump_url' in params.config_data:
             dump_url = params.config_data['dump_url']
             zip_name = dump_url.split('/')[-1]
-            build._log('test-migration', 'Restoring db $$%s$$' % (zip_name), log_type='link', path=dump_url)  # TODO replace by markdown
+            build._log('test-migration', 'Restoring db [%s](%s)' % (zip_name, dump_url), log_type='markdown')
         else:
             download_db_suffix = params.dump_db.db_suffix or self.restore_download_db_suffix
             dump_build = params.dump_db.build_id or build.parent_id
@@ -671,7 +673,7 @@ class ConfigStep(models.Model):
             dump_url = '%s%s' % (dump_build.http_log_url(), zip_name)
             build._log('test-migration', 'Restoring dump [%s](%s) from build [%s](%s)' % (zip_name, dump_url, dump_build.id, dump_build.build_url), log_type='markdown')
         restore_suffix = self.restore_rename_db_suffix or params.dump_db.db_suffix
-        assert restore_suffix  # TODO check dump_url case
+        assert restore_suffix
         restore_db_name = '%s-%s' % (build.dest, restore_suffix)
 
         build._local_pg_createdb(restore_db_name)
@@ -692,6 +694,7 @@ class ConfigStep(models.Model):
             """psql %s -c "select name from ir_module_module where state = 'installed'" -t -A > /data/build/logs/restore_modules_installed.txt""" % restore_db_name,
 
             ])
+
         docker_run(cmd, log_path, build._path(), build._get_docker_name(), cpu_limit=self.cpu_limit)
 
     def _reference_builds(self, bundle, trigger):

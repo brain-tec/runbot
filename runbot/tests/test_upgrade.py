@@ -493,7 +493,7 @@ class TestUpgradeFlow(RunbotCase):
             'name': 'Stable policy',
             'step_order_ids': [(0, 0, {'step_id': step_upgrade_complement.id})]
         })
-        trigger_upgrade_complement = self.env['runbot.trigger'].create({  # TODO think about ci for this trigger
+        trigger_upgrade_complement = self.env['runbot.trigger'].create({
             'name': 'Stable policy',
             'repo_ids': [(4, self.repo_server.id)],
             'dependency_ids': [(4, self.repo_upgrade.id)],

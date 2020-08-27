@@ -59,7 +59,7 @@ class Version(models.Model):
                 (
                     v
                     for v in reversed(all_versions)
-                    if v.is_major and v.number < version.number and v.sequence <= version.sequence # TODO FIXME
+                    if v.is_major and v.number < version.number and v.sequence <= version.sequence # TODO FIXME, make version comparable?
                 ), self.browse())
             if version.previous_major_version_id:
                 version.intermediate_version_ids = all_versions.filtered(

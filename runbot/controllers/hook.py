@@ -30,7 +30,7 @@ class Hook(http.Controller):
 
         remote = request.env['runbot.remote'].sudo().browse([remote_id])
 
-        # force update of dependencies to in case a hook is lost
+        # force update of dependencies too in case a hook is lost
         if not payload or event == 'push' or (event == 'pull_request' and payload.get('action') in ('synchronize', 'opened', 'reopened')):
             remote.repo_id.set_hook_time(time.time())
         elif event == 'pull_request':
@@ -48,6 +48,7 @@ class Hook(http.Controller):
                 if base:
                     _logger.info('Changing base of bundle %s to %s(%s)', branch.bundle_id, base.name, base.id)
                     branch.bundle_id.defined_base_id = base.id
+                    # TODO remove all ci
 
             elif payload.get('action') in ('deleted', 'closed'):
                 _logger.info('Closing pr %s', branch.name)

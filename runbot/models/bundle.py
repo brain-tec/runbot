@@ -66,7 +66,7 @@ class Bundle(models.Model):
             project_id = bundle.project_id.id
             master_base = False
             for bid, bname in self._get_base_ids(project_id):
-                if bundle.name.startswith(bname):
+                if bundle.name.startswith('%s-' % bname):
                     bundle.base_id = self.browse(bid)
                     break
                 elif bname == 'master':
@@ -191,10 +191,17 @@ class Bundle(models.Model):
                 if branch.target_branch_name.startswith(self.base_id.name):
                     warnings.append(('info', 'PR %s targeting a non base branch: %s' % (branch.dname, branch.target_branch_name)))
                 else:
-                    warnings.append(('warning', 'PR %s targeting wrong version: %s (expecting %s)' % (branch.dname, branch.target_branch_name, self.base_id.name)))
+                    warnings.append(('warning' if branch.alive else 'info', 'PR %s targeting wrong version: %s (expecting %s)' % (branch.dname, branch.target_branch_name, self.base_id.name)))
             elif not branch.is_pr and not branch.name.startswith(self.base_id.name) and not self.defined_base_id:
                 warnings.append(('warning', 'Branch %s not starting with version name (%s)' % (branch.dname, self.base_id.name)))
         return warnings
+
+    def branch_groups(self):
+        self.branch_ids.sorted(key=lambda b: (b.remote_id.repo_id.sequence, b.remote_id.repo_id.id, b.is_pr))
+        branch_groups = {repo: [] for repo in self.branch_ids.mapped('remote_id.repo_id').sorted('sequence')}
+        for branch in self.branch_ids.sorted(key=lambda b: (b.is_pr)):
+            branch_groups[branch.remote_id.repo_id].append(branch)
+        return branch_groups
 
 
 class BundleTriggerCustomisation(models.Model):

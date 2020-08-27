@@ -35,8 +35,6 @@ class Branch(models.Model):
 
     alive = fields.Boolean('Alive', default=True)
 
-    # TODO add constrains head.repo_id == branch.remote_id.repo_id
-
     @api.depends('name', 'remote_id.short_name')
     def _compute_dname(self):
         for branch in self:

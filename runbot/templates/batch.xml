@@ -97,7 +97,7 @@
                                             Committer:
                                             <span t-esc="commit.committer"/>
                                             (
-                                            <span t-esc="commit.author_email"/>
+                                            <span t-esc="commit.committer_email"/>
                                             )
                                             <br/>
                                         </t>
