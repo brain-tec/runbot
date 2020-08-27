@@ -422,7 +422,7 @@ class ConfigStep(models.Model):
             cmd.finals.append(['gzip', '-f', self._perfs_data_path()])  # keep data but gz them to save disc space
         max_timeout = int(self.env['ir.config_parameter'].get_param('runbot.runbot_timeout', default=10000))
         timeout = min(self.cpu_limit, max_timeout)
-        env_variables = self.additionnal_env.split(',') if self.additionnal_env else []
+        env_variables = self.additionnal_env.split(';') if self.additionnal_env else []
         return docker_run(cmd, log_path, build._path(), build._get_docker_name(), cpu_limit=timeout, ro_volumes=exports, env_variables=env_variables)
 
     def _upgrade_create_childs(self):
@@ -652,8 +652,8 @@ class ConfigStep(models.Model):
         timeout = self.cpu_limit
 
         migrate_cmd.finals.append(['psql', migrate_db_name, '-c', '"SELECT id, name, state FROM ir_module_module WHERE state NOT IN (\'installed\', \'uninstalled\', \'uninstallable\') AND name NOT LIKE \'test_%\' "', '>', '/data/build/logs/modules_states.txt'])
-        
-        env_variables = self.additionnal_env.split(',') if self.additionnal_env else []
+
+        env_variables = self.additionnal_env.split(';') if self.additionnal_env else []
         docker_run(migrate_cmd, log_path, build._path(), build._get_docker_name(), cpu_limit=timeout, ro_volumes=exports, env_variables=env_variables)
 
     def _run_restore(self, build, log_path):
