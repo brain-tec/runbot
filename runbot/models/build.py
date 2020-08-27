@@ -290,6 +290,7 @@ class BuildResult(models.Model):
 
     def copy_data(self, default=None):
         values = super().copy_data(default)[0] or {}
+        default = dict(default or [])
         values = {key: value for key, value in values.items() if (key in COPY_WHITELIST or key in default)}
         values.update({
             'host': 'PAUSED',  # hack to keep the build in pending waiting for a manual update. Todo: add a paused flag instead
