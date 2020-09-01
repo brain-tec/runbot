@@ -43,6 +43,7 @@ class Bundle(models.Model):
     priority = fields.Boolean('Build priority', default=False)
 
     trigger_custom_ids = fields.One2many('runbot.bundle.trigger.custom', 'bundle_id')
+    auto_rebase = fields.Boolean('Auto rebase', default=False)
 
     @api.depends('sticky')
     def _compute_make_stats(self):
@@ -166,7 +167,7 @@ class Bundle(models.Model):
             model = self.browse()
             model._get_base_ids.clear_cache(model)
 
-    def _force(self, category_id=None):
+    def _force(self, category_id=None, auto_rebase=False):
         self.ensure_one()
         if self.last_batch.state == 'preparing':
             return
@@ -179,7 +180,7 @@ class Bundle(models.Model):
             values['category_id'] = category_id
         new = self.env['runbot.batch'].create(values)
         self.last_batch = new
-        new.sudo()._prepare()
+        new.sudo()._prepare(auto_rebase or self.auto_rebase)
         return new
 
     def consistency_warning(self):

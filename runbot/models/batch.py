@@ -4,7 +4,7 @@ import datetime
 import subprocess
 
 from odoo import models, fields, api
-from ..common import dt2time, s2human_long
+from ..common import dt2time, s2human_long, pseudo_markdown
 
 _logger = logging.getLogger(__name__)
 
@@ -118,7 +118,7 @@ class Batch(models.Model):
             build._github_status(post_commit=False)
         return link_type, build
 
-    def _prepare(self):
+    def _prepare(self, auto_rebase=False):
         for level, message in self.bundle_id.consistency_warning():
             if level == "warning":
                 self.warning("Bundle warning: %s" % message)
@@ -191,26 +191,31 @@ class Batch(models.Model):
         # 2. FIND missing commit in a compatible base bundle
         if missing_repos and not bundle.is_base:
             merge_base_commits = self.commit_link_ids.mapped('merge_base_commit_id')
-            link_commit = self.env['runbot.commit.link'].search([
-                ('commit_id', 'in', merge_base_commits.ids),
-                ('match_type', 'in', ('new', 'head'))
-            ])
-            batches = self.env['runbot.batch'].search([
-                ('bundle_id', '=', bundle.base_id.id),
-                ('commit_link_ids', 'in', link_commit.ids),
-                ('state', '!=', 'preparing'),
-                ('category_id', '=', self.category_id.id)
-            ])
-            if batches:
-                batches = batches.sorted(lambda b: (len(b.commit_ids & merge_base_commits), b.id), reverse=True)
-                batch = batches[0]
-                self._log('Using batch %s to define missing commits', batch.id)
-                batch_exiting_commit = batch.commit_ids.filtered(lambda c: c.repo_id in merge_base_commits.repo_id)
-                not_matching = (batch_exiting_commit - merge_base_commits)
-                if not_matching:
-                    message = 'Only %s out of %s merge base matched. You may want to rebase your branches to ensure compatibility' % (len(merge_base_commits)-len(not_matching), len(merge_base_commits))
-                    suggestions = [('Tip: rebase %s to %s' % (commit.repo_id.name, commit.name)) for commit in not_matching]
-                    self.warning('%s\n%s' % (message, '\n'.join(suggestions)))
+            if auto_rebase:
+                batch = last_base_batch
+                self._log('Using last done batch %s to define missing commits (automatic rebase)', batch.id)
+            else:
+                batch = False
+                link_commit = self.env['runbot.commit.link'].search([
+                    ('commit_id', 'in', merge_base_commits.ids),
+                    ('match_type', 'in', ('new', 'head'))
+                ])
+                batches = self.env['runbot.batch'].search([
+                    ('bundle_id', '=', bundle.base_id.id),
+                    ('commit_link_ids', 'in', link_commit.ids),
+                    ('state', '!=', 'preparing'),
+                    ('category_id', '=', self.category_id.id)
+                ]).sorted(lambda b: (len(b.commit_ids & merge_base_commits), b.id), reverse=True)
+                if batches:
+                    batch = batches[0]
+                    self._log('Using batch %s to define missing commits', batch.id)
+                    batch_exiting_commit = batch.commit_ids.filtered(lambda c: c.repo_id in merge_base_commits.repo_id)
+                    not_matching = (batch_exiting_commit - merge_base_commits)
+                    if not_matching:
+                        message = 'Only %s out of %s merge base matched. You may want to rebase your branches to ensure compatibility' % (len(merge_base_commits)-len(not_matching), len(merge_base_commits))
+                        suggestions = [('Tip: rebase %s to %s' % (commit.repo_id.name, commit.name)) for commit in not_matching]
+                        self.warning('%s\n%s' % (message, '\n'.join(suggestions)))
+            if batch:
                 fill_missing({link.branch_id: link.commit_id for link in batch.commit_link_ids}, 'base_match')
 
         # 3.1 FIND missing commit in base heads
@@ -244,6 +249,9 @@ class Batch(models.Model):
         ######################################
         #  Generate build params
         ######################################
+        if auto_rebase:
+            for commit_link in self.commit_link_ids:
+                commit_link.commit_id = commit_link.commit_id._rebase_on(commit_link.base_commit_id)
         commit_link_by_repos = {commit_link.commit_id.repo_id.id: commit_link for commit_link in self.commit_link_ids}
         bundle_repos = bundle.branch_ids.mapped('remote_id.repo_id')
         version_id = self.bundle_id.version_id.id
@@ -314,10 +322,7 @@ class Batch(models.Model):
                 if commit.name == base_head.name:
                     continue
                 merge_base_sha = commit.repo_id._git(['merge-base', commit.name, base_head.name]).strip()
-                merge_base_commit = self.env['runbot.commit'].search([('name', '=', merge_base_sha), ('repo_id', '=', commit.repo_id.id)])
-                if not merge_base_commit:
-                    merge_base_commit = self.env['runbot.commit'].create({'name': merge_base_sha, 'repo_id': commit.repo_id.id})
-                    self.warning('Commit for base head %s in %s was created', merge_base_sha, commit.repo_id.name)
+                merge_base_commit = self.env['runbot.commit']._get(merge_base_sha, commit.repo_id.id)
                 link_commit.merge_base_commit_id = merge_base_commit.id
 
                 ahead, behind = commit.repo_id._git(['rev-list', '--left-right', '--count', '%s...%s' % (commit.name, base_head.name)]).strip().split('\t')
@@ -362,6 +367,14 @@ class BatchLog(models.Model):
     batch_id = fields.Many2one('runbot.batch', index=True)
     message = fields.Text('Message')
     level = fields.Char()
+
+
+    def _markdown(self):
+        """ Apply pseudo markdown parser for message.
+        """
+        self.ensure_one()
+        return pseudo_markdown(self.message)
+
 
 
 class BatchSlot(models.Model):

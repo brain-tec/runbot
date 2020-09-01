@@ -285,13 +285,6 @@ class Repo(models.Model):
             )
         """)
 
-    def _source_path(self, sha, *path):
-        """
-        returns the absolute path to the source folder of the repo (adding option *path)
-        """
-        self.ensure_one()
-        return os.path.join(self.env['runbot.runbot']._root(), 'sources', self.name, sha, *path)
-
     @api.depends('name')
     def _get_path(self):
         """compute the server path of repo from the name"""
@@ -309,16 +302,7 @@ class Repo(models.Model):
         _logger.info("git command: %s", ' '.join(cmd))
         return subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode()
 
-    def _git_export(self, sha):
-        """Export a git repo into a sources"""
-        #  TODO add automated tests
-        self.ensure_one()
-        export_path = self._source_path(sha)
-
-        if os.path.isdir(export_path):
-            _logger.info('git export: exporting to %s (already exists)', export_path)
-            return export_path
-
+    def _fetch(self, sha):
         if not self._hash_exists(sha):
             self._update(force=True)
             if not self._hash_exists(sha):
@@ -331,33 +315,6 @@ class Repo(models.Model):
                         pass
                 if not self._hash_exists(sha):
                     raise RunbotException("Commit %s is unreachable. Did you force push the branch?" % sha)
-
-        _logger.info('git export: exporting to %s (new)', export_path)
-        os.makedirs(export_path)
-
-        p1 = subprocess.Popen(['git', '--git-dir=%s' % self.path, 'archive', sha], stderr=subprocess.PIPE, stdout=subprocess.PIPE)
-        p2 = subprocess.Popen(['tar', '-xmC', export_path], stdin=p1.stdout, stdout=subprocess.PIPE)
-        p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
-        (_, err) = p2.communicate()
-        p1.poll()  # fill the returncode
-        if p1.returncode:
-            raise RunbotException("Git archive failed for %s with error code %s. (%s)" % (sha, p1.returncode, p1.stderr.read().decode()))
-        if err:
-            raise RunbotException("Export for %s failed. (%s)" % (sha, err))
-        # TODO get result and fallback on cleaning in case of problem
-
-        # migration scripts link if necessary
-        icp = self.env['ir.config_parameter']
-        ln_param = icp.get_param('runbot_migration_ln', default='')
-        migration_repo_id = int(icp.get_param('runbot_migration_repo_id', default=0))
-        if ln_param and migration_repo_id and self.server_files:
-            scripts_dir = self.env['runbot.repo'].browse(migration_repo_id).name
-            try:
-                os.symlink('/data/build/%s' % scripts_dir,  self._source_path(sha, ln_param))
-            except FileNotFoundError:
-                _logger.warning('Impossible to create migration symlink')
-
-        return export_path
 
     def _hash_exists(self, commit_hash):
         """ Verify that a commit hash exists in the repo """
@@ -457,11 +414,7 @@ class Repo(models.Model):
             if branch.head_name != sha:  # new push on branch
                 _logger.info('repo %s branch %s new commit found: %s', self.name, branch.name, sha)
 
-                commit = self.env['runbot.commit'].search([('name', '=', sha), ('repo_id', '=', self.id)])
-                if not commit:
-                    commit = self.env['runbot.commit'].create({
-                        'name': sha,
-                        'repo_id': self.id,
+                commit = self.env['runbot.commit']._get(sha, self.id, {
                         'author': author,
                         'author_email': author_email,
                         'committer': committer,

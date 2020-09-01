@@ -83,6 +83,7 @@
                                             <br/>
                                         </t>
                                     </small>
+                                    <b t-if="commit.rebase_on_id">Automatic rebase on <t t-esc="commit.rebase_on_id.name"/><br/></b>
                                     <t t-if="more or not (commit_link.match_type and commit_link.match_type.startswith('base'))">
                                         Subject:
                                         <span t-esc="commit.subject"/>
@@ -134,7 +135,7 @@
                     <div t-attf-class="alert alert-{{logclass}}">
                         <b t-esc="log.level"/>
                         --
-                        <t t-foreach="log.message.split('\n')" t-as="line">
+                        <t t-foreach="log._markdown().split('\n')" t-as="line">
                             <span t-esc="line"/>
                             <br t-if="not line_last"/>
                         </t>

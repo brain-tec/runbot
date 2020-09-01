@@ -1,6 +1,10 @@
 
-from ..common import os
+import subprocess
+
+from ..common import os, RunbotException
 import glob
+import shutil
+
 from odoo import models, fields, api, registry
 import logging
 
@@ -14,7 +18,7 @@ class Commit(models.Model):
     _sql_constraints = [
         (
             "commit_unique",
-            "unique (name, repo_id)",
+            "unique (name, repo_id, rebase_on_id)",
             "Commit must be unique to ensure correct duplicate matching",
         )
     ]
@@ -27,6 +31,18 @@ class Commit(models.Model):
     committer_email = fields.Char('Committer Email')
     subject = fields.Text('Subject')
     dname = fields.Char('Display name', compute='_compute_dname')
+    rebase_on_id = fields.Many2one('runbot.commit', 'Rebase on commit')
+
+    def _get(self, name, repo_id, vals=None, rebase_on_id=False):
+        commit = self.search([('name', '=', name), ('repo_id', '=', repo_id), ('rebase_on_id', '=', rebase_on_id)])
+        if not commit:
+            commit = self.env['runbot.commit'].create({**(vals or {}), 'name': name, 'repo_id': repo_id, 'rebase_on_id': rebase_on_id})
+        return commit
+
+    def _rebase_on(self, commit):
+        if self == commit:
+            return self
+        return self._get(self.name, self.repo_id.id, self.read()[0], commit.id)
 
     def _get_available_modules(self):
         for manifest_file_name in self.repo_id.manifest_files.split(','):  # '__manifest__.py' '__openerp__.py'
@@ -37,7 +53,67 @@ class Commit(models.Model):
                     yield (addons_path, module, manifest_file_name)
 
     def export(self):
-        return self.repo_id._git_export(self.name)
+        """Export a git repo into a sources"""
+        #  TODO add automated tests
+        self.ensure_one()
+
+        export_path = self._source_path()
+
+        if os.path.isdir(export_path):
+            _logger.info('git export: exporting to %s (already exists)', export_path)
+            return export_path
+
+
+        _logger.info('git export: exporting to %s (new)', export_path)
+        os.makedirs(export_path)
+
+        self.repo_id._fetch(self.name)
+        export_sha = self.name
+        if self.rebase_on_id:
+            export_sha = self.rebase_on_id.name
+            export_sha.repo_id._fetch(export_sha)
+
+        p1 = subprocess.Popen(['git', '--git-dir=%s' % self.path, 'archive', export_sha], stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+        p2 = subprocess.Popen(['tar', '-xmC', export_path], stdin=p1.stdout, stdout=subprocess.PIPE)
+        p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
+        (_, err) = p2.communicate()
+        p1.poll()  # fill the returncode
+        if p1.returncode:
+            raise RunbotException("Git archive failed for %s with error code %s. (%s)" % (self.name, p1.returncode, p1.stderr.read().decode()))
+        if err:
+            raise RunbotException("Export for %s failed. (%s)" % (self.name, err))
+
+        if self.rebase_on_id:
+            # we could be smart here and detect if merge_base == commit, in witch case checkouting base_commit is enough. Since we don't have this info
+            # and we are exporting in a custom folder anyway, lets
+
+            p1 = subprocess.Popen(['git', '--git-dir=%s' % self.path, 'diff', '%s...%s' % (export_sha, self.name)], stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+            p2 = subprocess.Popen(['patch', '-p0', '-d', export_path], stdin=p1.stdout, stdout=subprocess.PIPE)
+            p1.stdout.close()
+            (_, err) = p2.communicate()
+            p1.poll()
+            if p1.returncode:
+                shutil.rmtree(export_path)
+                raise RunbotException("Apply patch failed for %s...%s with error code %s. (%s)" % (export_sha, self.name, p1.returncode, p1.stderr.read().decode()))
+            if err:
+                shutil.rmtree(export_path)
+                raise RunbotException("Apply patch failed for %s...%s. (%s)" % (export_sha, self.name, err))
+
+
+        # TODO get result and fallback on cleaning in case of problem
+
+        # migration scripts link if necessary
+        icp = self.env['ir.config_parameter']
+        ln_param = icp.get_param('runbot_migration_ln', default='')
+        migration_repo_id = int(icp.get_param('runbot_migration_repo_id', default=0))
+        if ln_param and migration_repo_id and self.server_files:
+            scripts_dir = self.env['runbot.repo'].browse(migration_repo_id).name
+            try:
+                os.symlink('/data/build/%s' % scripts_dir,  self._source_path(self.name, ln_param))
+            except FileNotFoundError:
+                _logger.warning('Impossible to create migration symlink')
+
+        return export_path
 
     def read_source(self, file, mode='r'):
         file_path = self._source_path(file)
@@ -48,7 +124,10 @@ class Commit(models.Model):
             return False
 
     def _source_path(self, *path):
-        return self.repo_id._source_path(self.name, *path)
+        export_name = self.name
+        if self.rebase_on_id:
+            export_name = '%s_%s' % (self.name, self.rebase_on_id.name)
+        return os.path.join(self.env['runbot.runbot']._root(), 'sources', self.repo_id.name, export_name, *path)
 
     @api.depends('name', 'repo_id.name')
     def _compute_dname(self):

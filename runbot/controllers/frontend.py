@@ -192,10 +192,11 @@ class Runbot(Controller):
 
     @o_route([
         '/runbot/bundle/<model("runbot.bundle"):bundle>/force',
+        '/runbot/bundle/<model("runbot.bundle"):bundle>/force/<int:auto_rebase>',
     ], type='http', auth="user", methods=['GET', 'POST'], csrf=False)
-    def force_bundle(self, bundle, **post):
+    def force_bundle(self, bundle, auto_rebase=False, **post):
         _logger.info('user %s forcing bundle %s', request.env.user.name, bundle.name)  # user must be able to read bundle
-        batch = bundle.sudo()._force()
+        batch = bundle.sudo()._force(auto_rebase=auto_rebase)
         return werkzeug.utils.redirect('/runbot/batch/%s' % batch.id)
 
     @route(['/runbot/batch/<int:batch_id>'], website=True, auth='public', type='http')
