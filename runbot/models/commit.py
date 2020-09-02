@@ -71,7 +71,7 @@ class Commit(models.Model):
         export_sha = self.name
         if self.rebase_on_id:
             export_sha = self.rebase_on_id.name
-            export_sha.repo_id._fetch(export_sha)
+            self.rebase_on_id.repo_id._fetch(export_sha)
 
         p1 = subprocess.Popen(['git', '--git-dir=%s' % self.repo_id.path, 'archive', export_sha], stderr=subprocess.PIPE, stdout=subprocess.PIPE)
         p2 = subprocess.Popen(['tar', '-xmC', export_path], stdin=p1.stdout, stdout=subprocess.PIPE)
