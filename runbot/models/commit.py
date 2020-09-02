@@ -86,19 +86,18 @@ class Commit(models.Model):
         if self.rebase_on_id:
             # we could be smart here and detect if merge_base == commit, in witch case checkouting base_commit is enough. Since we don't have this info
             # and we are exporting in a custom folder anyway, lets
-
+            _logger.info('Applying patch for %s', self.name)
             p1 = subprocess.Popen(['git', '--git-dir=%s' % self.repo_id.path, 'diff', '%s...%s' % (export_sha, self.name)], stderr=subprocess.PIPE, stdout=subprocess.PIPE)
             p2 = subprocess.Popen(['patch', '-p0', '-d', export_path], stdin=p1.stdout, stdout=subprocess.PIPE)
             p1.stdout.close()
-            (_, err) = p2.communicate()
+            (message, err) = p2.communicate()
             p1.poll()
-            if p1.returncode:
-                shutil.rmtree(export_path)
-                raise RunbotException("Apply patch failed for %s...%s with error code %s. (%s)" % (export_sha, self.name, p1.returncode, p1.stderr.read().decode()))
             if err:
                 shutil.rmtree(export_path)
                 raise RunbotException("Apply patch failed for %s...%s. (%s)" % (export_sha, self.name, err))
-
+            if p1.returncode or p2.returncode:
+                shutil.rmtree(export_path)
+                raise RunbotException("Apply patch failed for %s...%s with error code %s+%s. (%s)" % (export_sha, self.name, p1.returncode, p2.returncode, message))
 
         # TODO get result and fallback on cleaning in case of problem
 
