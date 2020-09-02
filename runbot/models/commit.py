@@ -109,7 +109,7 @@ class Commit(models.Model):
         if ln_param and migration_repo_id and self.repo_id.server_files:
             scripts_dir = self.env['runbot.repo'].browse(migration_repo_id).name
             try:
-                os.symlink('/data/build/%s' % scripts_dir,  self._source_path(self.name, ln_param))
+                os.symlink('/data/build/%s' % scripts_dir,  self._source_path(ln_param))
             except FileNotFoundError:
                 _logger.warning('Impossible to create migration symlink')
 
