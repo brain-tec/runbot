@@ -73,7 +73,7 @@ class Commit(models.Model):
             export_sha = self.rebase_on_id.name
             export_sha.repo_id._fetch(export_sha)
 
-        p1 = subprocess.Popen(['git', '--git-dir=%s' % self.path, 'archive', export_sha], stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+        p1 = subprocess.Popen(['git', '--git-dir=%s' % self.repo_id.path, 'archive', export_sha], stderr=subprocess.PIPE, stdout=subprocess.PIPE)
         p2 = subprocess.Popen(['tar', '-xmC', export_path], stdin=p1.stdout, stdout=subprocess.PIPE)
         p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
         (_, err) = p2.communicate()
@@ -87,7 +87,7 @@ class Commit(models.Model):
             # we could be smart here and detect if merge_base == commit, in witch case checkouting base_commit is enough. Since we don't have this info
             # and we are exporting in a custom folder anyway, lets
 
-            p1 = subprocess.Popen(['git', '--git-dir=%s' % self.path, 'diff', '%s...%s' % (export_sha, self.name)], stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+            p1 = subprocess.Popen(['git', '--git-dir=%s' % self.repo_id.path, 'diff', '%s...%s' % (export_sha, self.name)], stderr=subprocess.PIPE, stdout=subprocess.PIPE)
             p2 = subprocess.Popen(['patch', '-p0', '-d', export_path], stdin=p1.stdout, stdout=subprocess.PIPE)
             p1.stdout.close()
             (_, err) = p2.communicate()
@@ -106,7 +106,7 @@ class Commit(models.Model):
         icp = self.env['ir.config_parameter']
         ln_param = icp.get_param('runbot_migration_ln', default='')
         migration_repo_id = int(icp.get_param('runbot_migration_repo_id', default=0))
-        if ln_param and migration_repo_id and self.server_files:
+        if ln_param and migration_repo_id and self.repo_id.server_files:
             scripts_dir = self.env['runbot.repo'].browse(migration_repo_id).name
             try:
                 os.symlink('/data/build/%s' % scripts_dir,  self._source_path(self.name, ln_param))
