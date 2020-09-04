@@ -45,6 +45,7 @@
         'views/repo_views.xml',
         'views/res_config_settings_views.xml',
         'views/stat_views.xml',
+        'views/upgrade.xml',
         'views/warning_views.xml',
 
         'wizards/mutli_build_wizard_views.xml',

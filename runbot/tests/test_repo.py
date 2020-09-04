@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import datetime
+import re
 from unittest import skip
 from unittest.mock import patch, Mock
 from subprocess import CalledProcessError
@@ -57,7 +58,7 @@ class TestRepo(RunbotCaseMinimalSetup):
 
         branch_name = 'master-test'
 
-        def github(url, ignore_errors):
+        def github(url, payload=None, ignore_errors=False, nb_tries=2, recursive=False):
             self.assertEqual(ignore_errors, False)
             self.assertEqual(url, '/repos/:owner/:repo/pulls/123')
             return {
@@ -232,6 +233,13 @@ class TestRepo(RunbotCaseMinimalSetup):
         self.assertEqual(last_batch.commit_link_ids.commit_id.mapped('subject'), ['Server subject'], 'commits should have been updated')
         self.assertEqual(last_batch.state, 'preparing')
         self.assertEqual(dev_branch.head_name, 'd0d0caca')
+
+        def github2(url, payload=None, ignore_errors=False, nb_tries=2, recursive=False):
+            self.assertEqual(ignore_errors, True)
+            self.assertIn(url, ['/repos/:owner/:repo/statuses/d0d0caca', '/repos/:owner/:repo/statuses/deadbeef'])
+            return {}
+
+        self.patchers['github_patcher'].side_effect = github2
         last_batch._prepare()
         self.assertEqual(last_batch.commit_link_ids.commit_id.mapped('subject'), ['Server subject', 'Addons subject'])
 
@@ -390,9 +398,9 @@ class TestIdentityFile(RunbotCase):
         def check_output_helper(self):
             """Helper that returns a mock for repo._git()"""
             def mock_check_output(cmd, *args, **kwargs):
-                expected_option = '-c core.sshCommand="ssh -i ~/.ssh/fake_identity"'
+                expected_option = '-c core.sshCommand=ssh -i \/.+\/\.ssh\/fake_identity'
                 git_cmd = ' '.join(cmd)
-                self.assertIn(expected_option, git_cmd)
+                self.assertTrue(re.search(expected_option, git_cmd), '%s did not match %s' % (git_cmd, expected_option))
                 return Mock()
 
             return mock_check_output
