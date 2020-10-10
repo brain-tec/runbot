@@ -71,10 +71,15 @@ class Host(models.Model):
         self._bootstrap_db_template()
 
     def _docker_build(self):
-        """ build docker image """
+        """ build docker images needed by locally pending builds"""
+        dockerfile_ids = self.env['runbot.dockerfile'].search(['to_build', '=', True])
         static_path = self._get_work_path()
-        log_path = os.path.join(static_path, 'docker', 'docker_build.txt')
-        docker_build(log_path, static_path)
+        for dockerfile_id in dockerfile_ids:
+            docker_build_path = os.path.join(static_path, 'docker', dockerfile_id.image_tag)
+            os.makedirs(docker_build_path, exists_ok=True)
+            with open(os.path.join(docker_build_path, 'Dockerfile'), 'w') as Dockerfile:
+                Dockerfile.write(dockerfile_id.dockerfile)
+            docker_build(docker_build_path, dockerfile_id.image_tag)
 
     def _get_work_path(self):
         return os.path.abspath(os.path.join(os.path.dirname(__file__), '../static'))
