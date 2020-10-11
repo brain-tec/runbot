@@ -8,7 +8,7 @@
             <sheet>
               <group name="dockerfile_group">
                 <field name="name"/>
-                <field name="image_tag"
+                <field name="image_tag"/>
                 <field name="base_from"/>
                 <field name="is_default"/>
                 <field name="version_ids" widget="many2many_tags"/>

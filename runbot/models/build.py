@@ -50,6 +50,7 @@ class BuildParameters(models.Model):
     project_id = fields.Many2one('runbot.project', required=True, index=True)  # for access rights
     trigger_id = fields.Many2one('runbot.trigger', index=True)  # for access rights
     category = fields.Char('Category', index=True)  # normal vs nightly vs weekly, ...
+    dockerfile_id = fields.Many2one('runbot.dockerfile', index=True) # Override version_id.dockerfile_id when set
     # other informations
     extra_params = fields.Char('Extra cmd args')
     config_id = fields.Many2one('runbot.build.config', 'Run Config', required=True,

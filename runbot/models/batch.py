@@ -134,6 +134,11 @@ class Batch(models.Model):
         project = bundle.project_id
         if not bundle.version_id:
             _logger.error('No version found on bundle %s in project %s', bundle.name, project.name)
+
+        dockerfile_id = bundle.dockerfile_id or self.env['runbot.dockerfile'].get_default()
+        if not dockerfile_id:
+            _logger.error('No dockerfile found !')
+
         triggers = self.env['runbot.trigger'].search([  # could be optimised for multiple batches. Ormcached method?
             ('project_id', '=', project.id),
             ('category_id', '=', self.category_id.id)

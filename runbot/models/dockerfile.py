@@ -61,3 +61,7 @@ class Dockerfile(models.Model):
     def _compute_image_tag(self):
         for rec in self:
             rec.image_tag = re.sub(' |/|:', '_', rec.name)
+
+    @api.model
+    def get_default(self):
+        return self.search([('is_default', '=', 'True')], order='id desc', limit=1)
