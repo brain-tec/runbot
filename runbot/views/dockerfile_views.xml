@@ -8,18 +8,21 @@
             <sheet>
               <group name="dockerfile_group">
                 <field name="name"/>
+                <field name="image_tag"
                 <field name="base_from"/>
+                <field name="is_default"/>
+                <field name="version_ids" widget="many2many_tags"/>
               </group>
               <group>
                 <field name="docker_step_order_ids">
-                    <tree string="Docker Step list" editable="bottom">
+                    <tree editable="bottom">
                         <field name="docker_step_id"/>
                         <field name="sequence" widget="handle"/>
                     </tree>
                 </field>
               </group>
               <group>
-                <field name="docker_file"/>
+                <field name="dockerfile"/>
               </group>
             </sheet>
           </form>

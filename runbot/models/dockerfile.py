@@ -1,4 +1,5 @@
 import logging
+import re
 from odoo import models, fields, api
 
 _logger = logging.getLogger(__name__)
@@ -42,13 +43,21 @@ class Dockerfile(models.Model):
     _description = "Dockerfile"
 
     name = fields.Char('Dockerfile name', required=True, help="Name of Dockerfile")
+    image_tag = fields.Char(compute='_compute_image_tag')
     base_from = fields.Char('Dockerfile from', required=True, help="Base FROM")
     docker_step_order_ids = fields.One2many('runbot.dockerfile.step.order', 'dockerfile_id')
-    docker_file = fields.Text(compute='_compute_docker_file')
+    dockerfile = fields.Text(compute='_compute_dockerfile')
+    is_default = fields.Boolean('Use as fallback', default=False)
+    version_ids = fields.One2many('runbot.version', 'dockerfile_id')
 
     @api.depends('docker_step_order_ids', 'base_from')
-    def _compute_docker_file(self):
+    def _compute_dockerfile(self):
         for rec in self:
-            docker_file = 'FROM %s\n' % rec.base_from
-            docker_file += '\n'.join([step_order.docker_step_id.content for step_order in rec.docker_step_order_ids])
-            rec.docker_file = docker_file
+            dockerfile = 'FROM %s\n' % rec.base_from
+            dockerfile += '\n'.join([step_order.docker_step_id.content for step_order in rec.docker_step_order_ids])
+            rec.dockerfile = '%s\n' % dockerfile
+
+    @api.depends('name')
+    def _compute_image_tag(self):
+        for rec in self:
+            rec.image_tag = re.sub(' |/|:', '_', rec.name)
