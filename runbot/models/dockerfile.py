@@ -60,7 +60,7 @@ class Dockerfile(models.Model):
     @api.depends('name')
     def _compute_image_tag(self):
         for rec in self:
-            rec.image_tag = re.sub(' |/|:', '_', rec.name)
+            rec.image_tag = 'odoo:%s' % re.sub(r'[ /:\(\)\[\]]', '', rec.name)
 
     @api.model
     def get_default(self):

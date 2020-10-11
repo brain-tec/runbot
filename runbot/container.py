@@ -100,7 +100,7 @@ class Command():
 
 
 def docker_build(build_dir, image_tag):
-    return _docker_build(build_idr, image_tag)
+    return _docker_build(build_dir, image_tag)
 
 
 def _docker_build(build_dir, image_tag):
@@ -109,10 +109,11 @@ def _docker_build(build_dir, image_tag):
     :param image_tag: name used to tag the resulting docker image
     """
     # synchronise the current user with the odoo user inside the Dockerfile
-    with open(os.path.join(docker_dir, 'Dockerfile'), 'a') as df:
+    with open(os.path.join(build_dir, 'Dockerfile'), 'a') as df:
         df.write(DOCKERUSER)
+    log_path = os.path.join(build_dir, 'docker_build.txt')
     logs = open(log_path, 'w')
-    dbuild = subprocess.Popen(['docker', 'build', '--tag', 'odoo:' % image_tag, '.'], stdout=logs, stderr=logs, cwd=docker_dir)
+    dbuild = subprocess.Popen(['docker', 'build', '--tag', image_tag, '.'], stdout=logs, stderr=logs, cwd=build_dir)
     dbuild.wait()
 
 
@@ -175,7 +176,7 @@ def _docker_run(run_cmd, log_path, build_dir, image_tag, container_name, exposed
             docker_command.extend(['-p', '127.0.0.1:%s:%s' % (hp, dp)])
     if cpu_limit:
         docker_command.extend(['--ulimit', 'cpu=%s' % int(cpu_limit)])
-    docker_command.extend(['odoo:%s' % image_tag, '/bin/bash', '-c', "%s" % run_cmd])
+    docker_command.extend([image_tag, '/bin/bash', '-c', "%s" % run_cmd])
     subprocess.Popen(docker_command, stdout=logs, stderr=logs, preexec_fn=preexec_fn, close_fds=False, cwd=build_dir)
     _logger.info('Started Docker container %s', container_name)
     return
