@@ -75,11 +75,10 @@ class Host(models.Model):
         version_ids = self.env['runbot.build'].search([('local_state', '=', 'pending'), ('host', '=', self.name)]).mapped('version_id')
         static_path = self._get_work_path()
         for version_id in version_ids:
-            docker_build_path = os.path.join(static_path, 'docker', versrion_id.name)
+            docker_build_path = os.path.join(static_path, 'docker', version_id.name)
             os.makedirs(docker_build_path, exists_ok=True)
             with open(os.path.join(docker_build_path, 'Dockerfile'), 'w') as Dockerfile:
                 Dockerfile.write(version_id.dockerfile_id.dockerfile)
-            log_path = os.path.join(docker_build_path, 'docker_build.txt')
             docker_build(docker_build_path, version_id.dockerfile_id.image_tag)
 
     def _get_work_path(self):
