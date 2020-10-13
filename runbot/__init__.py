@@ -5,3 +5,4 @@ from . import models
 from . import common
 from . import container
 from . import wizards
+from . import cli
