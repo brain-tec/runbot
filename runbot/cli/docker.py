@@ -10,6 +10,7 @@ import odoo
 from odoo.cli import Command
 from odoo.tools import config
 
+from ..container import docker_list_images
 
 def raise_keyboard_interrupt(*a):
     raise KeyboardInterrupt()
@@ -25,8 +26,10 @@ class Docker(Command):
         signal.signal(signal.SIGINT, raise_keyboard_interrupt)
 
     def _action_list_dockerfiles(self, env):
+        images_on_host = {i['Tag']: i for i in docker_list_images() if i['Repository'] == 'odoo'}
         for dockerfile in env['runbot.dockerfile'].search([]):
-            print(dockerfile.image_tag)
+            infos = images_on_host.get(dockerfile.image_tag, {})
+            print('%s -- %s -- %s' % (dockerfile.name, infos.get('CreatedAt', ''), infos.get('ID', '')))
 
     def _run_action(self, action):
         with odoo.api.Environment.manage():

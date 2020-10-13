@@ -260,6 +260,23 @@ def _docker_ps():
     return output.strip().split('\n')
 
 
+def docker_list_images():
+    return _docker_list_images()
+
+
+def _docker_list_images():
+    """Return a list of docker images dictionaries on host"""
+    try:
+        raw_output = subprocess.check_output(['docker', 'images', '--format', '{{json . }}'])
+    except FileNotFoundError:
+        _logger.warning('Docker not found, returning an empty list.')
+        return []
+    image_list = []
+    for l in raw_output.decode().split('\n'):  # each line is a json dict (not a list of dict)
+        if l:
+            image_list.append(json.loads(l))
+    return image_list
+
 def build(args):
     """Build container from CLI"""
     _logger.info('Building the base image container')
