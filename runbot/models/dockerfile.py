@@ -12,6 +12,12 @@ class DockerStep(models.Model):
     name = fields.Char('Dockerfile step name', required=True, help="Step description")
     content = fields.Text('Step content', required=True)
     docker_step_order_ids = fields.One2many('runbot.dockerfile.step.order', 'docker_step_id')
+    dockerfile_ids = fields.Many2many('runbot.dockerfile', compute='_compute_dockerfile_ids')
+
+    @api.depends('docker_step_order_ids')
+    def _compute_dockerfile_ids(self):
+        for record in self:
+            record.dockerfile_ids = record.docker_step_order_ids.filtered(lambda r: r.docker_step_id.id == record.id).mapped('dockerfile_id')
 
 
 class DockerStepOrder(models.Model):

@@ -56,6 +56,19 @@
                 <field name="name"/>
                 <field name="content"/>
               </group>
+              <notebook>
+                <page string="Dockerfiles">
+                  <field name="dockerfile_ids" nolabel="1" widget="many2many" options="{'not_delete': True, 'no_create': True}">
+                    <tree>
+                      <field name="id"/>
+                      <field name="name"/>
+                      <field name="image_tag"/>
+                      <field name="is_default"/>
+                      <field name="version_ids" widget="many2many_tags"/>
+                    </tree>
+                  </field>
+                </page>
+              </notebook>
             </sheet>
           </form>
         </field>
