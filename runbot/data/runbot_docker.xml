@@ -142,7 +142,7 @@ RUN pip install --no-cache-dir -r /root/p2-requirements.txt coverage flanker==0.
   <!-- Base Dockerfile for compatibility with old version  -->
   <record model="runbot.dockerfile" id="runbot.compatibility_base_dockerfile">
     <field name="name">Base Dockerfile for compatibility with old system</field>
-    <field name="base_from">FROM ubuntu:bionic</field>
+    <field name="base_from">ubuntu:bionic</field>
     <field name="is_default">True</field>
   </record>
 

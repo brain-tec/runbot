@@ -113,7 +113,7 @@ def _docker_build(build_dir, image_tag):
         df.write(DOCKERUSER)
     log_path = os.path.join(build_dir, 'docker_build.txt')
     logs = open(log_path, 'w')
-    dbuild = subprocess.Popen(['docker', 'build', '--pull', '--tag', image_tag, '.'], stdout=logs, stderr=logs, cwd=build_dir)
+    dbuild = subprocess.Popen(['docker', 'build', '--tag', image_tag, '.'], stdout=logs, stderr=logs, cwd=build_dir)
     dbuild.wait()
 
 

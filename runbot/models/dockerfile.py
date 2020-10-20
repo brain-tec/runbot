@@ -49,7 +49,7 @@ class Dockerfile(models.Model):
     _description = "Dockerfile"
 
     name = fields.Char('Dockerfile name', required=True, help="Name of Dockerfile")
-    image_tag = fields.Char(compute='_compute_image_tag')
+    image_tag = fields.Char(compute='_compute_image_tag', store=True)
     base_from = fields.Char('Dockerfile from', required=True, help="Base FROM")
     docker_step_order_ids = fields.One2many('runbot.dockerfile.step.order', 'dockerfile_id')
     dockerfile = fields.Text(compute='_compute_dockerfile')
