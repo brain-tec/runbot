@@ -121,7 +121,8 @@ class Runbot(models.AbstractModel):
         if domain:
             non_allocated_domain = expression.AND([non_allocated_domain, domain])
         e = expression.expression(non_allocated_domain, self.env['runbot.build'])
-        assert e.get_tables() == ['"runbot_build"']
+        print(e.get_tables())
+        #assert e.get_tables() == ['"runbot_build"']
         where_clause, where_params = e.to_sql()
 
         # self-assign to be sure that another runbot batch cannot self assign the same builds

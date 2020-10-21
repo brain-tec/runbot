@@ -259,8 +259,8 @@ class ConfigStep(models.Model):
     def make_python_ctx(self, build):
         return {
             'self': self,
-            'fields': fields,
-            'models': models,
+            # 'fields': fields,
+            # 'models': models,
             'build': build,
             'docker_run': docker_run,
             '_logger': _logger,
