@@ -9,17 +9,12 @@
               <group name="dockerfile_group">
                 <field name="name"/>
                 <field name="image_tag"/>
-                <field name="base_from"/>
                 <field name="is_default"/>
                 <field name="version_ids" widget="many2many_tags"/>
+                <field name="template_id"/>
               </group>
+                <field name="arch_base" widget="ace" options="{'mode': 'xml'}" readonly="0"/>
               <group>
-                <field name="docker_step_order_ids">
-                    <tree editable="bottom">
-                        <field name="docker_step_id"/>
-                        <field name="sequence" widget="handle"/>
-                    </tree>
-                </field>
               </group>
               <group>
                 <field name="dockerfile"/>
@@ -35,7 +30,6 @@
         <field name="arch" type="xml">
             <tree string="Dockerfile">
                 <field name="name"/>
-                <field name="base_from"/>
             </tree>
         </field>
     </record>
@@ -43,50 +37,6 @@
     <record id="open_view_dockerfile_tree" model="ir.actions.act_window">
         <field name="name">Dockerfiles</field>
         <field name="res_model">runbot.dockerfile</field>
-        <field name="view_mode">tree,form</field>
-    </record>
-
-    <record id="dockerfile_step_form" model="ir.ui.view">
-        <field name="name">runbot.dockerfile.step.form</field>
-        <field name="model">runbot.dockerfile.step</field>
-        <field name="arch" type="xml">
-          <form string="Dockerfile Step">
-            <sheet>
-              <group>
-                <field name="name"/>
-                <field name="content"/>
-              </group>
-              <notebook>
-                <page string="Dockerfiles">
-                  <field name="dockerfile_ids" nolabel="1" widget="many2many" options="{'not_delete': True, 'no_create': True}">
-                    <tree>
-                      <field name="id"/>
-                      <field name="name"/>
-                      <field name="image_tag"/>
-                      <field name="is_default"/>
-                      <field name="version_ids" widget="many2many_tags"/>
-                    </tree>
-                  </field>
-                </page>
-              </notebook>
-            </sheet>
-          </form>
-        </field>
-    </record>
-
-    <record id="dockerfile_step_view_tree" model="ir.ui.view">
-        <field name="name">runbot.dockerfile.step.tree</field>
-        <field name="model">runbot.dockerfile.step</field>
-        <field name="arch" type="xml">
-            <tree string="Dockerfile">
-                <field name="name"/>
-            </tree>
-        </field>
-    </record>
-
-    <record id="open_view_dockerfile_step_tree" model="ir.actions.act_window">
-        <field name="name">Dockerfiles Steps</field>
-        <field name="res_model">runbot.dockerfile.step</field>
         <field name="view_mode">tree,form</field>
     </record>
 
@@ -98,7 +48,6 @@
     />
 
     <menuitem id="menu_dockerfile" name="Dockerfiles" parent="menu_docker" action="open_view_dockerfile_tree" sequence="10"/>
-    <menuitem id="menu_dockerfile_step" name="Docker Steps" parent="menu_docker" action="open_view_dockerfile_step_tree" sequence="15"/>
 
   </data>
 </odoo>

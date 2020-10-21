@@ -13,7 +13,6 @@
         'data/error_link.xml',
         'data/runbot_build_config_data.xml',
         'data/runbot_data.xml',
-        'data/runbot_docker.xml',
         'data/runbot_error_regex_data.xml',
         'data/website_data.xml',
 
@@ -29,6 +28,7 @@
         'templates/bundle.xml',
         'templates/commit.xml',
         'templates/dashboard.xml',
+        'templates/dockerfile.xml',
         'templates/frontend.xml',
         'templates/git.xml',
         'templates/nginx.xml',
