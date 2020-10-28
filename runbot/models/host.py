@@ -76,7 +76,7 @@ class Host(models.Model):
         static_path = self._get_work_path()
         for dockerfile_id in dockerfile_ids:
             docker_build_path = os.path.join(static_path, 'docker', dockerfile_id.image_tag)
-            os.makedirs(docker_build_path, exists_ok=True)
+            os.makedirs(docker_build_path, exist_ok=True)
             with open(os.path.join(docker_build_path, 'Dockerfile'), 'w') as Dockerfile:
                 Dockerfile.write(dockerfile_id.dockerfile)
             docker_build(docker_build_path, dockerfile_id.image_tag)
