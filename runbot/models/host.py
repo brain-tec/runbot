@@ -72,7 +72,7 @@ class Host(models.Model):
 
     def _docker_build(self):
         """ build docker images needed by locally pending builds"""
-        dockerfile_ids = self.env['runbot.dockerfile'].search(['to_build', '=', True])
+        dockerfile_ids = self.env['runbot.dockerfile'].search([('to_build', '=', True)])
         static_path = self._get_work_path()
         for dockerfile_id in dockerfile_ids:
             docker_build_path = os.path.join(static_path, 'docker', dockerfile_id.image_tag)
