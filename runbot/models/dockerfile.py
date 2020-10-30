@@ -1,6 +1,7 @@
 import logging
 import re
 from odoo import models, fields, api
+from odoo.addons.base.models.qweb import QWebException
 
 _logger = logging.getLogger(__name__)
 
@@ -22,8 +23,11 @@ class Dockerfile(models.Model):
     @api.depends('template_id')
     def _compute_dockerfile(self):
         for rec in self:
-            res = rec.template_id.render().decode() if rec.template_id else ''
-            rec.dockerfile = re.sub(r'^\s*$', '', res, flags=re.M).strip()
+            try:
+                res = rec.template_id.render().decode() if rec.template_id else ''
+                rec.dockerfile = re.sub(r'^\s*$', '', res, flags=re.M).strip()
+            except QWebException:
+                rec.dockerfile = ''
 
     @api.depends('name')
     def _compute_image_tag(self):
