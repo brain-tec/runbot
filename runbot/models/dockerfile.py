@@ -17,6 +17,7 @@ class Dockerfile(models.Model):
     to_build = fields.Boolean('Default', help='Default Dockerfile', default=False)
     version_ids = fields.One2many('runbot.version', 'dockerfile_id', string='Versions')
     description = fields.Text('Description')
+    view_ids = fields.Many2many('ir.ui.view', compute='_compute_view_ids')
 
     @api.depends('template_id')
     def _compute_dockerfile(self):
@@ -29,3 +30,9 @@ class Dockerfile(models.Model):
         for rec in self:
             if rec.name:
                 rec.image_tag = 'odoo:%s' % re.sub(r'[ /:\(\)\[\]]', '', rec.name)
+
+    @api.depends('template_id')
+    def _compute_view_ids(self):
+        for rec in self:
+            keys = re.findall(r'<t.+t-call="(.+)".+', rec.arch_base)
+            rec.view_ids = self.env['ir.ui.view'].search([('type', '=', 'qweb'), ('key', 'in', keys)]).ids
