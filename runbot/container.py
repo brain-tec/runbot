@@ -121,14 +121,14 @@ def docker_run(*args, **kwargs):
     return _docker_run(*args, **kwargs)
 
 
-def _docker_run(run_cmd, log_path, build_dir, image_tag, container_name, exposed_ports=None, cpu_limit=None, preexec_fn=None, ro_volumes=None, env_variables=None):
+def _docker_run(run_cmd, log_path, build_dir, container_name, image_tag='odoo:DockerDefault', exposed_ports=None, cpu_limit=None, preexec_fn=None, ro_volumes=None, env_variables=None):
     """Run tests in a docker container
     :param run_cmd: command string to run in container
     :param log_path: path to the logfile that will contain odoo stdout and stderr
     :param build_dir: the build directory that contains the Odoo sources to build.
                       This directory is shared as a volume with the container
-    :param image_tag: Docker image tag name to select which docker image to use
     :param container_name: used to give a name to the container for later reference
+    :param image_tag: Docker image tag name to select which docker image to use
     :param exposed_ports: if not None, starting at 8069, ports will be exposed as exposed_ports numbers
     :params ro_volumes: dict of dest:source volumes to mount readonly in builddir
     :params env_variables: list of environment variables

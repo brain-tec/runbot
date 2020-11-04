@@ -9,7 +9,7 @@ import time
 import datetime
 import hashlib
 from ..common import dt2time, fqdn, now, grep, local_pgadmin_cursor, s2human, dest_reg, os, list_local_dbs, pseudo_markdown, RunbotException
-from ..container import docker_stop, docker_state, Command
+from ..container import docker_stop, docker_state, Command, docker_run
 from ..fields import JsonDictField
 from odoo import models, fields, api
 from odoo.exceptions import UserError, ValidationError
@@ -717,6 +717,14 @@ class BuildResult(models.Model):
                     _logger.exception(message)
                     build._log("run", message, level='ERROR')
                     build._kill(result='ko')
+
+    def _docker_run(self, *args, **kwargs):
+        self.ensure_one()
+        if 'image_tag' not in kwargs:
+            kwargs.update({'image_tag': self.params_id.dockerfile_id.image_tag})
+        if kwargs['image_tag'] != 'odoo:DockerDefault':
+            self._log('Preparing', 'Using Dockerfile Tag %s' % kwargs['image_tag'])
+        docker_run(*args, **kwargs)
 
     def _path(self, *l, **kw):
         """Return the repo build path"""
