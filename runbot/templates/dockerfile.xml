@@ -3,7 +3,7 @@
   <data>
 
     <template id="runbot.docker_from">
-FROM <t t-esc="docker_from"/>
+FROM <t t-esc="values['from']"/>
 ENV LANG C.UTF-8
 USER root
     </template>
@@ -12,13 +12,13 @@ USER root
 # Install debian packages
 RUN set -x ; \
     apt-get update \
-    &amp;&amp; DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends <t t-esc="deb_packages"/> \
+    &amp;&amp; DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends <t t-esc="deb_packages or values['deb_packages']"/> \
     &amp;&amp; rm -rf /var/lib/apt/lists/*
     </template>
 
     <template id="runbot.docker_install_chrome">
-      <t t-set="chrome_distrib" t-value="chrome_distrib or 'bionic'"/>
-      <t t-set="chrome_version" t-value="chrome_version or '80.0.3987.116-1'"/>
+      <t t-set="chrome_distrib" t-value="values['chrome_distrib']"/>
+      <t t-set="chrome_version" t-value="values['chrome_version']"/>
 # Install Google Chrome
 RUN curl -sSL http://nightly.odoo.com/odoo.key | apt-key add - \
     &amp;&amp; echo "deb http://nightly.odoo.com/deb/<t t-esc="chrome_distrib"/> ./" > /etc/apt/sources.list.d/google-chrome.list \
@@ -36,9 +36,8 @@ RUN curl -sSL https://bitbucket.org/ariya/phantomjs/downloads/phantomjs-2.1.1-li
     </template>
 
     <template id="runbot.docker_install_wkhtml">
-      <t t-set="wkhtml_url" t-value="wkhtml_url or 'https://github.com/wkhtmltopdf/wkhtmltopdf/releases/download/0.12.5/wkhtmltox_0.12.5-1.bionic_amd64.deb'"/>
 # Install wkhtml
-RUN curl -sSL <t t-esc="wkhtml_url"/> -o /tmp/wkhtml.deb \
+RUN curl -sSL <t t-esc="values['wkhtml_url']"/> -o /tmp/wkhtml.deb \
     &amp;&amp; apt-get update \
     &amp;&amp; dpkg --force-depends -i /tmp/wkhtml.deb \
     &amp;&amp; apt-get install -y -f --no-install-recommends \
@@ -49,13 +48,13 @@ RUN curl -sSL <t t-esc="wkhtml_url"/> -o /tmp/wkhtml.deb \
       <t t-set="node_version" t-value="node_version or '15'"/>
 # Install nodejs
 RUN curl -sSL https://deb.nodesource.com/gpgkey/nodesource.gpg.key | apt-key add - \
-    &amp;&amp; echo "deb https://deb.nodesource.com/node_<t t-esc="node_version"/>.x `lsb_release -c -s` main" > /etc/apt/sources.list.d/nodesource.list \
+    &amp;&amp; echo "deb https://deb.nodesource.com/node_<t t-esc="values['node_version']"/>.x `lsb_release -c -s` main" > /etc/apt/sources.list.d/nodesource.list \
     &amp;&amp; apt-get update \
     &amp;&amp; apt-get install -y nodejs
     </template>
 
     <template id="runbot.docker_install_node_packages">
-RUN npm install -g <t t-esc="node_packages"/>
+RUN npm install -g <t t-esc="values['node_packages']"/>
     </template>
 
     <template id="runbot.docker_install_flamegraph">
@@ -68,13 +67,13 @@ RUN chmod +rx /usr/local/bin/flamegraph.pl
 RUN curl -sSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add - \
     &amp;&amp; echo "deb http://apt.postgresql.org/pub/repos/apt/ `lsb_release -s -c`-pgdg main" > /etc/apt/sources.list.d/pgclient.list \
     &amp;&amp; apt-get update \
-    &amp;&amp; DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql-client<t t-if="psql_version">-</t><t t-esc="psql_version"/> \
+    &amp;&amp; DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql-client<t t-if="values['psql_version']">-</t><t t-esc="values['psql_version']"/> \
     &amp;&amp; rm -rf /var/lib/apt/lists/*
     </template>
 
     <template id="runbot.docker_install_odoo_debs">
       <t t-set="odoo_branch" t-value="odoo_branch or 'master'"/>
-ADD https://raw.githubusercontent.com/odoo/odoo/<t t-esc="odoo_branch"/>/debian/control /tmp/control.txt
+ADD https://raw.githubusercontent.com/odoo/odoo/<t t-esc="values['odoo_branch']"/>/debian/control /tmp/control.txt
 RUN apt-get update \
     &amp;&amp; sed -n '/^Depends:/,/^[A-Z]/p' /tmp/control.txt \
        | awk '/^ [a-z]/ { gsub(/,/,"") ; print }' | sort -u \
@@ -85,64 +84,76 @@ RUN apt-get update \
     &amp;&amp; rm -rf /var/lib/apt/lists/*
     </template>
 
-    <template id="runbot.docker_install_odoo_python3_requirements">
-      <t t-set="odoo_branch" t-value="odoo_branch or 'master'"/>
-ADD https://raw.githubusercontent.com/odoo/odoo/<t t-esc="odoo_branch"/>/requirements.txt /root/p3-requirements.txt
-RUN pip3 install --no-cache-dir -r /root/p3-requirements.txt coverage==4.5.4 websocket-client astroid==2.4.2 \
-    pylint==2.6.0 phonenumbers pyCrypto dbfread==2.0.7 firebase-admin==2.17.0 flamegraph pdfminer.six==20200720 \
-    pdf417gen==0.7.1
-    </template>
-
-    <template id="runbot.docker_install_odoo_python2_requirements">
-      <t t-set="odoo_branch" t-value="odoo_branch or '10.0'"/>
-ADD https://raw.githubusercontent.com/odoo/odoo/<t t-esc="odoo_branch"/>/requirements.txt /root/p2-requirements.txt
-RUN pip install -U setuptools wheel \
-    &amp;&amp; pip install --no-cache-dir -r /root/p2-requirements.txt coverage flanker==0.4.38 pylint==1.7.2 phonenumbers redis
+    <template id="runbot.docker_install_odoo_python_requirements">
+ADD https://raw.githubusercontent.com/odoo/odoo/<t t-esc="values['odoo_branch']"/>/requirements.txt /root/requirements.txt
+RUN <t t-esc="values['python_version']"/> -m pip install setuptools wheel &amp;&amp; \
+    <t t-esc="values['python_version']"/> -m pip install --no-cache-dir -r /root/requirements.txt &amp;&amp; \
+    <t t-esc="values['python_version']"/> -m pip install <t t-esc="values['additional_pip']"/>
     </template>
 
     <template id="runbot.docker_base">
-      <t t-set="docker_from" t-value="docker_from or 'ubuntu:bionic'"></t>
-        <t t-call="runbot.docker_from"/>
+      <t t-set="default" t-value="{
+                'from': 'ubuntu:bionic',
+                'odoo_branch': 'master',
+                'chrome_distrib': 'bionic',
+                'chrome_version': '80.0.3987.116-1',
+                'node_packages': 'rtlcss es-check',
+                'node_version': '15',
+                'psql_version': '12',
+                'wkhtml_url': 'https://github.com/wkhtmltopdf/wkhtmltopdf/releases/download/0.12.5/wkhtmltox_0.12.5-1.bionic_amd64.deb',
+                'chrome': True,
+                'phantom': False,
+                'python_version': 'python3',
+                'deb_packages_python': 'python3 python3-dev python3-pip python3-setuptools python3-wheel python3-markdown libpq-dev',
+                'deb_package_default': 'apt-transport-https build-essential ca-certificates curl ffmpeg file fonts-freefont-ttf fonts-noto-cjk gawk gnupg libldap2-dev libsasl2-dev libxslt1-dev lsb-release node-less ocrmypdf sed sudo unzip xfonts-75dpi zip zlib1g-dev',
+                'additional_pip': 'coverage==4.5.4 websocket-client astroid==2.4.2 pylint==2.6.0 phonenumbers pyCrypto dbfread==2.0.7 firebase-admin==2.17.0 flamegraph pdfminer.six==20200720 pdf417gen==0.7.1'
+              }"/>
+      <t t-set="values" t-value="default"/>
+      <t t-set="dummy" t-value="values.update(custom_values)" t-if="custom_values" />
 
-        <t t-call="runbot.docker_install_debs">
-          <t t-set="deb_packages" t-value="'apt-transport-https build-essential ca-certificates curl ffmpeg file fonts-freefont-ttf fonts-noto-cjk gawk gnupg libldap2-dev libsasl2-dev libxslt1-dev lsb-release node-less ocrmypdf sed sudo unzip xfonts-75dpi zip zlib1g-dev'"/>
-        </t>
-
-        <t t-call="runbot.docker_install_phantomjs"/>
-
-        <t t-call="runbot.docker_install_debs">
-          <t t-set="deb_packages" t-value="'python python-dev python-pip python3 python3-dev python3-pip python3-setuptools python3-wheel python3-markdown'"/>
-        </t>
-
-        <t t-call="runbot.docker_install_wkhtml"/>
-
-        <t t-call="runbot.docker_install_nodejs"/>
-
-        <t t-call="runbot.docker_install_node_packages">
-          <t t-set="node_packages" t-value="node_packages or 'rtlcss es-check'"/>
-        </t>
-
-        <t t-call="runbot.docker_install_flamegraph"/>
-
-        <t t-call="runbot.docker_install_odoo_debs">
-          <t t-set="odoo_branch" t-value="'master'"/>
-        </t>
-
-        <t t-call="runbot.docker_install_odoo_debs">
-          <t t-set="odoo_branch" t-value="'10.0'"/>
-        </t>
-
-        <t t-call="runbot.docker_install_psql"/>
-
-        <t t-call="runbot.docker_install_chrome"/>
-
-        <t t-call="runbot.docker_install_odoo_python3_requirements">
-          <t t-set="odoo_branch" t-value="'master'"/>
-        </t>
-
-        <t t-call="runbot.docker_install_odoo_python2_requirements">
-          <t t-set="odoo_branch" t-value="'10.0'"/>
-        </t>
+      <t t-call="runbot.docker_from"/>
+      <t t-call="runbot.docker_install_debs">
+         <t t-set="deb_packages" t-value="values['deb_package_default']"/>
+      </t>
+      <t t-call="runbot.docker_install_debs">
+        <t t-set="deb_packages" t-value="values['deb_packages_python']"/>
+      </t>
+      <t t-raw="0"/><!-- custom content from caller t-call-->
+      <t t-call="runbot.docker_install_wkhtml"/>
+      <t t-call="runbot.docker_install_nodejs"/>
+      <t t-call="runbot.docker_install_node_packages"/>
+      <t t-call="runbot.docker_install_flamegraph"/>
+      <t t-call="runbot.docker_install_odoo_debs"/>
+      <t t-call="runbot.docker_install_psql"/>
+      <t t-if="values['chrome']" t-call="runbot.docker_install_chrome"/>
+      <t t-if="values['phantom']" t-call="runbot.docker_install_phantomjs"/>
+      <t t-call="runbot.docker_install_odoo_python_requirements"/>
     </template>
+
+    <template id="runbot.docker_11">
+      <t t-call="runbot.docker_base">
+       <t t-set="custom_values" t-value="{
+          'from': 'ubuntu:bionic',
+          'odoo_branch': '11.0',
+          'chrome': False,
+          'phantom': True,
+        }"/>
+      </t>
+    </template>
+
+    <template id="runbot.docker_10">
+    <t t-call="runbot.docker_base">
+      <t t-set="custom_values" t-value="{
+        'from': 'ubuntu:bionic',
+        'python_version': 'python',
+        'odoo_branch': '10.0',
+        'deb_packages_python': 'python python-dev python-pip',
+        'chrome': False,
+        'phantom': True,
+        'additional_pip': 'coverage flanker==0.4.38 pylint==1.7.2 phonenumbers redis'
+      }"/>
+    </t>
+    </template>
+
   </data>
 </odoo>

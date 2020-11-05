@@ -4,8 +4,24 @@
         <field name="name">Docker Default</field>
         <field name="template_id" ref="runbot.docker_base"/>
         <field name="to_build">True</field>
-        <field name="description">Default Dockerfile with Python2 and Python3.
-Can be used with Odoo 9 to 14.
+        <field name="description">Default Dockerfile with Python3.
+Can be used with 12 to 14.
+        </field>
+    </record>
+    <record model="runbot.dockerfile" id="runbot.docker_11">
+        <field name="name">Docker11</field>
+        <field name="template_id" ref="runbot.docker_11"/>
+        <field name="to_build">True</field>
+        <field name="description">Default Dockerfile with Python3 and phantomjs.
+Can be used with Odoo 11.
+        </field>
+    </record>
+    <record model="runbot.dockerfile" id="runbot.docker_10">
+        <field name="name">Docker10</field>
+        <field name="template_id" ref="runbot.docker_10"/>
+        <field name="to_build">True</field>
+        <field name="description">Default Dockerfile with Python2 and phantomjs.
+Can be used with Odoo 9 to 10.
         </field>
     </record>
 </odoo>
