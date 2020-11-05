@@ -15,13 +15,13 @@ class Dockerfile(models.Model):
     image_tag = fields.Char(compute='_compute_image_tag', store=True)
     template_id = fields.Many2one('ir.ui.view', string='Docker Template', domain=[('type', '=', 'qweb')], context={'default_type': 'qweb', 'default_arch_base': '<t></t>'})
     arch_base = fields.Text(related='template_id.arch_base', readonly=False)
-    dockerfile = fields.Text(compute='_compute_dockerfile')
+    dockerfile = fields.Text(compute='_compute_dockerfile', tracking=True)
     to_build = fields.Boolean('To Build', help='Build Dockerfile. Check this when the Dockerfile is ready.', default=False)
     version_ids = fields.One2many('runbot.version', 'dockerfile_id', string='Versions')
     description = fields.Text('Description')
     view_ids = fields.Many2many('ir.ui.view', compute='_compute_view_ids')
 
-    @api.depends('template_id')
+    @api.depends('template_id.arch_base')
     def _compute_dockerfile(self):
         for rec in self:
             try:
