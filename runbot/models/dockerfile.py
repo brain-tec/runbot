@@ -8,6 +8,7 @@ _logger = logging.getLogger(__name__)
 
 class Dockerfile(models.Model):
     _name = 'runbot.dockerfile'
+    _inherit = [ 'mail.thread' ]
     _description = "Dockerfile"
 
     name = fields.Char('Dockerfile name', required=True, unique=True, help="Name of Dockerfile")

@@ -114,7 +114,7 @@ def _docker_build(build_dir, image_tag):
     log_path = os.path.join(build_dir, 'docker_build.txt')
     logs = open(log_path, 'w')
     dbuild = subprocess.Popen(['docker', 'build', '--tag', image_tag, '.'], stdout=logs, stderr=logs, cwd=build_dir)
-    dbuild.wait()
+    return dbuild.wait()
 
 
 def docker_run(*args, **kwargs):
