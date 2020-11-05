@@ -39,5 +39,5 @@ class Dockerfile(models.Model):
     @api.depends('template_id')
     def _compute_view_ids(self):
         for rec in self:
-            keys = re.findall(r'<t.+t-call="(.+)".+', rec.arch_base)
+            keys = re.findall(r'<t.+t-call="(.+)".+', rec.arch_base or '')
             rec.view_ids = self.env['ir.ui.view'].search([('type', '=', 'qweb'), ('key', 'in', keys)]).ids
