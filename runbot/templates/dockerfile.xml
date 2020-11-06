@@ -135,6 +135,7 @@ RUN <t t-esc="values['python_version']"/> -m pip install setuptools wheel &amp;&
        <t t-set="custom_values" t-value="{
           'from': 'ubuntu:bionic',
           'odoo_branch': '11.0',
+          'node_version': '8',
           'chrome': False,
           'phantom': True,
         }"/>
