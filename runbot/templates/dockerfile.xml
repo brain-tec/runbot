@@ -148,6 +148,7 @@ RUN <t t-esc="values['python_version']"/> -m pip install setuptools wheel &amp;&
         'from': 'ubuntu:bionic',
         'python_version': 'python',
         'odoo_branch': '10.0',
+        'node_version': '8',
         'deb_packages_python': 'python python-dev python-pip',
         'chrome': False,
         'phantom': True,
