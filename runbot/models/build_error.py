@@ -32,7 +32,7 @@ class BuildError(models.Model):
     trigger_ids = fields.Many2many('runbot.trigger', compute='_compute_trigger_ids')
     active = fields.Boolean('Error is not fixed', default=True, tracking=True)
     tag_ids = fields.Many2many('runbot.build.error.tag', string='Tags')
-    build_count = fields.Integer(compute='_compute_build_counts', string='Nb seen')
+    build_count = fields.Integer(compute='_compute_build_counts', string='Nb seen', store=True)
     parent_id = fields.Many2one('runbot.build.error', 'Linked to', index=True)
     child_ids = fields.One2many('runbot.build.error', 'parent_id', string='Child Errors', context={'active_test': False})
     children_build_ids = fields.Many2many('runbot.build', compute='_compute_children_build_ids', string='Children builds')
@@ -65,10 +65,10 @@ class BuildError(models.Model):
                 (build_error.child_ids - self).write({'active': vals['active']})
         return super(BuildError, self).write(vals)
 
-    @api.depends('build_ids')
+    @api.depends('build_ids', 'child_ids.build_ids')
     def _compute_build_counts(self):
         for build_error in self:
-            build_error.build_count = len(build_error.children_build_ids)
+            build_error.build_count = len(build_error.build_ids | build_error.mapped('child_ids.build_ids'))
 
     @api.depends('build_ids')
     def _compute_bundle_ids(self):
@@ -86,18 +86,18 @@ class BuildError(models.Model):
         for build_error in self:
             build_error.summary = build_error.content[:50]
 
-    @api.depends('child_ids')
+    @api.depends('build_ids', 'child_ids.build_ids')
     def _compute_children_build_ids(self):
         for build_error in self:
             all_builds = build_error.build_ids | build_error.mapped('child_ids.build_ids')
             build_error.children_build_ids = all_builds.sorted(key=lambda rec: rec.id, reverse=True)
 
-    @api.depends('build_ids', 'child_ids')
+    @api.depends('children_build_ids')
     def _compute_last_seen_build_id(self):
         for build_error in self:
             build_error.last_seen_build_id = build_error.children_build_ids and build_error.children_build_ids[0] or False
 
-    @api.depends('build_ids', 'child_ids')
+    @api.depends('children_build_ids')
     def _compute_first_seen_build_id(self):
         for build_error in self:
             build_error.first_seen_build_id = build_error.children_build_ids and build_error.children_build_ids[-1] or False
