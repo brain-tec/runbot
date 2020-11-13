@@ -352,18 +352,13 @@ class Runbot(Controller):
 
     @route(['/runbot/errors',
             '/runbot/errors/<int:error_id>'], type='http', auth='user', website=True)
-    def build_errors(self, error_id=None, **kwargs):
-        unassigned_random_errors = request.env['runbot.build.error'].search([('random', '=', True), ('parent_id', '=', False), ('responsible', '=', False)]).filtered(lambda rec: len(rec.children_build_ids) > 1)
-        current_user_errors = request.env['runbot.build.error'].search([('responsible', '=', request.env.user.id)])
-        other_user_errors = request.env['runbot.build.error'].search([('responsible', 'not in', [False, request.env.user.id])])
-
-        unassigned_random_errors = unassigned_random_errors.sorted(lambda rec: (rec.last_seen_date.date(), rec.build_count), reverse=True)
-        current_user_errors = current_user_errors.sorted(lambda rec: (rec.last_seen_date.date(), rec.build_count), reverse=True)
-        other_user_errors = other_user_errors.sorted(lambda rec: (rec.last_seen_date.date(), rec.build_count), reverse=True)
-
-        build_errors = current_user_errors + other_user_errors + unassigned_random_errors
+    def build_errors(self, error_id=None, order=None, **kwargs):
+        orders = { 'date'}
+        current_user_errors = request.env['runbot.build.error'].search([('responsible', '=', request.env.user.id)], order='last_seen_date desc, build_count desc')
+        build_errors = request.env['runbot.build.error'].search([('responsible', '!=', request.env.user.id)], order='last_seen_date desc, build_count desc')
 
         qctx = {
+            'current_user_errors': current_user_errors,
             'build_errors': build_errors,
             'title': 'Build Errors'
         }
