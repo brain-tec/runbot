@@ -32,15 +32,15 @@ class BuildError(models.Model):
     trigger_ids = fields.Many2many('runbot.trigger', compute='_compute_trigger_ids')
     active = fields.Boolean('Error is not fixed', default=True, tracking=True)
     tag_ids = fields.Many2many('runbot.build.error.tag', string='Tags')
-    build_count = fields.Integer(compute='_compute_build_counts', string='Nb seen')
+    build_count = fields.Integer(compute='_compute_build_counts', string='Nb seen', store=True)
     parent_id = fields.Many2one('runbot.build.error', 'Linked to', index=True)
     child_ids = fields.One2many('runbot.build.error', 'parent_id', string='Child Errors', context={'active_test': False})
     children_build_ids = fields.Many2many('runbot.build', compute='_compute_children_build_ids', string='Children builds')
     error_history_ids = fields.Many2many('runbot.build.error', compute='_compute_error_history_ids', string='Old errors', context={'active_test': False})
     first_seen_build_id = fields.Many2one('runbot.build', compute='_compute_first_seen_build_id', string='First Seen build')
     first_seen_date = fields.Datetime(string='First Seen Date', related='first_seen_build_id.create_date')
-    last_seen_build_id = fields.Many2one('runbot.build', compute='_compute_last_seen_build_id', string='Last Seen build')
-    last_seen_date = fields.Datetime(string='Last Seen Date', related='last_seen_build_id.create_date')
+    last_seen_build_id = fields.Many2one('runbot.build', compute='_compute_last_seen_build_id', string='Last Seen build', store=True)
+    last_seen_date = fields.Datetime(string='Last Seen Date', related='last_seen_build_id.create_date', store=True)
     test_tags = fields.Char(string='Test tags', help="Comma separated list of test_tags to use to reproduce/remove this error")
 
     @api.constrains('test_tags')
@@ -65,10 +65,10 @@ class BuildError(models.Model):
                 (build_error.child_ids - self).write({'active': vals['active']})
         return super(BuildError, self).write(vals)
 
-    @api.depends('build_ids')
+    @api.depends('build_ids', 'child_ids.build_ids')
     def _compute_build_counts(self):
         for build_error in self:
-            build_error.build_count = len(build_error.children_build_ids)
+            build_error.build_count = len(build_error.build_ids | build_error.mapped('child_ids.build_ids'))
 
     @api.depends('build_ids')
     def _compute_bundle_ids(self):
@@ -86,18 +86,18 @@ class BuildError(models.Model):
         for build_error in self:
             build_error.summary = build_error.content[:50]
 
-    @api.depends('child_ids')
+    @api.depends('build_ids', 'child_ids.build_ids')
     def _compute_children_build_ids(self):
         for build_error in self:
             all_builds = build_error.build_ids | build_error.mapped('child_ids.build_ids')
             build_error.children_build_ids = all_builds.sorted(key=lambda rec: rec.id, reverse=True)
 
-    @api.depends('build_ids', 'child_ids')
+    @api.depends('children_build_ids')
     def _compute_last_seen_build_id(self):
         for build_error in self:
             build_error.last_seen_build_id = build_error.children_build_ids and build_error.children_build_ids[0] or False
 
-    @api.depends('build_ids', 'child_ids')
+    @api.depends('children_build_ids')
     def _compute_first_seen_build_id(self):
         for build_error in self:
             build_error.first_seen_build_id = build_error.children_build_ids and build_error.children_build_ids[-1] or False
@@ -106,7 +106,7 @@ class BuildError(models.Model):
     def _compute_error_history_ids(self):
         for error in self:
             fingerprints = [error.fingerprint] + [rec.fingerprint for rec in error.child_ids]
-            error.error_history_ids = self.search([('fingerprint', 'in', fingerprints), ('active', '=', False), ('id', '!=', error.id)])
+            error.error_history_ids = self.search([('fingerprint', 'in', fingerprints), ('active', '=', False), ('id', '!=', error.id or False)])
 
     @api.model
     def _digest(self, s):
@@ -129,20 +129,35 @@ class BuildError(models.Model):
             fingerprint = self._digest(cleaning_regs.r_sub('%', log.message))
             hash_dict[fingerprint].append(log)
 
+        build_errors = self.env['runbot.build.error']
         # add build ids to already detected errors
-        for build_error in self.env['runbot.build.error'].search([('fingerprint', 'in', list(hash_dict.keys())), ('active', '=', True)]):
+        existing_errors = self.env['runbot.build.error'].search([('fingerprint', 'in', list(hash_dict.keys())), ('active', '=', True)])
+        build_errors |= existing_errors
+        for build_error in existing_errors:
             for build in {rec.build_id for rec in hash_dict[build_error.fingerprint]}:
                 build.build_error_ids += build_error
             del hash_dict[build_error.fingerprint]
 
         # create an error for the remaining entries
         for fingerprint, logs in hash_dict.items():
-            build_error = self.env['runbot.build.error'].create({
+            build_errors |= self.env['runbot.build.error'].create({
                 'content': logs[0].message,
                 'module_name': logs[0].name,
                 'function': logs[0].func,
                 'build_ids': [(6, False, [r.build_id.id for r in logs])],
             })
+
+        if build_errors:
+            window_action = {
+                "type": "ir.actions.act_window",
+                "res_model": "runbot.build.error",
+                "views": [[False, "tree"]],
+                "domain": [('id', 'in', build_errors.ids)]
+            }
+            if len(build_errors) == 1:
+                window_action["views"] = [[False, "form"]]
+                window_action["res_id"] = build_errors.id
+            return window_action
 
     def link_errors(self):
         """ Link errors with the first one of the recordset

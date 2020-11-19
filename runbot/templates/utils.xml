@@ -280,10 +280,6 @@
                         logs
                     </a>
                 </t>
-                <a t-if="bu.coverage and bu.host" class="dropdown-item" t-attf-href="http://{{bu.host}}/runbot/static/build/#{bu.dest}/coverage/index.html">
-                    <i class="fa fa-file-text-o"/>
-                    Coverage
-                </a>
                 <t groups="runbot.group_runbot_admin">
                     <div class="dropdown-divider"/>
                     <a class="dropdown-item" t-attf-href="/web/#id={{bu['id']}}&amp;view_type=form&amp;model=runbot.build" target="new">
@@ -305,6 +301,12 @@
               <a t-att-href="branch.branch_url" class="dropdown-item" t-att-title="link_title"><span class="font-italic text-muted"><t t-esc="branch.remote_id.short_name"/></span> <t t-esc="branch.name"/></a>
             </t>
           </div>
+        </template>
+
+        <template id="runbot.branch_copy_button">
+            <button t-attf-class="btn btn-default btn-ssm" title="Copy Bundle name" aria-label="Copy Bundle name" t-attf-onclick="copyToClipboard('{{ bundle.name.split(':')[-1] }}')">
+              <i t-attf-class="fa fa-clipboard"/>
+            </button>
         </template>
     </data>
 </odoo>
