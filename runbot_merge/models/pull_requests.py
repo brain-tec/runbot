@@ -16,6 +16,7 @@ import time
 from itertools import takewhile
 
 import requests
+import werkzeug
 from werkzeug.datastructures import Headers
 
 from odoo import api, fields, models, tools
@@ -265,6 +266,8 @@ class Repository(models.Model):
     project_id = fields.Many2one('runbot_merge.project', required=True)
     status_ids = fields.One2many('runbot_merge.repository.status', 'repo_id', string="Required Statuses")
 
+    group_id = fields.Many2one('res.groups', default=lambda self: self.env.ref('base.group_user'))
+
     branch_filter = fields.Char(default='[(1, "=", 1)]', help="Filter branches valid for this repository")
     substitutions = fields.Text(
         "label substitutions",
@@ -304,10 +307,11 @@ All substitutions are tentatively applied sequentially to the input.
         # fetch PR object and handle as *opened*
         issue, pr = gh.pr(number)
 
+        feedback = self.env['runbot_merge.pull_requests.feedback'].create
         if not self.project_id._has_branch(pr['base']['ref']):
             _logger.info("Tasked with loading PR %d for un-managed branch %s:%s, ignoring",
-                         pr['number'], self.name, pr['base']['ref'])
-            self.env['runbot_merge.pull_requests.feedback'].create({
+                         number, self.name, pr['base']['ref'])
+            feedback({
                 'repository': self.id,
                 'pull_request': number,
                 'message': "I'm sorry. Branch `{}` is not within my remit.".format(pr['base']['ref']),
@@ -317,7 +321,7 @@ All substitutions are tentatively applied sequentially to the input.
         # if the PR is already loaded, check... if the heads match?
         pr_id = self.env['runbot_merge.pull_requests'].search([
             ('repository.name', '=', pr['base']['repo']['full_name']),
-            ('number', '=', pr['number']),
+            ('number', '=', number),
         ])
         if pr_id:
             # TODO: edited, maybe (requires crafting a 'changes' object)
@@ -325,36 +329,60 @@ All substitutions are tentatively applied sequentially to the input.
                 'action': 'synchronize',
                 'pull_request': pr,
             })
-            self.env['runbot_merge.pull_requests.feedback'].create({
+            feedback({
                 'repository': pr_id.repository.id,
                 'pull_request': number,
                 'message': r,
             })
             return
 
+        # init the PR to the null commit so we can later synchronise it back
+        # back to the "proper" head while resetting reviews
         controllers.handle_pr(self.env, {
             'action': 'opened',
-            'pull_request': pr,
+            'pull_request': {**pr, 'head': {**pr['head'], 'sha': '0'*40}},
         })
+        # fetch & set up actual head
         for st in gh.statuses(pr['head']['sha']):
             controllers.handle_status(self.env, st)
-        # get and handle all comments
-        for comment in gh.comments(number):
-            controllers.handle_comment(self.env, {
-                'action': 'created',
-                'issue': issue,
-                'sender': comment['user'],
-                'comment': comment,
-                'repository': {'full_name': self.name},
-            })
-        # get and handle all reviews
-        for review in gh.reviews(number):
-            controllers.handle_review(self.env, {
-                'action': 'submitted',
-                'review': review,
-                'pull_request': pr,
-                'repository': {'full_name': self.name},
-            })
+        # fetch and apply comments
+        counter = itertools.count()
+        items = [ # use counter so `comment` and `review` don't get hit during sort
+            (comment['created_at'], next(counter), False, comment)
+            for comment in gh.comments(number)
+        ] + [
+            (review['submitted_at'], next(counter), True, review)
+            for review in gh.reviews(number)
+        ]
+        items.sort()
+        for _, _, is_review, item in items:
+            if is_review:
+                controllers.handle_review(self.env, {
+                    'action': 'submitted',
+                    'review': item,
+                    'pull_request': pr,
+                    'repository': {'full_name': self.name},
+                })
+            else:
+                controllers.handle_comment(self.env, {
+                    'action': 'created',
+                    'issue': issue,
+                    'sender': item['user'],
+                    'comment': item,
+                    'repository': {'full_name': self.name},
+                })
+        # sync to real head
+        controllers.handle_pr(self.env, {
+            'action': 'synchronize',
+            'pull_request': pr,
+            'sender': {'login': self.project_id.github_prefix}
+        })
+        feedback({
+            'repository': self.id,
+            'pull_request': number,
+            'message': "Sorry, I didn't know about this PR and had to retrieve "
+                       "its information, you may have to re-approve it."
+        })
 
     def having_branch(self, branch):
         branches = self.env['runbot_merge.branch'].search
@@ -580,18 +608,6 @@ For-Commit-Id: %s
                 )
                 raise TimeoutError("Staged head not updated after %d seconds" % sum(WAIT_FOR_VISIBILITY))
 
-
-        # creating the staging doesn't trigger a write on the prs
-        # and thus the ->staging taggings, so do that by hand
-        Tagging = self.env['runbot_merge.pull_requests.tagging']
-        for pr in st.mapped('batch_ids.prs'):
-            Tagging.create({
-                'pull_request': pr.number,
-                'repository': pr.repository.id,
-                'state_from': 'ready',
-                'state_to': 'staged',
-            })
-
         logger.info("Created staging %s (%s) to %s", st, ', '.join(
             '%s[%s]' % (batch, batch.prs)
             for batch in staged
@@ -676,6 +692,18 @@ class PullRequests(models.Model):
         help="PR is not currently stageable for some reason (mostly an issue if status is ready)"
     )
 
+    url = fields.Char(compute='_compute_url')
+    github_url = fields.Char(compute='_compute_url')
+
+    @api.depends('repository.name', 'number')
+    def _compute_url(self):
+        base = werkzeug.urls.url_parse(self.env['ir.config_parameter'].sudo().get_param('web.base.url', 'http://localhost:8069'))
+        gh_base = werkzeug.urls.url_parse('https://github.com')
+        for pr in self:
+            path = f'/{werkzeug.urls.url_quote(pr.repository.name)}/pull/{pr.number}'
+            pr.url = str(base.join(path))
+            pr.github_url = str(gh_base.join(path))
+
     @api.depends('repository.name', 'number')
     def _compute_display_name(self):
         return super(PullRequests, self)._compute_display_name()
@@ -686,6 +714,27 @@ class PullRequests(models.Model):
             for p in self
         ]
 
+    @property
+    def _approved(self):
+        return self.state in ('approved', 'ready') or any(
+            p.priority == 0
+            for p in (self | self._linked_prs)
+        )
+
+    @property
+    def _ready(self):
+        return (self.squash or self.merge_method) and self._approved and self.status == 'success'
+
+    @property
+    def _linked_prs(self):
+        if re.search(r':patch-\d+', self.label):
+            return self.browse(())
+        return self.search([
+            ('target', '=', self.target.id),
+            ('label', '=', self.label),
+            ('state', 'not in', ('merged', 'closed')),
+        ]) - self
+
     # missing link to other PRs
     @api.depends('priority', 'state', 'squash', 'merge_method', 'batch_id.active', 'label')
     def _compute_is_blocked(self):
@@ -694,31 +743,23 @@ class PullRequests(models.Model):
             if pr.state in ('merged', 'closed'):
                 continue
 
-            batch = pr
-            if not re.search(r':patch-\d+', pr.label):
-                batch = self.search([
-                    ('target', '=', pr.target.id),
-                    ('label', '=', pr.label),
-                    ('state', 'not in', ('merged', 'closed')),
-                ])
-
+            linked = pr._linked_prs
             # check if PRs are configured (single commit or merge method set)
             if not (pr.squash or pr.merge_method):
                 pr.blocked = 'has no merge method'
                 continue
-            other_unset = next((p for p in batch if not (p.squash or p.merge_method)), None)
+            other_unset = next((p for p in linked if not (p.squash or p.merge_method)), None)
             if other_unset:
                 pr.blocked = "linked PR %s has no merge method" % other_unset.display_name
                 continue
 
             # check if any PR in the batch is p=0 and none is in error
-            if any(p.priority == 0 for p in batch):
-                in_error = next((p for p in batch if p.state == 'error'), None)
-                if in_error:
-                    if pr == in_error:
-                        pr.blocked = "in error"
-                    else:
-                        pr.blocked = "linked pr %s in error" % in_error.display_name
+            if any(p.priority == 0 for p in (pr | linked)):
+                if pr.state == 'error':
+                    pr.blocked = "in error"
+                other_error = next((p for p in linked if p.state == 'error'), None)
+                if other_error:
+                    pr.blocked = "linked pr %s in error" % other_error.display_name
                 # if none is in error then none is blocked because p=0
                 # "unblocks" the entire batch
                 continue
@@ -727,7 +768,7 @@ class PullRequests(models.Model):
                 pr.blocked = 'not ready'
                 continue
 
-            unready = next((p for p in batch if p.state != 'ready'), None)
+            unready = next((p for p in linked if p.state != 'ready'), None)
             if unready:
                 pr.blocked = 'linked pr %s is not ready' % unready.display_name
                 continue
@@ -966,7 +1007,7 @@ class PullRequests(models.Model):
                     })
             elif command == 'override':
                 overridable = author.override_rights\
-                    .filtered(lambda r: r.repository_id == self.repository)\
+                    .filtered(lambda r: not r.repository_id or (r.repository_id == self.repository))\
                     .mapped('context')
                 if param in overridable:
                     self.overrides = json.dumps({
@@ -1060,12 +1101,6 @@ class PullRequests(models.Model):
                     pr.state = 'validated'
                 elif oldstate == 'approved':
                     pr.state = 'ready'
-            self.env['runbot_merge.pull_requests.tagging'].create({
-                'repository': pr.repository.id,
-                'pull_request': pr.number,
-                'tags_remove': json.dumps(r),
-                'tags_add': json.dumps(a),
-            })
         return failed
 
     def _notify_ci_new_failure(self, ci, st):
@@ -1118,11 +1153,10 @@ class PullRequests(models.Model):
         pr._validate(json.loads(c.statuses or '{}'))
 
         if pr.state not in ('closed', 'merged'):
-            self.env['runbot_merge.pull_requests.tagging'].create({
-                'pull_request': pr.number,
+            self.env['runbot_merge.pull_requests.feedback'].create({
                 'repository': pr.repository.id,
-                'state_from': False,
-                'state_to': pr._tagstate,
+                'pull_request': pr.number,
+                'message': f"[Pull request status dashboard]({pr.url}).",
             })
         return pr
 
@@ -1168,27 +1202,7 @@ class PullRequests(models.Model):
         if newhead:
             c = self.env['runbot_merge.commit'].search([('sha', '=', newhead)])
             self._validate(json.loads(c.statuses or '{}'))
-
-        for pr in self:
-            before, after = oldstate[pr], pr._tagstate
-            if after != before:
-                self.env['runbot_merge.pull_requests.tagging'].create({
-                    'pull_request': pr.number,
-                    'repository': pr.repository.id,
-                    'state_from': oldstate[pr],
-                    'state_to': pr._tagstate,
-                })
         return w
-
-    def unlink(self):
-        for pr in self:
-            self.env['runbot_merge.pull_requests.tagging'].create({
-                'pull_request': pr.number,
-                'repository': pr.repository.id,
-                'state_from': pr._tagstate,
-                'state_to': False,
-            })
-        return super().unlink()
 
     def _check_linked_prs_statuses(self, commit=False):
         """ Looks for linked PRs where at least one of the PRs is in a ready
@@ -1406,12 +1420,6 @@ class PullRequests(models.Model):
         self.env.cr.commit()
         self.modified(['state'])
         if self.env.cr.rowcount:
-            self.env['runbot_merge.pull_requests.tagging'].create({
-                'pull_request': self.number,
-                'repository': self.repository.id,
-                'state_from': res[1] if not self.staging_id else 'staged',
-                'state_to': 'closed',
-            })
             self.unstage(
                 "PR %s closed by %s",
                 self.display_name,

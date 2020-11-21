@@ -55,7 +55,6 @@ import time
 import uuid
 import xmlrpc.client
 from contextlib import closing
-from datetime import datetime
 
 import psutil
 import pytest
@@ -79,6 +78,12 @@ def pytest_addoption(parser):
              "queries per minute, free is 40, multi-repo batching tests will "
              "blow through the former); localtunnel has no rate-limiting but "
              "the servers are way less reliable")
+
+
+# noinspection PyUnusedLocal
+def pytest_configure(config):
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'mergebot_test_utils'))
+    print(sys.path)
 
 @pytest.fixture(scope='session', autouse=True)
 def _set_socket_timeout():
@@ -1040,6 +1045,9 @@ class Model:
         ids = self._env(self._model, 'search', *args, **kwargs)
         return Model(self._env, self._model, ids)
 
+    def name_search(self, *args, **kwargs):
+        return self._env(self._model, 'name_search', *args, **kwargs)
+
     def create(self, values):
         return Model(self._env, self._model, [self._env(self._model, 'create', values)])
 
@@ -1048,6 +1056,9 @@ class Model:
 
     def read(self, fields):
         return self._env(self._model, 'read', self._ids, fields)
+
+    def name_get(self):
+        return self._env(self._model, 'name_get', self._ids)
 
     def unlink(self):
         return self._env(self._model, 'unlink', self._ids)
