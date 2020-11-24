@@ -210,7 +210,7 @@ class Repo(models.Model):
     _order = 'sequence, id'
     _inherit = 'mail.thread'
 
-    name = fields.Char("Name", unique=True, tracking=True)  # odoo/enterprise/upgrade/security/runbot/design_theme
+    name = fields.Char("Name", tracking=True)  # odoo/enterprise/upgrade/security/runbot/design_theme
     identity_file = fields.Char("Identity File", help="Identity file to use with git/ssh", groups="runbot.group_runbot_admin")
     main_remote_id = fields.Many2one('runbot.remote', "Main remote", tracking=True)
     remote_ids = fields.One2many('runbot.remote', 'repo_id', "Remotes")

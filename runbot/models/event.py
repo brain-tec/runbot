@@ -96,7 +96,7 @@ class RunbotErrorLog(models.Model):
     path = fields.Char(string='Path', readonly=True)
     line = fields.Char(string='Line', readonly=True)
     build_id = fields.Many2one('runbot.build', string='Build', readonly=True)
-    dest = fields.Char(String='Build dest', readonly=True)
+    dest = fields.Char(string='Build dest', readonly=True)
     local_state = fields.Char(string='Local state', readonly=True)
     local_result = fields.Char(string='Local result', readonly=True)
     global_state = fields.Char(string='Global state', readonly=True)
