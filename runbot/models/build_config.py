@@ -295,7 +295,7 @@ class ConfigStep(models.Model):
         if not self:
             return False
         self.ensure_one()
-        return self.job_type in ('install_odoo', 'run_odoo', 'restore', 'test_upgrade') or (self.job_type == 'python' and ('docker_run(' in self.python_code or '_run_' in self.python_code))
+        return self.job_type in ('install_odoo', 'run_odoo', 'restore', 'test_upgrade') or (self.job_type == 'python' and ('docker_params =' in self.python_code or '_run_' in self.python_code))
 
     def _run_run_odoo(self, build, log_path, force=False):
         if not force:
@@ -740,7 +740,7 @@ class ConfigStep(models.Model):
 
         upgrade_complement_step = trigger.upgrade_dumps_trigger_id.upgrade_step_id
 
-        if next_versions and bundle.to_upgrade:
+        if next_versions and bundle.base_id.to_upgrade:
             for next_version in next_versions:
                 if bundle.version_id in upgrade_complement_step._get_upgrade_source_versions(next_version):
                     target_versions |= next_version
