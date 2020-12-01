@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 import datetime
-import werkzeug
-import logging
 import functools
+import logging
+import werkzeug
 
 import werkzeug.utils
 import werkzeug.urls
@@ -86,7 +86,7 @@ class Runbot(Controller):
         if update_triggers:
             enabled_triggers = []
             project_id = int(update_triggers)
-            for key in kwargs.keys():
+            for key in kwargs:
                 if key.startswith('trigger_'):
                     enabled_triggers.append(key.replace('trigger_', ''))
 
@@ -97,11 +97,168 @@ class Runbot(Controller):
                 response.set_cookie(key, '-'.join(enabled_triggers))
         return response
 
+    def base_runbot_context(self, project):
+        projects = [{
+            'id': p.id,
+            'name': p.name,
+            'slug': slug(p),
+        } for p in request.env['runbot.project'].search([])]
+
+        return {
+            'data': {
+                "user": {
+                    'id': request.env.user.id,
+                    'name': request.env.user.name,
+                    'public': request.env.user._is_public(),
+                },
+                "projects": projects,
+                "project": {
+                    'id': project.id,
+                    'name': project.name,
+                    'slug': slug(project),
+                } if project else projects[0] if projects else False,
+            }
+        }
+
     @route(['/',
             '/runbot',
             '/runbot/<model("runbot.project"):project>',
             '/runbot/<model("runbot.project"):project>/search/<search>'], website=True, auth='public', type='http')
-    def bundles(self, project=None, search='', projects=False, refresh=False, **kwargs):
+    def main(self, project=None, search='', projects=False, refresh=False, **kwargs):
+
+        res = request.render('runbot.main', self.base_runbot_context(project))
+        return res
+
+    @route(['/runbot/data/bundles/<sticky>/<model("runbot.project"):project>',
+            '/runbot/data/bundles/<sticky>/<model("runbot.project"):project>/search/<search>'], auth='public', type='json')
+    def bundles(self, sticky='false', project=None, search='', refresh=False, **kwargs):
+        search = search if len(search) < 60 else search[:60]
+        env = request.env
+        categories = env['runbot.category'].search([])
+
+        res = {}
+        domain = [('last_batch', '!=', False), ('project_id', '=', project.id), ('no_build', '=', False)]
+
+        filter_mode = request.httprequest.cookies.get('filter_mode', False)
+        if filter_mode == 'sticky':
+            domain.append(('sticky', '=', True))
+        elif filter_mode == 'nosticky':
+            domain.append(('sticky', '=', False))
+
+        if search:
+            search_domains = []
+            pr_numbers = []
+            for search_elem in search.split("|"):
+                if search_elem.isnumeric():
+                    pr_numbers.append(int(search_elem))
+                else:
+                    search_domains.append([('name', 'like', search_elem)])
+            if pr_numbers:
+                res = request.env['runbot.branch'].search([('name', 'in', pr_numbers)])
+                if res:
+                    search_domains.append([('id', 'in', res.mapped('bundle_id').ids)])
+            search_domain = expression.OR(search_domains)
+            domain = expression.AND([domain, search_domain])
+
+        e = expression.expression(domain, request.env['runbot.bundle'])
+        query = e.query
+        query.order = """
+            (case when "runbot_bundle".sticky then 1 when "runbot_bundle".sticky is null then 2 else 2 end),
+                case when "runbot_bundle".sticky then "runbot_bundle".version_number end collate "C" desc,
+                "runbot_bundle".last_batch desc
+        """
+        query.limit=40
+        bundles = env['runbot.bundle'].browse(query)
+
+        category_id = int(request.httprequest.cookies.get('category') or 0) or request.env['ir.model.data'].xmlid_to_res_id('runbot.default_category')
+        bundles = bundles.with_context(category_id=category_id)
+        bundles_data = []
+        for bundle in bundles:
+            last_batchs = []
+            for batch in bundle.last_batchs:
+                slot_ids = []
+                for slot in batch.slot_ids:
+                    slot_ids.append({
+                        'id': slot.id,
+                        'trigger_id': {
+                            'id': slot.trigger_id.id,
+                            'name': slot.trigger_id.name,
+                            'manual': slot.trigger_id.manual,
+                            'hide': slot.trigger_id.hide,
+                        },
+                        'build_id': {
+                            'id': slot.build_id.id,
+                            'global_result': slot.build_id.global_result,
+                            'global_state': slot.build_id.global_state,
+                            'local_result': slot.build_id.local_result,
+                            'local_state': slot.build_id.local_state,
+                            'domain': slot.build_id.domain,
+                            'dest': slot.build_id.dest,
+                        },
+                        'fa_link_type': slot.fa_link_type(),
+                    })
+                commit_link_ids = []
+                for commit_link in batch.commit_link_ids:  # todo extract commit else where since they may be redundant
+                    commit_link_ids.append({
+                        'id': commit_link.id,
+                        'match_type': commit_link.match_type,
+                        'commit_id': commit_link.commit_id.id,
+                        'commit_dname': commit_link.commit_id.dname,
+                        'commit_subject': commit_link.commit_id.subject,
+                        'commit_repo_sequence': commit_link.commit_id.repo_id.sequence,
+                        'commit_repo_id': commit_link.commit_id.repo_id.id,
+                        'commit_remote_url': commit_link.branch_id.remote_id.base_url,
+                        'commit_name': commit_link.commit_id.name,
+                    })
+                last_batchs.append({
+                    'id': batch.id,
+                    'has_warning': batch.has_warning,
+                    'state': batch.state,
+                    'formated_age': batch.get_formated_age(),
+                    'commit_link_ids': commit_link_ids,
+                    'slot_ids': slot_ids,
+                })
+
+            bundles_data.append({
+                'id': bundle.id,
+                'sticky': bundle.sticky,
+                'name': bundle.name,
+                'last_batchs': last_batchs,
+                'last_category_batch': {category.id: bundle.with_context(category_id=category.id).last_done_batch.id for category in categories}
+            })
+        categories_data = [{
+            'id': category.id,
+            'name': category.name,
+            'icon': category.icon,
+            'view_id': False, # TODO fixme
+        } for category in categories]
+
+
+        pending_count, level, scheduled_count = self._pending()
+        hosts = request.env['runbot.host'].search([])
+        load_infos = {
+                'pending_total': pending_count,
+                'pending_level': level,
+                'scheduled_count': scheduled_count,
+                'testing': hosts._total_testing(),
+                'workers': hosts._total_workers(),
+            }
+        res.update(self.base_runbot_context(project)['data'])
+        res.update({
+            'bundles': bundles_data,
+            'active_category_id': category_id,
+            'categories': categories_data,
+            'load_infos': load_infos,
+            'nb_assigned_errors': request.env['runbot.build.error'].search_count([('responsible', '=', request.env.user.id)]), # todo this information is duplicated from context
+        })
+        return res
+
+
+    @route(['/old/',
+            '/old/runbot',
+            '/old/runbot/<model("runbot.project"):project>',
+            '/old/runbot/<model("runbot.project"):project>/search/<search>'], website=True, auth='public', type='http')
+    def bundles_old(self, project=None, search='', projects=False, refresh=False, **kwargs):
         search = search if len(search) < 60 else search[:60]
         env = request.env
         categories = env['runbot.category'].search([])
@@ -171,6 +328,7 @@ class Runbot(Controller):
         context.update({'message': request.env['ir.config_parameter'].sudo().get_param('runbot.runbot_message')})
         res = request.render('runbot.bundles', context)
         return res
+
 
     @route([
         '/runbot/bundle/<model("runbot.bundle"):bundle>',
