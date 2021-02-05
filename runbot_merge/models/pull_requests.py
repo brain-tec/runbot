@@ -673,7 +673,14 @@ class PullRequests(models.Model):
     priority = fields.Integer(default=2, index=True)
 
     overrides = fields.Char(required=True, default='{}')
-    statuses = fields.Text(compute='_compute_statuses')
+    statuses = fields.Text(
+        compute='_compute_statuses',
+        help="Copy of the statuses from the HEAD commit, as a Python literal"
+    )
+    statuses_full = fields.Text(
+        compute='_compute_statuses',
+        help="Compilation of the full status of the PR (commit statuses + overrides), as JSON"
+    )
     status = fields.Char(compute='_compute_statuses')
     previous_failure = fields.Char(default='{}')
 
@@ -773,13 +780,19 @@ class PullRequests(models.Model):
                 pr.blocked = 'linked pr %s is not ready' % unready.display_name
                 continue
 
-    @api.depends('head', 'repository.status_ids')
+    def _get_overrides(self):
+        if self:
+            return json.loads(self.overrides)
+        return {}
+
+    @api.depends('head', 'repository.status_ids', 'overrides')
     def _compute_statuses(self):
         Commits = self.env['runbot_merge.commit']
         for pr in self:
             c = Commits.search([('sha', '=', pr.head)])
             st = json.loads(c.statuses or '{}')
-            statuses = {**st, **json.loads(pr.overrides)}
+            statuses = {**st, **pr._get_overrides()}
+            pr.statuses_full = json.dumps(statuses)
             if not statuses:
                 pr.status = pr.statuses = False
                 continue
@@ -841,10 +854,12 @@ class PullRequests(models.Model):
                 yield name, flag == '+'
             elif name == 'delegate':
                 if param:
-                    yield ('delegate', [
-                        p.lstrip('#@')
-                        for p in param.split(',')
-                    ])
+                    for p in param.split(','):
+                        yield 'delegate', p.lstrip('#@')
+            elif name == 'override':
+                if param:
+                    for p in param.split(','):
+                        yield 'override', p
             elif name in ('p', 'priority'):
                 if param in ('0', '1', '2'):
                     yield ('priority', int(param))
@@ -879,11 +894,11 @@ class PullRequests(models.Model):
 
         is_admin, is_reviewer, is_author = self._pr_acl(author)
 
-        commands = dict(
+        commands = [
             ps
             for m in self.repository.project_id._find_commands(comment['body'] or '')
             for ps in self._parse_command(m)
-        )
+        ]
 
         if not commands:
             _logger.info("found no commands in comment of %s (%s) (%s)", author.github_login, author.display_name,
@@ -892,7 +907,7 @@ class PullRequests(models.Model):
             return 'ok'
 
         Feedback = self.env['runbot_merge.pull_requests.feedback']
-        if not (is_author or 'override' in commands):
+        if not (is_author or any(cmd == 'override' for cmd, _ in commands)):
             # no point even parsing commands
             _logger.info("ignoring comment of %s (%s): no ACL to %s",
                           login, name, self.display_name)
@@ -916,7 +931,7 @@ class PullRequests(models.Model):
 
             return '%s%s' % (command, pstr)
         msgs = []
-        for command, param in commands.items():
+        for command, param in commands:
             ok = False
             msg = []
             if command == 'retry':
@@ -975,16 +990,15 @@ class PullRequests(models.Model):
             elif command == 'delegate':
                 if is_reviewer:
                     ok = True
-                    Partners = delegates = self.env['res.partner']
+                    Partners = self.env['res.partner']
                     if param is True:
-                        delegates |= self.author
+                        delegate = self.author
                     else:
-                        for login in param:
-                            delegates |= Partners.search([('github_login', '=', login)]) or Partners.create({
-                                'name': login,
-                                'github_login': login,
-                            })
-                    delegates.write({'delegate_reviewer': [(4, self.id, 0)]})
+                        delegate = Partners.search([('github_login', '=', param)]) or Partners.create({
+                            'name': param,
+                            'github_login': param,
+                        })
+                    delegate.write({'delegate_reviewer': [(4, self.id, 0)]})
             elif command == 'priority':
                 if is_admin:
                     ok = True
@@ -1078,19 +1092,14 @@ class PullRequests(models.Model):
         failed = self.browse(())
         for pr in self:
             required = pr.repository.status_ids._for_pr(pr).mapped('context')
-            sts = {**statuses, **json.loads(pr.overrides)}
+            sts = {**statuses, **pr._get_overrides()}
 
-            a, r = [], []
             success = True
             for ci in required:
                 st = state_(sts, ci) or 'pending'
                 if st == 'success':
-                    r.append(f'\N{Ballot Box} {ci}')
-                    a.append(f'\N{Ballot Box with Check} {ci}')
                     continue
 
-                a.append(f'\N{Ballot Box} {ci}')
-                r.append(f'\N{Ballot Box with Check} {ci}')
                 success = False
                 if st in ('error', 'failure'):
                     failed |= pr
@@ -1104,11 +1113,12 @@ class PullRequests(models.Model):
         return failed
 
     def _notify_ci_new_failure(self, ci, st):
-        # only sending notification if the newly failed status is different than
-        # the old one
         prev = json.loads(self.previous_failure)
-        if not self._statuses_equivalent(st, prev):
-            self.previous_failure = json.dumps(st)
+        if prev.get('state'): # old-style previous-failure
+            prev = {ci: prev}
+        if not any(self._statuses_equivalent(st, v) for v in prev.values()):
+            prev[ci] = st
+            self.previous_failure = json.dumps(prev)
             self._notify_ci_failed(ci)
 
     def _statuses_equivalent(self, a, b):
@@ -1191,8 +1201,6 @@ class PullRequests(models.Model):
         })
 
     def write(self, vals):
-        oldstate = { pr: pr._tagstate for pr in self }
-
         if vals.get('squash'):
             vals['merge_method'] = False
 
@@ -1335,7 +1343,7 @@ class PullRequests(models.Model):
         return head
 
     def _stage_rebase_merge(self, gh, target, commits, related_prs=()):
-        msg = self._build_merge_message(self.message, related_prs=related_prs)
+        msg = self._build_merge_message(self, related_prs=related_prs)
         h, mapping = gh.rebase(self.number, target, reset=True, commits=commits)
         merge_head = gh.merge(h, target, str(msg))['sha']
         self.commits_map = json.dumps({**mapping, '': merge_head})
@@ -1376,7 +1384,7 @@ class PullRequests(models.Model):
             return copy['sha']
         else:
             # otherwise do a regular merge
-            msg = self._build_merge_message(self.message)
+            msg = self._build_merge_message(self)
             merge_head = gh.merge(self.head, target, str(msg))['sha']
             # and the merge commit is the normal merge head
             commits_map[''] = merge_head
@@ -1471,7 +1479,6 @@ class Tagging(models.Model):
     tags_add = fields.Char(required=True, default='[]')
 
     def create(self, values):
-        before = str(values)
         if values.pop('state_from', None):
             values['tags_remove'] = ALL_TAGS
         if 'state_to' in values:
@@ -1532,9 +1539,14 @@ class Commit(models.Model):
                 pr = PRs.search([('head', '=', c.sha)])
                 if pr:
                     pr._validate(st)
-                # heads is a json-encoded mapping of reponame:head, so chances
-                # are if a sha matches a heads it's matching one of the shas
-                stagings = Stagings.search([('heads', 'ilike', c.sha)])
+
+                stagings = Stagings.search([('heads', 'ilike', c.sha)]).filtered(
+                    lambda s, h=c.sha: any(
+                        head == h
+                        for repo, head in json.loads(s.heads).items()
+                        if not repo.endswith('^')
+                    )
+                )
                 if stagings:
                     stagings._validate()
             except Exception:
@@ -1663,6 +1675,7 @@ class Stagings(models.Model):
             vals = {'state': st}
             if update_timeout_limit:
                 vals['timeout_limit'] = fields.Datetime.to_string(datetime.datetime.now() + datetime.timedelta(minutes=s.target.project_id.ci_timeout))
+                _logger.debug("%s got pending status, bumping timeout to %s (%s)", self, vals['timeout_limit'], cmap)
             s.write(vals)
 
     def action_cancel(self):
@@ -1683,7 +1696,7 @@ class Stagings(models.Model):
         })
 
     def fail(self, message, prs=None):
-        _logger.error("Staging %s failed: %s", self, message)
+        _logger.info("Staging %s failed: %s", self, message)
         prs = prs or self.batch_ids.prs
         prs.write({'state': 'error'})
         for pr in prs:
@@ -2040,17 +2053,62 @@ def parse_refs_smart(read):
         m = refline.match(line)
         yield m[1].decode(), m[2].decode()
 
+BREAK = re.compile(r'''
+    ^
+    [ ]{0,3} # 0-3 spaces of indentation
+    # followed by a sequence of three or more matching -, _, or * characters,
+    # each followed optionally by any number of spaces or tabs
+    # so needs to start with a _, - or *, then have at least 2 more such
+    # interspersed with any number of spaces or tabs
+    ([*_-])
+    ([ \t]*\1){2,}
+    [ \t]*
+    $
+''', flags=re.VERBOSE)
+SETEX_UNDERLINE = re.compile(r'''
+    ^
+    [ ]{0,3} # no more than 3 spaces indentation
+    [-=]+ # a sequence of = characters or a sequence of - characters
+    [ ]* # any number of trailing spaces
+    $
+    # we don't care about "a line containing a single -" because we want to
+    # disambiguate SETEX headings from thematic breaks, and thematic breaks have
+    # 3+ -. Doesn't look like GH interprets `- - -` as a line so yay...
+''', flags=re.VERBOSE)
 HEADER = re.compile('^([A-Za-z-]+): (.*)$')
 class Message:
     @classmethod
     def from_message(cls, msg):
         in_headers = True
+        maybe_setex = None
+        # creating from PR message -> remove content following break
+        msg, handle_break = (msg, False) if isinstance(msg, str) else (msg.message, True)
         headers = []
         body = []
         for line in reversed(msg.splitlines()):
+            if maybe_setex:
+                # NOTE: actually slightly more complicated: it's a SETEX heading
+                #       only if preceding line(s) can be interpreted as a
+                #       paragraph so e.g. a title followed by a line of dashes
+                #       would indeed be a break, but this should be good enough
+                #       for now, if we need more we'll need a full-blown
+                #       markdown parser probably
+                if line: # actually a SETEX title -> add underline to body then process current
+                    body.append(maybe_setex)
+                else: # actually break, remove body then process current
+                    body = []
+                maybe_setex = None
+
             if not line:
                 if not in_headers and body and body[-1]:
                     body.append(line)
+                continue
+
+            if handle_break and BREAK.match(line):
+                if SETEX_UNDERLINE.match(line):
+                    maybe_setex = line
+                else:
+                    body = []
                 continue
 
             h = HEADER.match(line)

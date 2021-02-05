@@ -74,7 +74,7 @@ class Project(models.Model):
                 'Authorization': 'token %s' % project.fp_github_token
             })
             if not (r0.ok and r1.ok):
-                _logger.warning("Failed to fetch bot information for project %s: %s", project.name, (r0.text or r0.content) if not r0.ok else (r1.text or r1.content))
+                _logger.error("Failed to fetch bot information for project %s: %s", project.name, (r0.text or r0.content) if not r0.ok else (r1.text or r1.content))
                 continue
             project.fp_github_name = r0.json()['login']
             project.fp_github_email = next((
@@ -99,6 +99,9 @@ class Project(models.Model):
             bafter = p._forward_port_ordered()
             if bafter.ids == bbefore.ids:
                 continue
+
+            logger = _logger.getChild('project').getChild(p.name)
+            logger.debug("branches updated %s -> %s", bbefore, bafter)
             # if it's just that a branch was inserted at the end forwardport
             # should keep on keeping normally
             if bafter.ids[:-1] == bbefore.ids:
@@ -120,6 +123,7 @@ class Project(models.Model):
                     if new:
                         raise UserError("Inserting multiple branches at the same time is not supported")
                     new = b
+            logger.debug('before: %s new: %s after: %s', before.ids, new.ids, after.ids)
             # find all FPs whose ancestry spans the insertion
             leaves = self.env['runbot_merge.pull_requests'].search([
                 ('state', 'not in', ['closed', 'merged']),
@@ -133,6 +137,7 @@ class Project(models.Model):
                 '|', ('id', 'in', leaves.mapped('source_id').ids),
                      ('source_id', 'in', leaves.mapped('source_id').ids),
             ])
+            logger.debug("\nPRs spanning new: %s\nto port: %s", leaves, candidates)
             # enqueue the creation of a new forward-port based on our candidates
             # but it should only create a single step and needs to stitch batch
             # the parents linked list, so it has a special type
@@ -508,6 +513,16 @@ class PullRequests(models.Model):
             else:
                 break
 
+    @api.depends('parent_id.statuses')
+    def _compute_statuses(self):
+        super()._compute_statuses()
+
+    def _get_overrides(self):
+        # NB: assumes _get_overrides always returns an "owned" dict which we can modify
+        p = self.parent_id._get_overrides() if self.parent_id else {}
+        p.update(super()._get_overrides())
+        return p
+
     def _iter_ancestors(self):
         while self:
             yield self
@@ -572,7 +587,7 @@ class PullRequests(models.Model):
 
         notarget = [p.repository.name for p in self if not p.repository.fp_remote_target]
         if notarget:
-            _logger.warning(
+            _logger.error(
                 "Can not forward-port %s: repos %s don't have a remote configured",
                 self, ', '.join(notarget)
             )
@@ -839,7 +854,9 @@ This PR targets %s and is part of the forward-port chain. Further PRs will be cr
             # switch back to the PR branch
             conf.checkout(fp_branch_name)
             # cherry-pick the squashed commit to generate the conflict
-            conf.with_params('merge.renamelimit=0').with_config(check=False).cherry_pick(squashed)
+            conf.with_params('merge.renamelimit=0')\
+                .with_config(check=False)\
+                .cherry_pick(squashed, no_commit=True)
 
             # if there was a single commit, reuse its message when committing
             # the conflict
@@ -869,49 +886,54 @@ stderr:
         logger = _logger.getChild('cherrypick').getChild(str(self.number))
 
         # original head so we can reset
-        original_head = working_copy.stdout().rev_parse('HEAD').stdout.decode().strip()
+        prev = original_head = working_copy.stdout().rev_parse('HEAD').stdout.decode().strip()
 
         commits = self.commits()
-        logger.info("%s: %s commits in %s", self, len(commits), original_head)
-        for c in commits:
-            logger.debug('- %s (%s)', c['sha'], c['commit']['message'])
+        logger.info("%s: copy %s commits to %s\n%s", self, len(commits), original_head, '\n'.join(
+            '- %s (%s)' % (c['sha'], c['commit']['message'].splitlines()[0])
+            for c in commits
+        ))
 
         for commit in commits:
             commit_sha = commit['sha']
             # config (global -c) or commit options don't really give access to
             # setting dates
             cm = commit['commit'] # get the "git" commit object rather than the "github" commit resource
-            configured = working_copy.with_config(env={
+            env = {
                 'GIT_AUTHOR_NAME': cm['author']['name'],
                 'GIT_AUTHOR_EMAIL': cm['author']['email'],
                 'GIT_AUTHOR_DATE': cm['author']['date'],
                 'GIT_COMMITTER_NAME': cm['committer']['name'],
                 'GIT_COMMITTER_EMAIL': cm['committer']['email'],
-            })
+            }
+            configured = working_copy.with_config(env=env)
 
-            conf = configured.with_config(stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+            conf = working_copy.with_config(
+                env={**env, 'GIT_TRACE': 'true'},
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                check=False
+            )
             # first try with default / low renamelimit
             r = conf.cherry_pick(commit_sha)
-            _logger.debug("Cherry-picked %s: %s\n%s\n%s", commit_sha, r.returncode, r.stdout.decode(), r.stderr.decode())
+            logger.debug("Cherry-picked %s: %s\n%s\n%s", commit_sha, r.returncode, r.stdout.decode(), _clean_rename(r.stderr.decode()))
             if r.returncode:
                 # if it failed, retry with high renamelimit
-                configured.reset('--hard', original_head)
+                configured.reset('--hard', prev)
                 r = conf.with_params('merge.renamelimit=0').cherry_pick(commit_sha)
-                _logger.debug("Cherry-picked %s (renamelimit=0): %s\n%s\n%s", commit_sha, r.returncode, r.stdout.decode(), r.stderr.decode())
+                logger.debug("Cherry-picked %s (renamelimit=0): %s\n%s\n%s", commit_sha, r.returncode, r.stdout.decode(), _clean_rename(r.stderr.decode()))
 
             if r.returncode: # pick failed, reset and bail
-                logger.info("%s: failed", commit_sha)
+                # try to log inflateInit: out of memory errors as warning, they
+                # seem to return the status code 128
+                logger.log(
+                    logging.WARNING if r.returncode == 128 else logging.INFO,
+                    "forward-port of %s (%s) failed at %s",
+                    self, self.display_name, commit_sha)
                 configured.reset('--hard', original_head)
                 raise CherrypickError(
                     commit_sha,
                     r.stdout.decode(),
-                    # Don't include the inexact rename detection spam in the
-                    # feedback, it's useless. There seems to be no way to
-                    # silence these messages.
-                    '\n'.join(
-                        line for line in r.stderr.decode().splitlines()
-                        if not line.startswith('Performing inexact rename detection')
-                    )
+                    _clean_rename(r.stderr.decode())
                 )
 
             msg = self._make_fp_message(commit)
@@ -920,8 +942,8 @@ stderr:
             configured \
                 .with_config(input=str(msg).encode())\
                 .commit(amend=True, file='-')
-            new = configured.stdout().rev_parse('HEAD').stdout.decode()
-            logger.info('%s: success -> %s', commit_sha, new)
+            prev = configured.stdout().rev_parse('HEAD').stdout.decode()
+            logger.info('%s: success -> %s', commit_sha, prev)
 
     def _build_merge_message(self, message, related_prs=()):
         msg = super()._build_merge_message(message, related_prs=related_prs)
@@ -1107,3 +1129,12 @@ class GitCommand:
 
 class CherrypickError(Exception):
     ...
+
+def _clean_rename(s):
+    """ Filters out the "inexact rename detection" spam of cherry-pick: it's
+    useless but there seems to be no good way to silence these messages.
+    """
+    return '\n'.join(
+        l for l in s.splitlines()
+        if not l.startswith('Performing inexact rename detection')
+    )

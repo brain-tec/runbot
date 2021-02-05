@@ -160,7 +160,7 @@ def handle_pr(env, event):
 
     pr_obj = env['runbot_merge.pull_requests']._get_or_schedule(r, pr['number'])
     if not pr_obj:
-        _logger.warning("webhook %s on unknown PR %s#%s, scheduled fetch", event['action'], repo.name, pr['number'])
+        _logger.info("webhook %s on unknown PR %s#%s, scheduled fetch", event['action'], repo.name, pr['number'])
         return "Unknown PR {}:{}, scheduling fetch".format(repo.name, pr['number'])
     if event['action'] == 'synchronize':
         if pr_obj.head == pr['head']['sha']:
@@ -266,7 +266,7 @@ def handle_comment(env, event):
     issue = event['issue']['number']
     author = event['comment']['user']['login']
     comment = event['comment']['body']
-    _logger.info('comment[%s]: %s %s#%s "%s"', event['action'], author, repo, issue, comment)
+    _logger.info('comment[%s]: %s %s#%s %r', event['action'], author, repo, issue, comment)
     if event['action'] != 'created':
         return "Ignored: action (%r) is not 'created'" % event['action']
 
@@ -278,7 +278,7 @@ def handle_review(env, event):
     author = event['review']['user']['login']
     comment = event['review']['body'] or ''
 
-    _logger.info('review[%s]: %s %s#%s "%s"', event['action'], author, repo, pr, comment)
+    _logger.info('review[%s]: %s %s#%s %r', event['action'], author, repo, pr, comment)
     if event['action'] != 'submitted':
         return "Ignored: action (%r) is not 'submitted'" % event['action']
 

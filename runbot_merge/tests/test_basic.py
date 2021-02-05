@@ -2,6 +2,7 @@ import datetime
 import itertools
 import json
 import re
+import textwrap
 from unittest import mock
 
 import pytest
@@ -658,7 +659,7 @@ def test_ff_failure_batch(env, repo, users, config):
 
     # block FF
     with repo:
-        m2 = repo.make_commit('heads/master', 'NO!', None, tree={'m': 'm2'})
+        repo.make_commit('heads/master', 'NO!', None, tree={'m': 'm2'})
 
     old_staging = repo.commit('heads/staging.master')
     # confirm staging
@@ -800,11 +801,6 @@ class TestPREdition:
         with repo:
             prx.base = 'master'
 
-@pytest.mark.skip(reason="What do?")
-def test_edit_staged(env, repo):
-    """
-    What should happen when editing the PR/metadata (not pushing) of a staged PR
-    """
 def test_close_staged(env, repo, config, page):
     """
     When closing a staged PR, cancel the staging
@@ -914,7 +910,7 @@ def test_rebase_failure(env, repo, users, config):
         return original(*args)
 
     env['runbot_merge.commit']._notify()
-    with mock.patch.object(GH, 'set_ref', autospec=True, side_effect=wrapper) as m:
+    with mock.patch.object(GH, 'set_ref', autospec=True, side_effect=wrapper):
         env['runbot_merge.project']._check_progress()
 
     env['runbot_merge.project']._send_feedback()
@@ -944,17 +940,24 @@ def test_ci_failure_after_review(env, repo, users, config):
         prx.post_comment('hansen r+', config['role_reviewer']['token'])
     env.run_crons()
 
-    with repo:
-        repo.post_status(prx.head, 'failure', 'ci/runbot', target_url="https://a")
-        repo.post_status(prx.head, 'failure', 'legal/cla', target_url="https://b")
-        repo.post_status(prx.head, 'failure', 'foo/bar', target_url="https://c")
-    env.run_crons()
+    for ctx, url in [
+        ('ci/runbot', 'https://a'),
+        ('ci/runbot', 'https://a'),
+        ('legal/cla', 'https://b'),
+        ('foo/bar', 'https://c'),
+        ('ci/runbot', 'https://a'),
+        ('legal/cla', 'https://d'), # url changes so different from the previous
+    ]:
+        with repo:
+            repo.post_status(prx.head, 'failure', ctx, target_url=url)
+        env.run_crons()
 
     assert prx.comments == [
         (users['reviewer'], 'hansen r+'),
         seen(env, prx, users),
-        (users['user'], "'legal/cla' failed on this reviewed PR.".format_map(users)),
         (users['user'], "'ci/runbot' failed on this reviewed PR.".format_map(users)),
+        (users['user'], "'legal/cla' failed on this reviewed PR.".format_map(users)),
+        (users['user'], "'legal/cla' failed on this reviewed PR.".format_map(users)),
     ]
 
 def test_reopen_merged_pr(env, repo, config, users):
@@ -1631,6 +1634,122 @@ class TestMergeMethod:
         expected = node('gibberish\n\ncloses {}#{}'
                         '\n\nSigned-off-by: {}'.format(repo.name, prx.number, reviewer), m, c0)
         assert log_to_node(repo.log('heads/master')), expected
+
+    @pytest.mark.parametrize('separator', [
+        '***', '___', '\n---',
+        '*'*12, '\n----------------',
+        '- - -', '  **     **     **'
+    ])
+    def test_pr_message_break(self, repo, env, users, config, separator):
+        """ If the PR message contains a "thematic break", only the part before
+        should be included in the merge commit's message.
+        """
+        reviewer = get_partner(env, users["reviewer"]).formatted_email
+        with repo:
+            root = repo.make_commits(None, Commit("root", tree={'a': 'a'}), ref='heads/master')
+
+            repo.make_commits(root, Commit('C', tree={'a': 'b'}), ref=f'heads/change')
+            pr = repo.make_pr(title="title", body=f'first\n{separator}\nsecond',
+                              target='master', head=f'change')
+            repo.post_status(pr.head, 'success', 'legal/cla')
+            repo.post_status(pr.head, 'success', 'ci/runbot')
+            pr.post_comment('hansen r+ merge', config['role_reviewer']['token'])
+        env.run_crons()
+
+        with repo:
+            repo.post_status('heads/staging.master', 'success', 'ci/runbot')
+            repo.post_status('heads/staging.master', 'success', 'legal/cla')
+        env.run_crons()
+
+        head = repo.commit('heads/master')
+        assert head.message == textwrap.dedent(f"""\
+        title
+
+        first
+
+        closes {repo.name}#{pr.number}
+
+        Signed-off-by: {reviewer}
+        """).strip(), "should not contain the content which follows the thematic break"
+
+    def test_pr_message_setex_title(self, repo, env, users, config):
+        """ should not break on a proper SETEX-style title """
+        reviewer = get_partner(env, users["reviewer"]).formatted_email
+        with repo:
+            root = repo.make_commits(None, Commit("root", tree={'a': 'a'}), ref='heads/master')
+
+            repo.make_commits(root, Commit('C', tree={'a': 'b'}), ref=f'heads/change')
+            pr = repo.make_pr(title="title", body="""\
+Title
+---
+This is some text
+
+Title 2
+-------
+This is more text
+***
+removed
+""",
+                              target='master', head=f'change')
+            repo.post_status(pr.head, 'success', 'legal/cla')
+            repo.post_status(pr.head, 'success', 'ci/runbot')
+            pr.post_comment('hansen r+ merge', config['role_reviewer']['token'])
+        env.run_crons()
+
+        with repo:
+            repo.post_status('heads/staging.master', 'success', 'ci/runbot')
+            repo.post_status('heads/staging.master', 'success', 'legal/cla')
+        env.run_crons()
+
+        head = repo.commit('heads/master')
+        assert head.message == textwrap.dedent(f"""\
+        title
+
+        Title
+        ---
+        This is some text
+
+        Title 2
+        -------
+        This is more text
+
+        closes {repo.name}#{pr.number}
+
+        Signed-off-by: {reviewer}
+        """).strip(), "should not break the SETEX titles"
+
+    def test_rebase_no_edit(self, repo, env, users, config):
+        """ Only the merge messages should be de-breaked
+        """
+        reviewer = get_partner(env, users["reviewer"]).formatted_email
+        with repo:
+            root = repo.make_commits(None, Commit("root", tree={'a': 'a'}), ref='heads/master')
+
+            repo.make_commits(root, Commit('Commit\n\nfirst\n***\nsecond', tree={'a': 'b'}), ref=f'heads/change')
+            pr = repo.make_pr(title="PR", body=f'first\n***\nsecond',
+                              target='master', head=f'change')
+            repo.post_status(pr.head, 'success', 'legal/cla')
+            repo.post_status(pr.head, 'success', 'ci/runbot')
+            pr.post_comment('hansen r+', config['role_reviewer']['token'])
+        env.run_crons()
+
+        with repo:
+            repo.post_status('heads/staging.master', 'success', 'ci/runbot')
+            repo.post_status('heads/staging.master', 'success', 'legal/cla')
+        env.run_crons()
+
+        head = repo.commit('heads/master')
+        assert head.message == textwrap.dedent(f"""\
+        Commit
+
+        first
+        ***
+        second
+
+        closes {repo.name}#{pr.number}
+
+        Signed-off-by: {reviewer}
+        """).strip(), "squashed / rebased messages should not be stripped"
 
     def test_pr_mergehead(self, repo, env, config):
         """ if the head of the PR is a merge commit and one of the parents is
