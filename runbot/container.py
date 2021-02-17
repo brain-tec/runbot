@@ -26,8 +26,8 @@ RUN groupadd -g %(group_id)s odoo \\
 && useradd -u %(user_id)s -g odoo -G audio,video odoo \\
 && mkdir /home/odoo \\
 && chown -R odoo:odoo /home/odoo \\
-&& echo "odoo ALL= NOPASSWD: /usr/bin/pip" > /etc/sudoers.d/pip \\
-&& echo "odoo ALL= NOPASSWD: /usr/bin/pip3" >> /etc/sudoers.d/pip
+&& echo "Cmnd_Alias PIP = /usr/bin/pip, /usr/bin/pip3, /usr/local/bin/pip, /usr/local/bin/pip3" > /etc/sudoers.d/pip \
+&& echo "odoo ALL= NOPASSWD: PIP" >> /etc/sudoers.d/pip
 USER odoo
 ENV COVERAGE_FILE /data/build/.coverage
 """ % {'group_id': os.getgid(), 'user_id': os.getuid()}
