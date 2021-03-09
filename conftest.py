@@ -43,6 +43,7 @@ import base64
 import collections
 import configparser
 import copy
+import http.client
 import itertools
 import logging
 import os
@@ -493,7 +494,7 @@ class Repo:
         if re.match(r'[0-9a-f]{40}', ref):
             # just check that the commit exists
             r = self._session.get('https://api.github.com/repos/{}/git/commits/{}'.format(self.name, ref))
-            assert 200 <= r.status_code < 300, r.reason
+            assert 200 <= r.status_code < 300, r.reason or http.client.responses[r.status_code]
             return r.json()['sha']
 
         if ref.startswith('refs/'):
@@ -502,7 +503,7 @@ class Repo:
             ref = 'heads/' + ref
 
         r = self._session.get('https://api.github.com/repos/{}/git/ref/{}'.format(self.name, ref))
-        assert 200 <= r.status_code < 300, r.reason
+        assert 200 <= r.status_code < 300, r.reason or http.client.responses[r.status_code]
         res = r.json()
         assert res['object']['type'] == 'commit'
         return res['object']['sha']
@@ -731,26 +732,6 @@ class Repo:
             **kw
         })
         assert 200 <= r.status_code < 300, r.json()
-
-    def read_tree(self, commit):
-        """ read tree object from commit
-
-        :param Commit commit:
-        :rtype: Dict[str, str]
-        """
-        r = self._session.get('https://api.github.com/repos/{}/git/trees/{}'.format(self.name, commit.tree))
-        assert 200 <= r.status_code < 300, r.json()
-
-        # read tree's blobs
-        tree = {}
-        for t in r.json()['tree']:
-            assert t['type'] == 'blob', "we're *not* doing recursive trees in test cases"
-            r = self._session.get(t['url'])
-            assert 200 <= r.status_code < 300, r.json()
-            # assume all test content is textual
-            tree[t['path']] = base64.b64decode(r.json()['content']).decode()
-
-        return tree
 
     def is_ancestor(self, sha, of):
         return any(c['sha'] == sha for c in self.log(of))
@@ -1142,7 +1123,11 @@ class Model:
         if not isinstance(other, Model) or self._model != other._model:
             return NotImplemented
 
-        return Model(self._env, self._model, {*self._ids, *other._ids}, fields=self._fields)
+        return Model(
+            self._env, self._model,
+            self._ids + tuple(id_ for id_ in other.ids if id_ not in self._ids),
+            fields=self._fields
+        )
     __add__ = __or__
 
     def __and__(self, other):

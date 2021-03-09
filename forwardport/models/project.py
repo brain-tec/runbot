@@ -538,10 +538,11 @@ class PullRequests(models.Model):
         if not self:
             return
 
-        ref = self[0]
+        all_sources = [(p.source_id or p._get_root()) for p in self]
+        all_targets = [s._find_next_target(p) for s, p in zip(all_sources, self)]
 
-        base = ref.source_id or ref._get_root()
-        all_targets = [(p.source_id or p._get_root())._find_next_target(p) for p in self]
+        ref = self[0]
+        base = all_sources[0]
         target = all_targets[0]
         if target is None:
             _logger.info(
@@ -549,6 +550,13 @@ class PullRequests(models.Model):
                 ref.display_name,
             )
             return  # QUESTION: do the prs need to be updated?
+
+        # check if the PRs have already been forward-ported: is there a PR
+        # with the same source targeting the next branch in the series
+        for source in all_sources:
+            if self.search_count([('source_id', '=', source.id), ('target', '=', target.id)]):
+                _logger.info("Will not forward-port %s: already ported", ref.display_name)
+                return
 
         # check if all PRs in the batch have the same "next target" , bail if
         # that's not the case as it doesn't make sense for forward one PR from
@@ -637,10 +645,19 @@ class PullRequests(models.Model):
                 body = None
 
             self.env.cr.execute('LOCK runbot_merge_pull_requests IN SHARE MODE')
-            r = gh.post('https://api.github.com/repos/{}/pulls'.format(pr.repository.name), json={
+            url = 'https://api.github.com/repos/{}/pulls'.format(pr.repository.name)
+            pr_data = {
                 'base': target.name, 'head': '%s:%s' % (owner, new_branch),
-                'title': title, 'body': body,
-            })
+                'title': title, 'body': body, 'draft': True
+            }
+            r = gh.post(url, json=pr_data)
+            if r.status_code == 422:
+                # assume this is a private repo which doesn't support draft PRs
+                # (github error response doesn't provide any machine
+                # information, only a human-readable message) so retry without
+                del pr_data['draft']
+                r = gh.post(url, json=pr_data)
+
             results = r.json()
             if not (200 <= r.status_code < 300):
                 _logger.warning("Failed to create forward-port PR for %s, deleting branches", pr.display_name)
@@ -782,8 +799,13 @@ This PR targets %s and is part of the forward-port chain. Further PRs will be cr
         """
         source = self._get_local_directory()
         # update all the branches & PRs
-        _logger.info("Update %s", source._directory)
-        source.with_params('gc.pruneExpire=1.day.ago').fetch('-p', 'origin')
+        r = source.with_params('gc.pruneExpire=1.day.ago')\
+            .with_config(
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT
+            )\
+            .fetch('-p', 'origin')
+        _logger.info("Updated %s:\n%s", source._directory, r.stdout.decode())
         # FIXME: check that pr.head is pull/{number}'s head instead?
         source.cat_file(e=self.head)
         # create working copy
@@ -857,7 +879,12 @@ This PR targets %s and is part of the forward-port chain. Further PRs will be cr
             conf.with_params('merge.renamelimit=0')\
                 .with_config(check=False)\
                 .cherry_pick(squashed, no_commit=True)
-
+            status = conf.stdout().status(short=True, untracked_files='no').stdout.decode()
+            h, out, err = e.args
+            if err.strip():
+                err = err.rstrip() + '\n----------\nstatus:\n' + status
+            else:
+                err = 'status:\n' + status
             # if there was a single commit, reuse its message when committing
             # the conflict
             # TODO: still add conflict information to this?
@@ -874,8 +901,8 @@ stdout:
 %s
 stderr:
 %s
-""" % e.args)
-            return e.args, working_copy
+""" % (h, out, err))
+            return (h, out, err), working_copy
 
     def _cherry_pick(self, working_copy):
         """ Cherrypicks ``self`` into the working copy
@@ -1057,6 +1084,7 @@ def git(directory): return Repo(directory, check=True)
 class Repo:
     def __init__(self, directory, **config):
         self._directory = str(directory)
+        config.setdefault('stderr', subprocess.PIPE)
         self._config = config
         self._params = ()
         self._opener = subprocess.run
@@ -1066,12 +1094,14 @@ class Repo:
 
     def _run(self, *args, **kwargs):
         opts = {**self._config, **kwargs}
-        return self._opener(
-            ('git', '-C', self._directory)
-            + tuple(itertools.chain.from_iterable(('-c', p) for p in self._params))
-            + args,
-            **opts
-        )
+        args = ('git', '-C', self._directory)\
+            + tuple(itertools.chain.from_iterable(('-c', p) for p in self._params))\
+            + args
+        try:
+            return self._opener(args, **opts)
+        except subprocess.CalledProcessError as e:
+            _logger.error("git call error:\n%s", e.stderr.decode())
+            raise
 
     def stdout(self, flag=True):
         if flag is True:

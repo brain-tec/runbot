@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import logging
+import uuid
 from contextlib import ExitStack
 from datetime import datetime
 
@@ -117,9 +118,27 @@ class UpdateQueue(models.Model, Queue):
                     child.target, child.refname, s)
 
                 new_head = working_copy.stdout().rev_parse(child.refname).stdout.decode().strip()
+                commits_count = int(working_copy.stdout().rev_list(
+                    f'{child.target.name}..{child.refname}',
+                    count=True
+                ).stdout.decode().strip())
                 # update child's head to the head we're going to push
-                child.with_context(ignore_head_update=True).head = new_head
+                child.with_context(ignore_head_update=True).write({
+                    'head': new_head,
+                    # 'state': 'opened',
+                    'squash': commits_count == 1,
+                })
                 working_copy.push('-f', 'target', child.refname)
+
+                # also push to local cache: looks like in some cases github
+                # doesn't propagate revisions (?) or at least does so too slowly
+                # so on the next loop we try to fetch the revision we just
+                # pushed through PR and... we can't find it
+                dummy_branch = str(uuid.uuid4())
+                ref = previous._get_local_directory()
+                working_copy.push(ref._directory, f'{new_head}:refs/heads/{dummy_branch}')
+                ref.branch('--delete', '--force', dummy_branch)
+
                 # committing here means github could technically trigger its
                 # webhook before sending a response, but committing before
                 # would mean we can update the PR in database but fail to
