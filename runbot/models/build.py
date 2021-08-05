@@ -209,7 +209,7 @@ class BuildResult(models.Model):
 
     build_url = fields.Char('Build url', compute='_compute_build_url', store=False)
     build_error_ids = fields.Many2many('runbot.build.error', 'runbot_build_error_ids_runbot_build_rel', string='Errors')
-    keep_running = fields.Boolean('Keep running', help='Keep running')
+    keep_running = fields.Boolean('Keep running', help='Keep running', index=True)
     log_counter = fields.Integer('Log Lines counter', default=100)
 
     slot_ids = fields.One2many('runbot.batch.slot', 'build_id')
@@ -407,20 +407,6 @@ class BuildResult(models.Model):
                 build.build_age = int(time.time() - dt2time(build.build_start))
             else:
                 build.build_age = 0
-
-    # TODO move this logic to batch: use param to check consistency of found commits
-    def _get_params(self):
-        try:
-            message = self.repo_id._git(['show', '-s', self.name])
-        except CalledProcessError:
-            _logger.error('Error getting params for %s', self.name)
-            message = ''
-        params = defaultdict(lambda: defaultdict(str))
-        if message:
-            regex = re.compile(r'^[\t ]*Runbot-dependency: ([A-Za-z0-9\-_]+/[A-Za-z0-9\-_]+):([0-9A-Fa-f\-]*) *(#.*)?$', re.M)  # dep:repo:hash #comment
-            for result in re.findall(regex, message):
-                params['dep'][result[0]] = result[1]
-        return params
 
     def _rebuild(self, message=None):
         """Force a rebuild and return a recordset of builds"""
