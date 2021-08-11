@@ -711,22 +711,27 @@ The next pull request (%s) is in conflict. You can merge the chain up to here by
 
         for pr, new_pr in zip(self, new_batch):
             source = pr.source_id or pr
-            (h, out, err) = conflicts.get(pr) or (None, None, None)
+            (h, out, err, hh) = conflicts.get(pr) or (None, None, None, None)
 
             if h:
                 sout = serr = ''
                 if out.strip():
-                    sout = "\nstdout:\n```\n%s\n```\n" % out
+                    sout = f"\nstdout:\n```\n{out}\n```\n"
                 if err.strip():
-                    serr = "\nstderr:\n```\n%s\n```\n" % err
+                    serr = f"\nstderr:\n```\n{err}\n```\n"
 
-                message = source._pingline() + """
-Cherrypicking %s of source %s failed
-%s%s
+                lines = ''
+                if len(hh) > 1:
+                    lines = '\n' + ''.join(
+                        '* %s%s\n' % (sha, ' <- on this commit' if sha == h else '')
+                        for sha in hh
+                    )
+                message = f"""{source._pingline()} cherrypicking of pull request {source.display_name} failed.
+{lines}{sout}{serr}
 Either perform the forward-port manually (and push to this branch, proceeding as usual) or close this PR (maybe?).
 
 In the former case, you may want to edit this PR message as well.
-""" % (h, source.display_name, sout, serr)
+"""
             elif has_conflicts:
                 message = """%s
 While this was properly forward-ported, at least one co-dependent PR (%s) did not succeed. You will need to fix it before this can be merged.
@@ -888,7 +893,7 @@ This PR targets %s and is part of the forward-port chain. Further PRs will be cr
                 .with_config(check=False)\
                 .cherry_pick(squashed, no_commit=True)
             status = conf.stdout().status(short=True, untracked_files='no').stdout.decode()
-            h, out, err = e.args
+            h, out, err, hh = e.args
             if err.strip():
                 err = err.rstrip() + '\n----------\nstatus:\n' + status
             else:
@@ -910,7 +915,7 @@ stdout:
 stderr:
 %s
 """ % (h, out, err))
-            return (h, out, err), working_copy
+            return (h, out, err, hh), working_copy
 
     def _cherry_pick(self, working_copy):
         """ Cherrypicks ``self`` into the working copy
@@ -968,7 +973,8 @@ stderr:
                 raise CherrypickError(
                     commit_sha,
                     r.stdout.decode(),
-                    _clean_rename(r.stderr.decode())
+                    _clean_rename(r.stderr.decode()),
+                    [commit['sha'] for commit in commits]
                 )
 
             msg = self._make_fp_message(commit)
