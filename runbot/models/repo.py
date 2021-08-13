@@ -441,9 +441,6 @@ class Repo(models.Model):
                     message = branch.remote_id.repo_id.invalid_branch_message or message
                     branch.head._github_status(False, "Branch naming", 'failure', False, message)
 
-                if not self.trigger_ids:
-                    continue
-
                 bundle = branch.bundle_id
                 if bundle.no_build:
                     continue

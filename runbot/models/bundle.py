@@ -93,14 +93,17 @@ class Bundle(models.Model):
                 continue
             project_id = bundle.project_id.id
             master_base = False
+            fallback = False
             for bid, bname in self._get_base_ids(project_id):
                 if bundle.name.startswith('%s-' % bname):
                     bundle.base_id = self.browse(bid)
                     break
                 elif bname == 'master':
                     master_base = self.browse(bid)
+                elif not fallback or fallback.id < bid:
+                    fallback = self.browse(bid)
             else:
-                bundle.base_id = master_base
+                bundle.base_id = master_base or fallback
 
     @tools.ormcache('project_id')
     def _get_base_ids(self, project_id):
