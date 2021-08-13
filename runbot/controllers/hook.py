@@ -12,15 +12,17 @@ _logger = logging.getLogger(__name__)
 
 class Hook(http.Controller):
 
-    @http.route(['/runbot/hook/<int:remote_id>'], type='http', auth="public", website=True, csrf=False)
+    @http.route(['/runbot/hook', '/runbot/hook/<int:remote_id>'], type='http', auth="public", website=True, csrf=False)
     def hook(self, remote_id=None, **_post):
         event = request.httprequest.headers.get("X-Github-Event")
         payload = json.loads(request.params.get('payload', '{}'))
         if remote_id is None:
             repo_data = payload.get('repository')
-            if repo_data and event in ['push', 'pull_request']:
+            if repo_data:
                 remote_domain = [
-                    '|', '|', ('name', '=', repo_data['ssh_url']),
+                    '|', '|', '|',
+                    ('name', '=', repo_data['ssh_url']),
+                    ('name', '=', repo_data['ssh_url'].rstrip('.git')),
                     ('name', '=', repo_data['clone_url']),
                     ('name', '=', repo_data['clone_url'].rstrip('.git')),
                 ]
