@@ -185,8 +185,8 @@ class TestBuildResult(RunbotCase):
 
         # test a bulk write, that one cannot change from 'ko' to 'ok'
         builds = self.Build.browse([build.id, other.id])
-        with self.assertRaises(AssertionError):
-            builds.write({'local_result': 'ok'})
+        builds.write({'local_result': 'ok'})
+        self.assertEqual(builds.local_result, 'ko')
 
     def test_markdown_description(self):
         build = self.Build.create({
