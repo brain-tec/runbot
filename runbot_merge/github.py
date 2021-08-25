@@ -8,6 +8,7 @@ import pathlib
 import pprint
 import textwrap
 import unicodedata
+from datetime import datetime, timezone
 
 import requests
 import werkzeug.urls
@@ -16,6 +17,7 @@ import odoo.netsvc
 from odoo.tools import topological_sort, config
 from . import exceptions, utils
 
+class MergeError(Exception): ...
 
 def _is_json(r):
     return r and r.headers.get('content-type', '').startswith(('application/json', 'application/javascript'))
@@ -258,11 +260,11 @@ class GH(object):
             'base': dest,
             'head': sha,
             'commit_message': message,
-        }, check={409: exceptions.MergeError})
+        }, check={409: MergeError})
         try:
             r = r.json()
         except Exception:
-            raise exceptions.MergeError("Got non-JSON reponse from github: %s %s (%s)" % (r.status_code, r.reason, r.text))
+            raise MergeError("Got non-JSON reponse from github: %s %s (%s)" % (r.status_code, r.reason, r.text))
         _logger.debug(
             "merge(%s, %s (%s), %s) -> %s",
             self._repo, dest, r['parents'][0]['sha'],
@@ -311,8 +313,11 @@ class GH(object):
                 'tree': c['new_tree'],
                 'parents': [prev],
                 'author': c['commit']['author'],
-                'committer': c['commit']['committer'],
-            }, check={409: exceptions.MergeError}).json()
+                'committer': dict(
+                    c['commit']['committer'],
+                    date=datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+                ),
+            }, check={409: MergeError}).json()
             logger.debug('copied %s to %s (parent: %s)', c['sha'], copy['sha'], prev)
             prev = mapping[c['sha']] = copy['sha']
 

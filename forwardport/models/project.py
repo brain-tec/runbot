@@ -34,7 +34,6 @@ from odoo.exceptions import UserError
 from odoo.tools import topological_sort, groupby
 from odoo.tools.appdirs import user_cache_dir
 from odoo.addons.runbot_merge import utils
-from odoo.addons.runbot_merge.models.pull_requests import RPLUS
 
 footer = '\nMore info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port\n'
 
@@ -192,6 +191,7 @@ class PullRequests(models.Model):
         help="a PR with a parent is an automatic forward port"
     )
     source_id = fields.Many2one('runbot_merge.pull_requests', index=True, help="the original source of this FP even if parents were detached along the way")
+    forwardport_ids = fields.One2many('runbot_merge.pull_requests', 'source_id')
     reminder_backoff_factor = fields.Integer(default=-4)
     merge_date = fields.Datetime()
 
@@ -317,11 +317,24 @@ class PullRequests(models.Model):
                 tokens = itertools.chain(['to', self.target.name], tokens)
 
             if token in ('r+', 'review+'):
+                if not self.source_id:
+                    Feedback.create({
+                        'repository': self.repository.id,
+                        'pull_request': self.number,
+                        'message': "I'm sorry, @{}. I can only do this on forward-port PRs and this ain't one.".format(login),
+                        'token_field': 'fp_github_token',
+                    })
+                    continue
                 if not self.source_id._pr_acl(author).is_reviewer:
                     Feedback.create({
                         'repository': self.repository.id,
                         'pull_request': self.number,
-                        'message': "I'm sorry, @{}. You can't review+.".format(login),
+                        'message': "I'm sorry, @{}. You can't review this PR: "
+                                   "you need to be a reviewer on {}.".format(
+                            login,
+                            self.source_id.display_name
+                        ),
+                        'token_field': 'fp_github_token',
                     })
                     continue
                 merge_bot = self.repository.project_id.github_prefix
@@ -330,7 +343,8 @@ class PullRequests(models.Model):
                     # only the author is delegated explicitely on the
                     pr._parse_commands(author, {**comment, 'body': merge_bot + ' r+'}, login)
             elif token == 'close':
-                msg = "I'm sorry, @{}. I can't close this PR for you."
+                msg = "I'm sorry, @{}. I can't close this PR for you.".format(
+                    login)
                 if self.source_id._pr_acl(author).is_reviewer:
                     close = True
                     msg = None
@@ -341,6 +355,7 @@ class PullRequests(models.Model):
                         'repository': self.repository.id,
                         'pull_request': self.number,
                         'message': "I'm sorry, @{}. You can't set a forward-port limit.".format(login),
+                        'token_field': 'fp_github_token',
                     })
                     continue
                 if not limit:
@@ -350,11 +365,10 @@ class PullRequests(models.Model):
                         ('project_id', '=', self.repository.project_id.id),
                         ('name', '=', limit),
                     ])
-                    if self.parent_id:
-                        msg = "Sorry, forward-port limit can only be set on an origin PR" \
-                              " (%s here) before it's merged and forward-ported." % (
-                            self._get_root().display_name
-                        )
+                    if self.source_id:
+                        msg = "Sorry, forward-port limit can only be set on " \
+                              f"an origin PR ({self.source_id.display_name} " \
+                              "here) before it's merged and forward-ported."
                     elif self.state in ['merged', 'closed']:
                         msg = "Sorry, forward-port limit can only be set before the PR is merged."
                     elif not limit_id:
@@ -538,7 +552,7 @@ class PullRequests(models.Model):
         if not self:
             return
 
-        all_sources = [(p.source_id or p._get_root()) for p in self]
+        all_sources = [(p.source_id or p) for p in self]
         all_targets = [s._find_next_target(p) for s, p in zip(all_sources, self)]
 
         ref = self[0]
@@ -648,33 +662,23 @@ class PullRequests(models.Model):
             url = 'https://api.github.com/repos/{}/pulls'.format(pr.repository.name)
             pr_data = {
                 'base': target.name, 'head': '%s:%s' % (owner, new_branch),
-                'title': title, 'body': body, 'draft': True
+                'title': title, 'body': body
             }
             r = gh.post(url, json=pr_data)
-            if r.status_code == 422:
-                # assume this is a private repo which doesn't support draft PRs
-                # (github error response doesn't provide any machine
-                # information, only a human-readable message) so retry without
-                del pr_data['draft']
-                r = gh.post(url, json=pr_data)
-
-            results = r.json()
-            if not (200 <= r.status_code < 300):
+            if not r.ok:
                 _logger.warning("Failed to create forward-port PR for %s, deleting branches", pr.display_name)
                 # delete all the branches this should automatically close the
                 # PRs if we've created any. Using the API here is probably
                 # simpler than going through the working copies
                 for repo in self.mapped('repository'):
-                    r = gh.delete('https://api.github.com/repos/{}/git/refs/heads/{}'.format(repo.fp_remote_target, new_branch))
-                    if r.ok:
+                    d = gh.delete('https://api.github.com/repos/{}/git/refs/heads/{}'.format(repo.fp_remote_target, new_branch))
+                    if d.ok:
                         _logger.info("Deleting %s:%s=success", repo.fp_remote_target, new_branch)
                     else:
-                        _logger.warning("Deleting %s:%s=%s", repo.fp_remote_target, new_branch, r.json())
-                raise RuntimeError("Forwardport failure: %s (%s)" % (pr.display_name, results))
+                        _logger.warning("Deleting %s:%s=%s", repo.fp_remote_target, new_branch, d.text)
+                raise RuntimeError("Forwardport failure: %s (%s)" % (pr.display_name, r.text))
 
-            r = results
-
-            new_pr = self._from_gh(r)
+            new_pr = self._from_gh(r.json())
             _logger.info("Created forward-port PR %s", new_pr)
             new_batch |= new_pr
 
@@ -707,22 +711,27 @@ The next pull request (%s) is in conflict. You can merge the chain up to here by
 
         for pr, new_pr in zip(self, new_batch):
             source = pr.source_id or pr
-            (h, out, err) = conflicts.get(pr) or (None, None, None)
+            (h, out, err, hh) = conflicts.get(pr) or (None, None, None, None)
 
             if h:
                 sout = serr = ''
                 if out.strip():
-                    sout = "\nstdout:\n```\n%s\n```\n" % out
+                    sout = f"\nstdout:\n```\n{out}\n```\n"
                 if err.strip():
-                    serr = "\nstderr:\n```\n%s\n```\n" % err
+                    serr = f"\nstderr:\n```\n{err}\n```\n"
 
-                message = source._pingline() + """
-Cherrypicking %s of source %s failed
-%s%s
+                lines = ''
+                if len(hh) > 1:
+                    lines = '\n' + ''.join(
+                        '* %s%s\n' % (sha, ' <- on this commit' if sha == h else '')
+                        for sha in hh
+                    )
+                message = f"""{source._pingline()} cherrypicking of pull request {source.display_name} failed.
+{lines}{sout}{serr}
 Either perform the forward-port manually (and push to this branch, proceeding as usual) or close this PR (maybe?).
 
 In the former case, you may want to edit this PR message as well.
-""" % (h, source.display_name, sout, serr)
+"""
             elif has_conflicts:
                 message = """%s
 While this was properly forward-ported, at least one co-dependent PR (%s) did not succeed. You will need to fix it before this can be merged.
@@ -794,8 +803,11 @@ This PR targets %s and is part of the forward-port chain. Further PRs will be cr
         :param target_branch: the branch to port forward to
         :param fp_branch_name: the name of the branch to create the FP under
         :param ExitStack cleanup: so the working directories can be cleaned up
-        :return: (conflictp, working_copy)
-        :rtype: (bool, Repo)
+        :return: A pair of an optional conflict information and a repository. If
+                 present the conflict information is composed of the hash of the
+                 conflicting commit, the stderr and stdout of the failed
+                 cherrypick and a list of all PR commit hashes
+        :rtype: (None | (str, str, str, list[str]), Repo)
         """
         source = self._get_local_directory()
         # update all the branches & PRs
@@ -849,8 +861,10 @@ This PR targets %s and is part of the forward-port chain. Further PRs will be cr
             root_branch = 'origin/pull/%d' % root.number
             working_copy.checkout('-bsquashed', root_branch)
             root_commits = root.commits()
+            # commits returns oldest first, so youngest (head) last
+            head_commit = root_commits[-1]['commit']
 
-            to_tuple = operator.itemgetter('name', 'email', 'date')
+            to_tuple = operator.itemgetter('name', 'email')
             to_dict = lambda term, vals: {
                 'GIT_%s_NAME' % term: vals[0],
                 'GIT_%s_EMAIL' % term: vals[1],
@@ -860,9 +874,11 @@ This PR targets %s and is part of the forward-port chain. Further PRs will be cr
             for c in (c['commit'] for c in root_commits):
                 authors.add(to_tuple(c['author']))
                 committers.add(to_tuple(c['committer']))
-            fp_authorship = (project_id.fp_github_name, project_id.fp_github_email, '')
-            author = authors.pop() if len(authors) == 1 else fp_authorship
-            committer = committers.pop() if len(committers) == 1 else fp_authorship
+            fp_authorship = (project_id.fp_github_name, '', '')
+            author = fp_authorship if len(authors) != 1\
+                else authors.pop() + (head_commit['author']['date'],)
+            committer = fp_authorship if len(committers) != 1 \
+                else committers.pop() + (head_commit['committer']['date'],)
             conf = working_copy.with_config(env={
                 **to_dict('AUTHOR', author),
                 **to_dict('COMMITTER', committer),
@@ -880,7 +896,7 @@ This PR targets %s and is part of the forward-port chain. Further PRs will be cr
                 .with_config(check=False)\
                 .cherry_pick(squashed, no_commit=True)
             status = conf.stdout().status(short=True, untracked_files='no').stdout.decode()
-            h, out, err = e.args
+            h, out, err, hh = e.args
             if err.strip():
                 err = err.rstrip() + '\n----------\nstatus:\n' + status
             else:
@@ -902,7 +918,7 @@ stdout:
 stderr:
 %s
 """ % (h, out, err))
-            return (h, out, err), working_copy
+            return (h, out, err, hh), working_copy
 
     def _cherry_pick(self, working_copy):
         """ Cherrypicks ``self`` into the working copy
@@ -960,7 +976,8 @@ stderr:
                 raise CherrypickError(
                     commit_sha,
                     r.stdout.decode(),
-                    _clean_rename(r.stderr.decode())
+                    _clean_rename(r.stderr.decode()),
+                    [commit['sha'] for commit in commits]
                 )
 
             msg = self._make_fp_message(commit)
@@ -1029,19 +1046,31 @@ stderr:
             repo.config('--add', 'remote.origin.fetch', '+refs/pull/*/head:refs/heads/pull/*')
             return repo
 
-    def _reminder(self):
-        now = datetime.datetime.now()
-        cutoff = self.env.context.get('forwardport_updated_before') or fields.Datetime.to_string(now - DEFAULT_DELTA)
-        cutoff_dt = fields.Datetime.from_string(cutoff)
+    def _outstanding(self, cutoff=None):
+        """ Returns "outstanding" (unmerged and unclosed) forward-ports whose
+        source was merged before ``cutoff`` (all of them if not provided).
 
-        for source, prs in groupby(self.env['runbot_merge.pull_requests'].search([
+        :param str cutoff: a datetime (ISO-8601 formatted)
+        :returns: an iterator of (source, forward_ports)
+        """
+        cutoff_terms = []
+        if cutoff:
+            # original merged more than <cutoff> ago
+            cutoff_terms = [('source_id.merge_date', '<', cutoff)]
+        return groupby(self.env['runbot_merge.pull_requests'].search([
             # only FP PRs
             ('source_id', '!=', False),
             # active
             ('state', 'not in', ['merged', 'closed']),
-            # original merged more than <cutoff> ago
-            ('source_id.merge_date', '<', cutoff),
-        ], order='source_id, id'), lambda p: p.source_id):
+            *cutoff_terms,
+        ], order='source_id, id'), lambda p: p.source_id)
+
+    def _reminder(self):
+        cutoff = self.env.context.get('forwardport_updated_before') \
+              or fields.Datetime.to_string(datetime.datetime.now() - DEFAULT_DELTA)
+        cutoff_dt = fields.Datetime.from_string(cutoff)
+
+        for source, prs in self._outstanding(cutoff):
             backoff = dateutil.relativedelta.relativedelta(days=2**source.reminder_backoff_factor)
             prs = list(prs)
             if source.merge_date > (cutoff_dt - backoff):

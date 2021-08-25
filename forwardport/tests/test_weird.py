@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import pytest
 
-from utils import seen, Commit
+from utils import seen, Commit, to_pr
 
 
 def make_basic(env, config, make_repo, *, fp_token, fp_remote):
@@ -194,7 +194,7 @@ def test_failed_staging(env, config, make_repo):
     assert len(pr3_head) == 1
 
     assert not pr3_id.batch_id, "check that the PR indeed has no batch anymore"
-    assert not pr3_id.batch_ids
+    assert not pr3_id.batch_ids.filtered(lambda b: b.active)
 
     assert len(env['runbot_merge.batch'].search([
         ('prs', 'in', pr3_id.id),
@@ -658,3 +658,28 @@ def test_skip_ci_next(env, config, make_repo):
     _, _, pr2_id = env['runbot_merge.pull_requests'].search([], order='number')
     assert pr1_id.state == 'opened'
     assert pr2_id.state == 'opened'
+
+def test_approve_draft(env, config, make_repo, users):
+    _, prod, _ = make_basic(env, config, make_repo, fp_token=True, fp_remote=True)
+
+    with prod:
+        prod.make_commits('a', Commit('x', tree={'x': '0'}), ref='heads/change')
+        pr = prod.make_pr(target='a', head='change', draft=True)
+        pr.post_comment('hansen r+', config['role_reviewer']['token'])
+    env.run_crons()
+
+    pr_id = to_pr(env, pr)
+    assert pr_id.state == 'opened'
+    assert pr.comments == [
+        (users['reviewer'], 'hansen r+'),
+        seen(env, pr, users),
+        (users['user'], f"I'm sorry, @{users['reviewer']}. Draft PRs can not be approved."),
+    ]
+
+    with prod:
+        pr.draft = False
+    assert pr.draft is False
+    with prod:
+        pr.post_comment('hansen r+', config['role_reviewer']['token'])
+    env.run_crons()
+    assert pr_id.state == 'approved'

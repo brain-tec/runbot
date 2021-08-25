@@ -10,8 +10,9 @@ import time
 
 import pytest
 import requests
+from lxml.etree import XPath, tostring
 
-from utils import seen, re_matches, get_partner
+from utils import seen, re_matches, get_partner, pr_page, to_pr, Commit
 
 
 @pytest.fixture
@@ -20,7 +21,8 @@ def repo_a(project, make_repo, setreviewers):
     r = project.env['runbot_merge.repository'].create({
         'project_id': project.id,
         'name': repo.name,
-        'required_statuses': 'legal/cla,ci/runbot'
+        'required_statuses': 'legal/cla,ci/runbot',
+        'group_id': False,
     })
     setreviewers(r)
     return repo
@@ -31,7 +33,8 @@ def repo_b(project, make_repo, setreviewers):
     r = project.env['runbot_merge.repository'].create({
         'project_id': project.id,
         'name': repo.name,
-        'required_statuses': 'legal/cla,ci/runbot'
+        'required_statuses': 'legal/cla,ci/runbot',
+        'group_id': False,
     })
     setreviewers(r)
     return repo
@@ -42,7 +45,8 @@ def repo_c(project, make_repo, setreviewers):
     r = project.env['runbot_merge.repository'].create({
         'project_id': project.id,
         'name': repo.name,
-        'required_statuses': 'legal/cla,ci/runbot'
+        'required_statuses': 'legal/cla,ci/runbot',
+        'group_id': False,
     })
     setreviewers(r)
     return repo
@@ -56,7 +60,6 @@ def make_pr(repo, prefix, trees, *, target='master', user,
     :type trees: list[dict]
     :type target: str
     :type user: str
-    :type label: str | None
     :type statuses: list[(str, str)]
     :type reviewer: str | None
     :rtype: fake_github.PR
@@ -76,11 +79,7 @@ def make_pr(repo, prefix, trees, *, target='master', user,
     if reviewer:
         pr.post_comment('hansen r+', reviewer)
     return pr
-def to_pr(env, pr):
-    return env['runbot_merge.pull_requests'].search([
-        ('repository.name', '=', pr.repo.name),
-        ('number', '=', pr.number),
-    ])
+
 def make_branch(repo, name, message, tree, protect=True):
     c = repo.make_commit(None, message, None, tree=tree)
     repo.make_ref('heads/%s' % name, c)
@@ -109,33 +108,44 @@ def test_stage_one(env, project, repo_a, repo_b, config):
         )
     env.run_crons()
 
-    assert to_pr(env, pr_a).state == 'ready'
-    assert to_pr(env, pr_a).staging_id
-    assert to_pr(env, pr_b).state == 'ready'
-    assert not to_pr(env, pr_b).staging_id
+    pra_id = to_pr(env, pr_a)
+    assert pra_id.state == 'ready'
+    assert pra_id.staging_id
+    assert repo_a.commit('staging.master').message.startswith('commit_A_00')
+    assert repo_b.commit('staging.master').message.startswith('force rebuild')
 
-def test_stage_match(env, project, repo_a, repo_b, config):
+    prb_id = to_pr(env, pr_b)
+    assert prb_id.state == 'ready'
+    assert not prb_id.staging_id
+
+get_related_pr_labels = XPath('.//*[normalize-space(text()) = "Linked pull requests"]//a/text()')
+def test_stage_match(env, project, repo_a, repo_b, config, page):
     """ First PR is matched from A,  => should select matched PR from B
     """
     project.batch_limit = 1
 
     with repo_a:
         make_branch(repo_a, 'master', 'initial', {'a': 'a_0'})
-        pr_a = make_pr(
+        prx_a = make_pr(
             repo_a, 'do-a-thing', [{'a': 'a_1'}],
             user=config['role_user']['token'],
             reviewer=config['role_reviewer']['token'],
         )
     with repo_b:
         make_branch(repo_b, 'master', 'initial', {'a': 'b_0'})
-        pr_b = make_pr(repo_b, 'do-a-thing', [{'a': 'b_1'}],
+        prx_b = make_pr(repo_b, 'do-a-thing', [{'a': 'b_1'}],
             user=config['role_user']['token'],
             reviewer=config['role_reviewer']['token'],
         )
+    pr_a = to_pr(env, prx_a)
+    pr_b = to_pr(env, prx_b)
+
+    # check that related PRs link to one another
+    assert get_related_pr_labels(pr_page(page, prx_a)) == pr_b.mapped('display_name')
+    assert get_related_pr_labels(pr_page(page, prx_b)) == pr_a.mapped('display_name')
+
     env.run_crons()
 
-    pr_a = to_pr(env, pr_a)
-    pr_b = to_pr(env, pr_b)
     assert pr_a.state == 'ready'
     assert pr_a.staging_id
     assert pr_b.state == 'ready'
@@ -144,6 +154,22 @@ def test_stage_match(env, project, repo_a, repo_b, config):
     assert pr_a.staging_id == pr_b.staging_id, \
         "branch-matched PRs should be part of the same staging"
 
+    # check that related PRs *still* link to one another during staging
+    assert get_related_pr_labels(pr_page(page, prx_a)) == [pr_b.display_name]
+    assert get_related_pr_labels(pr_page(page, prx_b)) == [pr_a.display_name]
+    with repo_a:
+        repo_a.post_status('staging.master', 'failure', 'legal/cla')
+    env.run_crons()
+
+    assert pr_a.state == 'error'
+    assert pr_b.state == 'ready'
+
+    with repo_a:
+        prx_a.post_comment('hansen retry', config['role_reviewer']['token'])
+    env.run_crons()
+
+    assert pr_a.state == pr_b.state == 'ready'
+    assert pr_a.staging_id and pr_b.staging_id
     for repo in [repo_a, repo_b]:
         with repo:
             repo.post_status('staging.master', 'success', 'legal/cla')
@@ -154,6 +180,11 @@ def test_stage_match(env, project, repo_a, repo_b, config):
 
     assert 'Related: {}'.format(pr_b.display_name) in repo_a.commit('master').message
     assert 'Related: {}'.format(pr_a.display_name) in repo_b.commit('master').message
+
+    print(pr_a.batch_ids.read(['staging_id', 'prs']))
+    # check that related PRs *still* link to one another after merge
+    assert get_related_pr_labels(pr_page(page, prx_a)) == [pr_b.display_name]
+    assert get_related_pr_labels(pr_page(page, prx_b)) == [pr_a.display_name]
 
 def test_different_targets(env, project, repo_a, repo_b, config):
     """ PRs with different targets should not be matched together
@@ -338,15 +369,16 @@ def test_sub_match(env, project, repo_a, repo_b, repo_c, config):
         "branch-matched PRs should be part of the same staging"
 
     st = pr_b.staging_id
-    b_staging = repo_b.commit('heads/staging.master')
-    c_staging = repo_c.commit('heads/staging.master')
+    a_staging = repo_a.commit('staging.master')
+    b_staging = repo_b.commit('staging.master')
+    c_staging = repo_c.commit('staging.master')
     assert json.loads(st.heads) == {
-        repo_a.name: repo_a.commit('heads/staging.master').id,
-        repo_a.name + '^': repo_a.commit('heads/master').id,
+        repo_a.name: a_staging.id,
+        repo_a.name + '^': a_staging.parents[0],
         repo_b.name: b_staging.id,
-        repo_b.name + '^': b_staging.parents[0],
+        repo_b.name + '^': b_staging.id,
         repo_c.name: c_staging.id,
-        repo_c.name + '^': c_staging.parents[0],
+        repo_c.name + '^': c_staging.id,
     }
 
 def test_merge_fail(env, project, repo_a, repo_b, users, config):
@@ -406,7 +438,6 @@ def test_merge_fail(env, project, repo_a, repo_b, users, config):
         c['commit']['message']
         for c in repo_a.log('heads/staging.master')
     ] == [
-        re_matches('^force rebuild'),
         """commit_do-b-thing_00
 
 closes %s
@@ -870,6 +901,8 @@ class TestSubstitutions:
                         'full_name': r.name,
                     },
                     'pull_request': {
+                        'state': 'open',
+                        'draft': False,
                         'user': {'login': 'bob'},
                         'base': {
                             'repo': {'full_name': r.name},
@@ -946,3 +979,98 @@ class TestSubstitutions:
         assert prb_id.staging_id, "PR B should be staged"
         assert pra_id.staging_id == prb_id.staging_id, "both prs should be staged together"
         assert pra_id.batch_id == prb_id.batch_id, "both prs should be part of the same batch"
+
+def test_multi_project(env, make_repo, setreviewers, users, config,
+                       tunnel):
+    """ There should be no linking of PRs across projects, even if there is some
+    structural overlap between the two.
+
+    Here we have two projects on different forks, then a user creates a PR from
+    a third fork (or one of the forks should not matter) to *both*.
+
+    The two PRs should be independent.
+    """
+    Projects = env['runbot_merge.project']
+    gh_token = config['github']['token']
+
+    r1 = make_repo("repo_a")
+    with r1:
+        r1.make_commits(
+            None, Commit('root', tree={'a': 'a'}),
+            ref='heads/default')
+    r1_dev = r1.fork()
+    p1 = Projects.create({
+        'name': 'Project 1',
+        'github_token': gh_token,
+        'github_prefix': 'hansen',
+        'repo_ids': [(0, 0, {
+            'name': r1.name,
+            'group_id': False,
+            'required_statuses': 'a',
+        })],
+        'branch_ids': [(0, 0, {'name': 'default'})],
+    })
+    setreviewers(*p1.repo_ids)
+
+    r2 = make_repo('repo_b')
+    with r2:
+        r2.make_commits(
+            None, Commit('root', tree={'b': 'a'}),
+            ref='heads/default'
+        )
+    r2_dev = r2.fork()
+    p2 = Projects.create({
+        'name': "Project 2",
+        'github_token': gh_token,
+        'github_prefix': 'hansen',
+        'repo_ids': [(0, 0, {
+            'name': r2.name,
+            'group_id': False,
+            'required_statuses': 'a',
+        })],
+        'branch_ids': [(0, 0, {'name': 'default'})],
+    })
+    setreviewers(*p2.repo_ids)
+
+    assert r1_dev.owner == r2_dev.owner
+
+    with r1, r1_dev:
+        r1_dev.make_commits('default', Commit('new', tree={'a': 'b'}), ref='heads/other')
+
+        # create, validate, and approve pr1
+        pr1 = r1.make_pr(title='pr 1', target='default', head=r1_dev.owner + ':other')
+        r1.post_status(pr1.head, 'success', 'a')
+        pr1.post_comment('hansen r+', config['role_reviewer']['token'])
+
+    with r2, r2_dev:
+        r2_dev.make_commits('default', Commit('new', tree={'b': 'b'}), ref='heads/other')
+
+        # create second PR with the same label *in a different project*, don't
+        # approve it
+        pr2 = r2.make_pr(title='pr 2', target='default', head=r2_dev.owner + ':other')
+        r2.post_status(pr2.head, 'success', 'a')
+    env.run_crons()
+
+    pr1_id = to_pr(env, pr1)
+    pr2_id = to_pr(env, pr2)
+
+    print(
+        pr1.repo.name, pr1.number, pr1_id.display_name, pr1_id.label,
+        '\n',
+        pr2.repo.name, pr2.number, pr2_id.display_name, pr2_id.label,
+        flush=True,
+    )
+
+    assert pr1_id.state == 'ready' and not pr1_id.blocked
+    assert pr2_id.state == 'validated'
+
+    assert pr1_id.staging_id
+    assert not pr2_id.staging_id
+
+    assert pr1.comments == [
+        (users['reviewer'], 'hansen r+'),
+        (users['user'], f'[Pull request status dashboard]({pr1_id.url}).'),
+    ]
+    assert pr2.comments == [
+        (users['user'], f'[Pull request status dashboard]({pr2_id.url}).'),
+    ]

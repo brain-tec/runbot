@@ -189,20 +189,33 @@ def handle_pr(env, event):
             'head': pr['head']['sha'],
             'squash': pr['commits'] == 1,
         })
-        return 'Updated {} to {}'.format(pr_obj.id, pr_obj.head)
+        return 'Updated {} to {}'.format(pr_obj.display_name, pr_obj.head)
+
+    if event['action'] == 'ready_for_review':
+        pr_obj.draft = False
+        return f'Updated {pr_obj.display_name} to ready'
+    if event['action'] == 'converted_to_draft':
+        pr_obj.draft = True
+        return f'Updated {pr_obj.display_name} to draft'
 
     # don't marked merged PRs as closed (!!!)
     if event['action'] == 'closed' and pr_obj.state != 'merged':
-        # FIXME: store some sort of "try to close it later" if the merge fails?
-        _logger.info(
-            '%s closing %s (state=%s)',
-            event['sender']['login'],
-            pr_obj.display_name,
-            pr_obj.state,
-        )
+        oldstate = pr_obj.state
         if pr_obj._try_closing(event['sender']['login']):
-            return 'Closed {}'.format(pr_obj.id)
+            _logger.info(
+                '%s closed %s (state=%s)',
+                event['sender']['login'],
+                pr_obj.display_name,
+                oldstate,
+            )
+            return 'Closed {}'.format(pr_obj.display_name)
         else:
+            _logger.warning(
+                '%s tried to close %s (state=%s)',
+                event['sender']['login'],
+                pr_obj.display_name,
+                oldstate,
+            )
             return 'Ignored: could not lock rows (probably being merged)'
 
     if event['action'] == 'reopened' :
@@ -221,7 +234,7 @@ def handle_pr(env, event):
                 'squash': pr['commits'] == 1,
             })
 
-            return 'Reopened {}'.format(pr_obj.id)
+            return 'Reopened {}'.format(pr_obj.display_name)
 
     _logger.info("Ignoring event %s on PR %s", event['action'], pr['number'])
     return "Not handling {} yet".format(event['action'])
@@ -231,30 +244,23 @@ def handle_status(env, event):
         'status on %(sha)s %(context)s:%(state)s (%(target_url)s) [%(description)r]',
         event
     )
-    Commits = env['runbot_merge.commit']
-    env.cr.execute('SELECT id FROM runbot_merge_commit WHERE sha=%s FOR UPDATE', [event['sha']])
-    c = Commits.browse(env.cr.fetchone())
-    if c:
-        old = json.loads(c.statuses)
-        new = {
-            **old,
-            event['context']: {
-                'state': event['state'],
-                'target_url': event['target_url'],
-                'description': event['description']
-            }
+    status_value = json.dumps({
+        event['context']: {
+            'state': event['state'],
+            'target_url': event['target_url'],
+            'description': event['description']
         }
-        if new != old: # don't update the commit if nothing's changed (e.g dupe status)
-            c.statuses = json.dumps(new)
-    else:
-        Commits.create({
-            'sha': event['sha'],
-            'statuses': json.dumps({event['context']: {
-                'state': event['state'],
-                'target_url': event['target_url'],
-                'description': event['description']
-            }})
-        })
+    })
+    # create status, or merge update into commit *unless* the update is already
+    # part of the status (dupe status)
+    env.cr.execute("""
+        INSERT INTO runbot_merge_commit AS c (sha, to_check, statuses)
+        VALUES (%s, true, %s)
+        ON CONFLICT (sha) DO UPDATE
+            SET to_check = true,
+                statuses = c.statuses::jsonb || EXCLUDED.statuses::jsonb
+            WHERE NOT c.statuses::jsonb @> EXCLUDED.statuses::jsonb
+    """, [event['sha'], status_value])
 
     return 'ok'
 

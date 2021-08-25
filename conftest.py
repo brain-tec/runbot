@@ -54,6 +54,7 @@ import subprocess
 import sys
 import time
 import uuid
+import warnings
 import xmlrpc.client
 from contextlib import closing
 
@@ -129,16 +130,18 @@ def rolemap(request, config):
             r = _rate_limited(lambda: requests.get('https://api.github.com/user', headers={'Authorization': 'token %s' % data['token']}))
         r.raise_for_status()
 
-        rolemap[role] = data['user'] = r.json()['login']
+        user = rolemap[role] = r.json()
+        data['user'] = user['login']
     return rolemap
 
 @pytest.fixture
 def partners(env, config, rolemap):
     m = dict.fromkeys(rolemap.keys(), env['res.partner'])
-    for role, login in rolemap.items():
+    for role, u in rolemap.items():
         if role in ('user', 'other'):
             continue
 
+        login = u['login']
         m[role] = env['res.partner'].create({
             'name': config['role_' + role].get('name', login),
             'github_login': login,
@@ -164,7 +167,7 @@ def setreviewers(partners):
 
 @pytest.fixture
 def users(partners, rolemap):
-    return rolemap
+    return {k: v['login'] for k, v in rolemap.items()}
 
 @pytest.fixture(scope='session')
 def tunnel(pytestconfig, port):
@@ -383,6 +386,7 @@ def make_repo(capsys, request, config, tunnel, users):
             'allow_rebase_merge': False,
         })
         r.raise_for_status()
+        repo = Repo(github, fullname, repos)
 
         # create webhook
         github.post('{}/hooks'.format(repo_url), json={
@@ -401,8 +405,9 @@ def make_repo(capsys, request, config, tunnel, users):
             'content': base64.b64encode(b'whee').decode('ascii'),
             'branch': 'garbage_%s' % uuid.uuid4()
         }).raise_for_status()
-
-        return Repo(github, fullname, repos)
+        # try to unwatch repo, doesn't actually work
+        repo.unsubscribe()
+        return repo
 
     yield repomaker
 
@@ -416,7 +421,7 @@ def _rate_limited(req):
         q = req()
         if not q.ok and q.headers.get('X-RateLimit-Remaining') == '0':
             reset = int(q.headers['X-RateLimit-Reset'])
-            delay = round(reset - time.time() + 1.0)
+            delay = max(0, round(reset - time.time() + 1.0))
             print("Hit rate limit, sleeping for", delay, "seconds")
             time.sleep(delay)
             continue
@@ -432,9 +437,6 @@ class Repo:
         self._repos = repos
         self.hook = False
         repos.append(self)
-
-        # unwatch repo
-        self.unsubscribe()
 
     @property
     def owner(self):
@@ -470,7 +472,7 @@ class Repo:
     def delete(self):
         r = self._session.delete('https://api.github.com/repos/{}'.format(self.name))
         if r.status_code != 204:
-            logging.getLogger(__name__).warning("Unable to delete repository %s", self.name)
+            warnings.warn("Unable to delete repository %s (HTTP %s)" % (self.name, r.status_code))
 
     def set_secret(self, secret):
         assert self.hook
@@ -575,12 +577,12 @@ class Repo:
         if force and r.status_code == 422:
             self.update_ref(name, commit, force=force)
             return
-        assert 200 <= r.status_code < 300, r.json()
+        assert r.ok, r.text
 
     def update_ref(self, name, commit, force=False):
         assert self.hook
         r = self._session.patch('https://api.github.com/repos/{}/git/refs/{}'.format(self.name, name), json={'sha': commit, 'force': force})
-        assert 200 <= r.status_code < 300, r.json()
+        assert r.ok, r.text
 
     def protect(self, branch):
         assert self.hook
@@ -636,7 +638,7 @@ class Repo:
                 ],
                 'base_tree': tree
             })
-            assert 200 <= r.status_code < 300, r.json()
+            assert r.ok, r.text
             tree = r.json()['sha']
 
             data = {
@@ -650,7 +652,7 @@ class Repo:
                 data['committer'] = commit.committer
 
             r = self._session.post('https://api.github.com/repos/{}/git/commits'.format(self.name), json=data)
-            assert 200 <= r.status_code < 300, r.json()
+            assert r.ok, r.text
 
             hashes.append(r.json()['sha'])
             parents = [hashes[-1]]
@@ -686,7 +688,7 @@ class Repo:
         )).raise_for_status()
         return PR(self, number)
 
-    def make_pr(self, *, title=None, body=None, target, head, token=None):
+    def make_pr(self, *, title=None, body=None, target, head, draft=False, token=None):
         assert self.hook
         self.hook = 2
 
@@ -715,6 +717,7 @@ class Repo:
                 'body': body,
                 'head': head,
                 'base': target,
+                'draft': draft,
             },
             headers=headers,
         )
@@ -772,6 +775,22 @@ class Comment(tuple):
     def __getitem__(self, item):
         return self._c[item]
 
+
+PR_SET_READY = '''
+mutation setReady($pid: ID!) {
+    markPullRequestReadyForReview(input: { pullRequestId: $pid}) {
+        clientMutationId
+    }
+}
+'''
+
+PR_SET_DRAFT = '''
+mutation setDraft($pid: ID!) {
+    convertPullRequestToDraft(input: { pullRequestId: $pid }) {
+        clientMutationId
+    }
+}
+'''
 class PR:
     def __init__(self, repo, number):
         self.repo = repo
@@ -793,6 +812,22 @@ class PR:
     def base(self):
         raise NotImplementedError()
     base = base.setter(lambda self, v: self._set_prop('base', v))
+
+    @property
+    def draft(self):
+        return self._pr['draft']
+    @draft.setter
+    def draft(self, v):
+        assert self.repo.hook
+        # apparently it's not possible to update the draft flag via the v3 API,
+        # only the V4...
+        r = self.repo._session.post('https://api.github.com/graphql', json={
+            'query': PR_SET_DRAFT if v else PR_SET_READY,
+            'variables': {'pid': self._pr['node_id']}
+        })
+        assert r.ok, r.text
+        out = r.json()
+        assert 'errors' not in out, out['errors']
 
     @property
     def head(self):
@@ -861,7 +896,7 @@ class PR:
         r = self.repo._session.patch('https://api.github.com/repos/{}/pulls/{}'.format(self.repo.name, self.number), json={
             prop: value
         }, headers=headers)
-        assert 200 <= r.status_code < 300, r.json()
+        assert r.ok, r.text
 
     def open(self, token=None):
         self._set_prop('state', 'open', token=token)
