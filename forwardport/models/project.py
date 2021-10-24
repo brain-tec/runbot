@@ -13,6 +13,7 @@ it up), ...
 """
 import ast
 import base64
+import collections
 import contextlib
 import datetime
 import itertools
@@ -24,6 +25,7 @@ import pathlib
 import re
 import subprocess
 import tempfile
+import typing
 
 import dateutil.relativedelta
 import requests
@@ -34,6 +36,7 @@ from odoo.exceptions import UserError
 from odoo.tools import topological_sort, groupby
 from odoo.tools.appdirs import user_cache_dir
 from odoo.addons.runbot_merge import utils
+from odoo.addons.runbot_merge.models.pull_requests import RPLUS
 
 footer = '\nMore info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port\n'
 
@@ -325,21 +328,9 @@ class PullRequests(models.Model):
                         'token_field': 'fp_github_token',
                     })
                     continue
-                if not self.source_id._pr_acl(author).is_reviewer:
-                    Feedback.create({
-                        'repository': self.repository.id,
-                        'pull_request': self.number,
-                        'message': "I'm sorry, @{}. You can't review this PR: "
-                                   "you need to be a reviewer on {}.".format(
-                            login,
-                            self.source_id.display_name
-                        ),
-                        'token_field': 'fp_github_token',
-                    })
-                    continue
                 merge_bot = self.repository.project_id.github_prefix
                 # don't update the root ever
-                for pr in filter(lambda p: p.parent_id, self._iter_ancestors()):
+                for pr in (p for p in self._iter_ancestors() if p.parent_id if p.state in RPLUS):
                     # only the author is delegated explicitely on the
                     pr._parse_commands(author, {**comment, 'body': merge_bot + ' r+'}, login)
             elif token == 'close':
@@ -674,16 +665,16 @@ class PullRequests(models.Model):
             _logger.info("Created forward-port PR %s", new_pr)
             new_batch |= new_pr
 
-            # delegate original author on merged original PR & on new PR so
-            # they can r+ the forward ports (via mergebot or forwardbot)
+            # allows PR author to close or skipci
             source.delegates |= source.author
             new_pr.write({
                 'merge_method': pr.merge_method,
                 'source_id': source.id,
                 # only link to previous PR of sequence if cherrypick passed
                 'parent_id': pr.id if not has_conflicts else False,
-                # copy all delegates of source to new
-                'delegates': [(6, False, source.delegates.ids)]
+                # Copy author & delegates of source as well as delegates of
+                # previous so they can r+ the new forward ports.
+                'delegates': [(6, False, (source.delegates | pr.delegates).ids)]
             })
             if has_conflicts and pr.parent_id and pr.state not in ('merged', 'closed'):
                 message = source._pingline() + """
@@ -1038,24 +1029,45 @@ stderr:
             repo.config('--add', 'remote.origin.fetch', '+refs/pull/*/head:refs/heads/pull/*')
             return repo
 
-    def _outstanding(self, cutoff=None):
+    def _outstanding(self, cutoff):
         """ Returns "outstanding" (unmerged and unclosed) forward-ports whose
         source was merged before ``cutoff`` (all of them if not provided).
 
         :param str cutoff: a datetime (ISO-8601 formatted)
         :returns: an iterator of (source, forward_ports)
         """
-        cutoff_terms = []
-        if cutoff:
-            # original merged more than <cutoff> ago
-            cutoff_terms = [('source_id.merge_date', '<', cutoff)]
         return groupby(self.env['runbot_merge.pull_requests'].search([
             # only FP PRs
             ('source_id', '!=', False),
             # active
             ('state', 'not in', ['merged', 'closed']),
-            *cutoff_terms,
+            ('source_id.merge_date', '<', cutoff),
         ], order='source_id, id'), lambda p: p.source_id)
+
+    def _hall_of_shame(self):
+        """Provides data for the HOS view
+
+        * outstanding forward ports per reviewer
+        * pull requests with outstanding forward ports, oldest-merged first
+        """
+        cutoff_dt = datetime.datetime.now() - DEFAULT_DELTA
+        outstanding = self.env['runbot_merge.pull_requests'].search([
+            ('source_id', '!=', False),
+            ('state', 'not in', ['merged', 'closed']),
+            ('source_id.merge_date', '<', cutoff_dt),
+        ], order=None)
+        # only keep merged because apparently some PRs are in a weird spot
+        # where they're sources but closed?
+        sources = outstanding.mapped('source_id').filtered('merge_date').sorted('merge_date')
+        outstandings = []
+        reviewers = collections.Counter()
+        for source in sources:
+            outstandings.append(Outstanding(source=source, prs=source.forwardport_ids & outstanding))
+            reviewers[source.reviewed_by] += 1
+        return HallOfShame(
+            reviewers=reviewers.most_common(),
+            outstanding=outstandings,
+        )
 
     def _reminder(self):
         cutoff = self.env.context.get('forwardport_updated_before') \
@@ -1189,3 +1201,11 @@ def _clean_rename(s):
         l for l in s.splitlines()
         if not l.startswith('Performing inexact rename detection')
     )
+
+class HallOfShame(typing.NamedTuple):
+    reviewers: list
+    outstanding: list
+
+class Outstanding(typing.NamedTuple):
+    source: object
+    prs: object

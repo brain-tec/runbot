@@ -534,15 +534,13 @@ class Branch(models.Model):
             try:
                 staged |= Batch.stage(meta, batch)
             except exceptions.MergeError as e:
+                pr = e.args[0]
+                _logger.exception("Failed to merge %s into staging branch", pr.display_name)
                 if first or isinstance(e, exceptions.Unmergeable):
-                    pr = e.args[0]
                     if len(e.args) > 1 and e.args[1]:
                         message = e.args[1]
                     else:
                         message = "Unable to stage PR (%s)" % e.__context__
-                        _logger.exception(
-                            "Failed to merge %s into staging branch",
-                            pr.display_name)
                     pr.state = 'error'
                     self.env['runbot_merge.pull_requests.feedback'].create({
                         'repository': pr.repository.id,
@@ -694,6 +692,7 @@ class PullRequests(models.Model):
         ('merge', "merge directly, using the PR as merge commit message"),
         ('rebase-merge', "rebase and merge, using the PR as merge commit message"),
         ('rebase-ff', "rebase and fast-forward"),
+        ('squash', "squash"),
     ], default=False)
     method_warned = fields.Boolean(default=False)
 
@@ -1005,12 +1004,14 @@ class PullRequests(models.Model):
                 elif param and is_reviewer:
                     oldstate = self.state
                     newstate = RPLUS.get(self.state)
-                    if newstate:
+                    if not author.email:
+                        msg = "I must know your email before you can review PRs. Please contact an administrator."
+                    elif not newstate:
+                        msg = "This PR is already reviewed, reviewing it again is useless."
+                    else:
                         self.state = newstate
                         self.reviewed_by = author
                         ok = True
-                    else:
-                        msg = "This PR is already reviewed, reviewing it again is useless."
                     _logger.debug(
                         "r+ on %s by %s (%s->%s) status=%s message? %s",
                         self.display_name, author.github_login,
@@ -1064,15 +1065,18 @@ class PullRequests(models.Model):
                             author.github_login, self.target.name,
                         )
             elif command == 'method':
-                if is_admin:
-                    self.merge_method = param
-                    ok = True
-                    explanation = next(label for value, label in type(self).merge_method.selection if value == param)
-                    Feedback.create({
-                        'repository': self.repository.id,
-                        'pull_request': self.number,
-                        'message':"Merge method set to %s" % explanation
-                    })
+                if is_reviewer:
+                    if param == 'squash' and not self.squash:
+                        msg = "Squash can only be used with a single commit at this time."
+                    else:
+                        self.merge_method = param
+                        ok = True
+                        explanation = next(label for value, label in type(self).merge_method.selection if value == param)
+                        Feedback.create({
+                            'repository': self.repository.id,
+                            'pull_request': self.number,
+                            'message':"Merge method set to %s" % explanation
+                        })
             elif command == 'override':
                 overridable = author.override_rights\
                     .filtered(lambda r: not r.repository_id or (r.repository_id == self.repository))\
@@ -1334,6 +1338,7 @@ class PullRequests(models.Model):
                 'message': "Because this PR has multiple commits, I need to know how to merge it:\n\n" + ''.join(
                     '* `%s` to %s\n' % pair
                     for pair in type(self).merge_method.selection
+                    if pair[0] != 'squash'
                 )
             })
             r.method_warned = True
@@ -1427,6 +1432,22 @@ class PullRequests(models.Model):
         #       a merge commit reused instead of being re-merged)
         return method, getattr(self, '_stage_' + method.replace('-', '_'))(
             gh, target, pr_commits, related_prs=related_prs)
+
+    def _stage_squash(self, gh, target, commits, related_prs=()):
+        original_head = gh.head(target)
+        msg = self._build_merge_message(self, related_prs=related_prs)
+        [commit] = commits
+        merge_tree = gh.merge(commit['sha'], target, 'temp')['tree']['sha']
+        squashed = gh('post', 'git/commits', json={
+            'message': str(msg),
+            'tree': merge_tree,
+            'author': commit['commit']['author'],
+            'committer': commit['commit']['committer'],
+            'parents': [original_head],
+        }).json()['sha']
+        gh.set_ref(target, squashed)
+        self.commits_map = json.dumps({commit['sha']: squashed, '': squashed})
+        return squashed
 
     def _stage_rebase_ff(self, gh, target, commits, related_prs=()):
         # updates head commit with PR number (if necessary) then rebases
@@ -2211,7 +2232,9 @@ class Message:
         msg, handle_break = (msg, False) if isinstance(msg, str) else (msg.message, True)
         headers = []
         body = []
-        for line in reversed(msg.splitlines()):
+        # don't process the title (first line) of the commit message
+        msg = msg.splitlines()
+        for line in reversed(msg[1:]):
             if maybe_setex:
                 # NOTE: actually slightly more complicated: it's a SETEX heading
                 #       only if preceding line(s) can be interpreted as a
@@ -2247,6 +2270,10 @@ class Message:
             body.append(line)
             in_headers = False
 
+        # if there are non-title body lines, add a separation after the title
+        if body and body[-1]:
+            body.append('')
+        body.append(msg[0])
         return cls('\n'.join(reversed(body)), Headers(reversed(headers)))
 
     def __init__(self, body, headers=None):

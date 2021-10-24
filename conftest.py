@@ -22,6 +22,8 @@ Configuration:
   ``role_reviewer``, ``role_self_reviewer`` and ``role_other``
     - name (optional, used as partner name when creating that, otherwise github
       login gets used)
+    - email (optional, used as partner email when creating that, otherwise
+      github email gets used, reviewer and self-reviewer must have an email)
     - token, a personal access token with the ``public_repo`` scope (otherwise
       the API can't leave comments), maybe eventually delete_repo (for personal
       forks)
@@ -44,9 +46,9 @@ import collections
 import configparser
 import contextlib
 import copy
+import functools
 import http.client
 import itertools
-import logging
 import os
 import random
 import re
@@ -137,14 +139,16 @@ def rolemap(request, config):
 
 @pytest.fixture
 def partners(env, config, rolemap):
-    m = dict.fromkeys(rolemap.keys(), env['res.partner'])
+    m = {}
     for role, u in rolemap.items():
         if role in ('user', 'other'):
             continue
 
         login = u['login']
+        conf = config['role_' + role]
         m[role] = env['res.partner'].create({
-            'name': config['role_' + role].get('name', login),
+            'name': conf.get('name', login),
+            'email': conf.get('email') or u['email'] or False,
             'github_login': login,
         })
     return m
@@ -263,15 +267,15 @@ class DbDict(dict):
         super().__init__()
         self._adpath = adpath
     def __missing__(self, module):
-        db = 'template_%s' % uuid.uuid4()
+        self[module] = db = 'template_%s' % uuid.uuid4()
         subprocess.run([
             'odoo', '--no-http',
             '--addons-path', self._adpath,
             '-d', db, '-i', module,
             '--max-cron-threads', '0',
-            '--stop-after-init'
+            '--stop-after-init',
+            '--log-level', 'warn'
         ], check=True)
-        self[module] = db
         return db
 
 @pytest.fixture(scope='session')
@@ -332,15 +336,18 @@ def port():
 
 @pytest.fixture
 def server(request, db, port, module):
-    opts = ['--log-handler', 'github_requests:WARNING']
-    if request.config.getoption('--log-github'):
-        opts = []
+    log_handlers = [
+        'odoo.modules.loading:WARNING',
+    ]
+    if not request.config.getoption('--log-github'):
+        log_handlers.append('github_requests:WARNING')
 
     p = subprocess.Popen([
         'odoo', '--http-port', str(port),
         '--addons-path', request.config.getoption('--addons-path'),
-        '-d', db, *opts,
+        '-d', db,
         '--max-cron-threads', '0', # disable cron threads (we're running crons by hand)
+        *itertools.chain.from_iterable(('--log-handler', h) for h in log_handlers),
     ])
 
     try:
@@ -355,6 +362,9 @@ def server(request, db, port, module):
 def env(port, server, db, default_crons):
     yield Environment(port, db, default_crons)
 
+def check(response):
+    assert response.ok, response.text or response.reason
+    return response
 # users is just so I can avoid autouse on toplevel users fixture b/c it (seems
 # to) break the existing local tests
 @pytest.fixture
@@ -372,8 +382,7 @@ def make_repo(capsys, request, config, tunnel, users):
         endpoint = 'https://api.github.com/orgs/{}/repos'.format(owner)
     else:
         endpoint = 'https://api.github.com/user/repos'
-        r = github.get('https://api.github.com/user')
-        r.raise_for_status()
+        r = check(github.get('https://api.github.com/user'))
         assert r.json()['login'] == owner
 
     repos = []
@@ -383,7 +392,7 @@ def make_repo(capsys, request, config, tunnel, users):
         repo_url = 'https://api.github.com/repos/{}'.format(fullname)
 
         # create repo
-        r = github.post(endpoint, json={
+        r = check(github.post(endpoint, json={
             'name': name,
             'has_issues': False,
             'has_projects': False,
@@ -393,12 +402,11 @@ def make_repo(capsys, request, config, tunnel, users):
             'allow_squash_merge': False,
             # 'allow_merge_commit': False,
             'allow_rebase_merge': False,
-        })
-        r.raise_for_status()
+        }))
         repo = Repo(github, fullname, repos)
 
         # create webhook
-        github.post('{}/hooks'.format(repo_url), json={
+        check(github.post('{}/hooks'.format(repo_url), json={
             'name': 'web',
             'config': {
                 'url': '{}/runbot_merge/hooks'.format(tunnel),
@@ -406,14 +414,14 @@ def make_repo(capsys, request, config, tunnel, users):
                 'insecure_ssl': '1',
             },
             'events': ['pull_request', 'issue_comment', 'status', 'pull_request_review']
-        })
+        }))
 
-        github.put('{}/contents/{}'.format(repo_url, 'a'), json={
+        check(github.put('{}/contents/{}'.format(repo_url, 'a'), json={
             'path': 'a',
             'message': 'github returns a 409 (Git Repository is Empty) if trying to create a tree in a repo with no objects',
             'content': base64.b64encode(b'whee').decode('ascii'),
             'branch': 'garbage_%s' % uuid.uuid4()
-        }).raise_for_status()
+        }))
         # try to unwatch repo, doesn't actually work
         repo.unsubscribe()
         return repo
@@ -459,16 +467,13 @@ class Repo:
 
     def add_collaborator(self, login, token):
         # send invitation to user
-        r = self._session.put('https://api.github.com/repos/{}/collaborators/{}'.format(self.name, login))
-        assert r.ok, r.json()
+        r = check(self._session.put('https://api.github.com/repos/{}/collaborators/{}'.format(self.name, login)))
         # accept invitation on behalf of user
-        r = requests.patch('https://api.github.com/user/repository_invitations/{}'.format(r.json()['id']), headers={
+        check(requests.patch('https://api.github.com/user/repository_invitations/{}'.format(r.json()['id']), headers={
             'Authorization': 'token ' + token
-        })
-        assert r.ok, r.json()
+        }))
         # sanity check that user is part of collaborators
-        r = self._session.get('https://api.github.com/repos/{}/collaborators'.format(self.name))
-        assert r.ok, r.json()
+        r = check(self._session.get('https://api.github.com/repos/{}/collaborators'.format(self.name)))
         assert any(login == c['login'] for c in r.json())
 
     def _get_session(self, token):
@@ -1120,17 +1125,18 @@ class Model:
     def __getattr__(self, fieldname):
         if fieldname in ['__dataclass_fields__', '__attrs_attrs__']:
             raise AttributeError('%r is invalid on %s' % (fieldname, self._model))
+
+        field_description = self._fields.get(fieldname)
+        if field_description is None:
+            return functools.partial(self._call, fieldname)
+
         if not self._ids:
             return False
 
-        assert len(self._ids) == 1
         if fieldname == 'id':
             return self._ids[0]
 
-        try:
-            val = self.read([fieldname])[0][fieldname]
-        except Exception:
-            raise AttributeError('%r is invalid on %s' % (fieldname, self._model))
+        val = self.read([fieldname])[0][fieldname]
         field_description = self._fields[fieldname]
         if field_description['type'] in ('many2one', 'one2many', 'many2many'):
             val = val or []

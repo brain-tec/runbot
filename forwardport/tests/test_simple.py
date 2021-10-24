@@ -84,7 +84,7 @@ def test_straightforward_flow(env, config, make_repo, users):
         number=pr.number,
         headers='',
         name=reviewer_name,
-        login=users['reviewer'],
+        email=config['role_reviewer']['email'],
     )
     assert prod.read_tree(p_1_merged) == {
         'f': 'e',
@@ -192,7 +192,7 @@ More info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port
         number='%s',
         headers='X-original-commit: {}\n'.format(p_1_merged.id),
         name=reviewer_name,
-        login=users['reviewer'],
+        email=config['role_reviewer']['email'],
     )
 
     old_b = prod.read_tree(b_head)
@@ -397,8 +397,6 @@ def test_partially_empty(env, config, make_repo):
         'y': '0',
     }
 
-# reviewer = of the FP sequence, the original PR is always reviewed by `user`
-# set as reviewer
 Case = collections.namedtuple('Case', 'author reviewer delegate success')
 ACL = [
     Case('reviewer', 'reviewer', None, True),
@@ -418,6 +416,9 @@ ACL = [
 ]
 @pytest.mark.parametrize(Case._fields, ACL)
 def test_access_rights(env, config, make_repo, users, author, reviewer, delegate, success):
+    """Validates the review rights *for the forward-port sequence*, the original
+    PR is always reviewed by `user`.
+    """
     prod, other = make_basic(env, config, make_repo)
     project = env['runbot_merge.project'].search([])
 
@@ -425,12 +426,19 @@ def test_access_rights(env, config, make_repo, users, author, reviewer, delegate
     c = env['res.partner'].create({
         'name': users['user'],
         'github_login': users['user'],
+        'email': 'user@example.org',
     })
     c.write({
         'review_rights': [
             (0, 0, {'repository_id': repo.id, 'review': True})
             for repo in project.repo_ids
         ]
+    })
+    # create a partner for `other` so we can put an email on it
+    env['res.partner'].create({
+        'name': users['other'],
+        'github_login': users['other'],
+        'email': 'other@example.org',
     })
 
     author_token = config['role_' + author]['token']
@@ -489,6 +497,129 @@ def signoff(conf, message):
         if signoff in message:
             return signoff
     raise AssertionError("Failed to find signoff by %s in %s" % (conf, message))
+
+
+def test_delegate_fw(env, config, make_repo, users):
+    """If a user is delegated *on a forward port* they should be able to approve
+    *the followup*.
+    """
+    prod, _ = make_basic(env, config, make_repo)
+    # create a partner for `other` so we can put an email on it
+    env['res.partner'].create({
+        'name': users['other'],
+        'github_login': users['other'],
+        'email': 'other@example.org',
+    })
+    author_token = config['role_self_reviewer']['token']
+    fork = prod.fork(token=author_token)
+    with prod, fork:
+        [c] = fork.make_commits('a', Commit('c_0', tree={'y': '0'}), ref='heads/accessrights')
+        pr = prod.make_pr(
+            target='a', title='my change',
+            head=users['self_reviewer'] + ':accessrights',
+            token=author_token,
+        )
+        prod.post_status(c, 'success', 'legal/cla')
+        prod.post_status(c, 'success', 'ci/runbot')
+        pr.post_comment('hansen r+', token=config['role_reviewer']['token'])
+    env.run_crons()
+
+    with prod:
+        prod.post_status('staging.a', 'success', 'legal/cla')
+        prod.post_status('staging.a', 'success', 'ci/runbot')
+    env.run_crons()
+
+    # ensure pr1 has to be approved to be forward-ported
+    _, pr1_id = env['runbot_merge.pull_requests'].search([], order='number')
+    # detatch from source
+    pr1_id.parent_id = False
+    with prod:
+        prod.post_status(pr1_id.head, 'success', 'legal/cla')
+        prod.post_status(pr1_id.head, 'success', 'ci/runbot')
+    env.run_crons()
+    pr1 = prod.get_pr(pr1_id.number)
+    # delegate review to "other" consider PR fixed, and have "other" approve it
+    with prod:
+        pr1.post_comment('hansen delegate=' + users['other'],
+                         token=config['role_reviewer']['token'])
+        prod.post_status(pr1_id.head, 'success', 'ci/runbot')
+        pr1.post_comment('hansen r+', token=config['role_other']['token'])
+    env.run_crons()
+
+    with prod:
+        prod.post_status('staging.b', 'success', 'legal/cla')
+        prod.post_status('staging.b', 'success', 'ci/runbot')
+    env.run_crons()
+
+    _, _, pr2_id = env['runbot_merge.pull_requests'].search([], order='number')
+    pr2 = prod.get_pr(pr2_id.number)
+    # make "other" also approve this one
+    with prod:
+        prod.post_status(pr2_id.head, 'success', 'ci/runbot')
+        prod.post_status(pr2_id.head, 'success', 'legal/cla')
+        pr2.post_comment('hansen r+', token=config['role_other']['token'])
+    env.run_crons()
+
+    assert pr2.comments == [
+        seen(env, pr2, users),
+        (users['user'], '''Ping @{self_reviewer}, @{reviewer}
+This PR targets c and is the last of the forward-port chain.
+
+To merge the full chain, say
+> @{user} r+
+
+More info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port
+'''.format_map(users)),
+        (users['other'], 'hansen r+')
+    ]
+
+
+def test_redundant_approval(env, config, make_repo, users):
+    """If a forward port sequence has been partially approved, fw-bot r+ should
+    not perform redundant approval as that triggers warning messages.
+    """
+    prod, _ = make_basic(env, config, make_repo)
+    [project] = env['runbot_merge.project'].search([])
+    with prod:
+        prod.make_commits(
+            'a', Commit('p', tree={'x': '0'}),
+            ref='heads/early'
+        )
+        pr0 = prod.make_pr(target='a', head='early')
+        prod.post_status('heads/early', 'success', 'legal/cla')
+        prod.post_status('heads/early', 'success', 'ci/runbot')
+        pr0.post_comment('hansen r+', config['role_reviewer']['token'])
+    env.run_crons()
+    with prod:
+        prod.post_status('staging.a', 'success', 'legal/cla')
+        prod.post_status('staging.a', 'success', 'ci/runbot')
+    env.run_crons()
+    pr0_id, pr1_id = env['runbot_merge.pull_requests'].search([], order='number asc')
+    with prod:
+        prod.post_status(pr1_id.head, 'success', 'legal/cla')
+        prod.post_status(pr1_id.head, 'success', 'ci/runbot')
+    env.run_crons()
+
+    _, _, pr2_id = env['runbot_merge.pull_requests'].search([], order='number asc')
+    assert pr2_id.parent_id == pr1_id
+    assert pr1_id.parent_id == pr0_id
+
+    pr1 = prod.get_pr(pr1_id.number)
+    pr2 = prod.get_pr(pr2_id.number)
+    with prod:
+        pr1.post_comment('hansen r+', config['role_reviewer']['token'])
+    with prod:
+        pr2.post_comment(f'{project.fp_github_name} r+', config['role_reviewer']['token'])
+    env.run_crons()
+
+    assert pr1.comments == [
+        seen(env, pr1, users),
+        (users['user'], 'This PR targets b and is part of the forward-port chain. '
+                        'Further PRs will be created up to c.\n\n'
+                        'More info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port\n'),
+        (users['reviewer'], 'hansen r+'),
+    ]
+
 
 def test_batched(env, config, make_repo, users):
     """ Tests for projects with multiple repos & sync'd branches. Batches
