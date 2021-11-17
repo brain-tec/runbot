@@ -287,7 +287,7 @@ class BuildErrorTeamDashboard(models.Model):
     @api.depends('project_id', 'category_id', 'trigger_id', 'config_id')
     def _compute_display_name(self):
         for board in self:
-            names = [board.project_id.name, board.category_id.name,board.trigger_id.name, board.config_id.name]
+            names = [board.project_id.name, board.category_id.name, board.trigger_id.name, board.config_id.name]
             board.display_name = ' / '.join([n for n in names if n])
 
     @api.depends('project_id')
