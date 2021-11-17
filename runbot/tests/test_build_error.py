@@ -159,7 +159,6 @@ class TestBuildError(RunbotCase):
         self.assertNotIn('blah', self.BuildError.test_tags_list())
         self.assertNotIn('-blah', self.BuildError.disabling_tags())
 
-
     def test_build_error_team_wildcards(self):
         website_team = self.BuildErrorTeam.create({
             'name': 'website',
@@ -170,3 +169,24 @@ class TestBuildError(RunbotCase):
         self.assertFalse(self.BuildErrorTeam._get_team('odoo.addons.website_sale.tests.test_sale_process'))
         self.assertEqual(website_team.id, self.BuildErrorTeam._get_team('odoo.addons.website_crm.tests.test_website_crm'))
         self.assertEqual(website_team.id, self.BuildErrorTeam._get_team('odoo.addons.website.tests.test_ui'))
+
+    def test_team_dashboard_simple(self):
+        self.additionnal_setup()
+        bundle = self.env['runbot.bundle'].search([('project_id', '=', self.project.id)])
+        bundle.last_batch.state = 'done'
+        bundle.flush()
+        bundle._compute_last_done_batch()  # force the recompute
+        self.assertTrue(bool(bundle.last_done_batch.exists()))
+        # simulate a failed build that we want to monitor
+        failed_build = bundle.last_done_batch.slot_ids[0].build_id
+        failed_build.global_result = 'ko'
+        failed_build.flush()
+
+        team = self.env['runbot.team'].create({'name': 'Test team'})
+        dashboard = self.env['runbot.team.dashboard'].create({
+            'team_id': team.id,
+            'project_id': self.project.id,
+            'category_id': bundle.last_done_batch.category_id.id,
+        })
+
+        self.assertEqual(dashboard.build_ids, failed_build)
