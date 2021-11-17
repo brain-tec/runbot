@@ -5,7 +5,10 @@ from . import branch
 from . import build
 from . import build_config
 from . import build_error
+from . import build_stat
+from . import build_stat_regex
 from . import bundle
+from . import codeowner
 from . import commit
 from . import database
 from . import dockerfile
@@ -21,6 +24,3 @@ from . import runbot
 from . import upgrade
 from . import user
 from . import version
-
-from . import build_stat
-from . import build_stat_regex

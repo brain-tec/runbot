@@ -190,3 +190,65 @@ class TestBuildError(RunbotCase):
         })
 
         self.assertEqual(dashboard.build_ids, failed_build)
+
+class TestCodeOwner(RunbotCase):
+
+    def test_codeowner_invalid_regex(self):
+        with self.assertRaises(ValidationError):
+            self.env['runbot.codeowner'].create({
+                'project_id': self.project.id,
+                'regex': '*debian.*',
+                'github_teams': 'rd-test'
+            })
+
+
+    def test_codeowner_check_folder(self):
+
+        os_walk_return_value = [
+            ('/odoo', ('debian', 'addons'), ('odoo-bin', 'requirements.txt')),
+            ('/odoo/debian', ('souce',), ('control', 'rules')),
+            ('/odoo/addons', ('website', 'mrp', 'web'), ()),
+            ('/odoo/addons/website', ('models', 'views'), ('__init__.py')),
+            ('/odoo/addons/mrp', ('models', 'views'), ('__init__.py'))
+        ]
+
+        self.start_patcher('os_walk_patcher', 'odoo.addons.runbot.models.codeowner.os.walk', return_value=os_walk_return_value)
+        self.start_patcher('path_exists', 'odoo.addons.runbot.models.codeowner.Path.exists', return_value=True)
+        self.start_patcher('path_is_dir', 'odoo.addons.runbot.models.codeowner.Path.is_dir', return_value=True)
+
+        cow_deb = self.env['runbot.codeowner'].create({
+            'project_id' : self.project.id,
+            'github_teams': 'runbot',
+            'regex': '.*debian.*'
+        })
+
+        github_teams = cow_deb._check_folder('/data/odoo')
+        self.assertIn('runbot', github_teams)
+
+        cow_web = self.env['runbot.codeowner'].create({
+            'project_id' : self.project.id,
+            'github_teams': 'website',
+            'regex': '.*website.*'
+        })
+
+        github_teams = cow_web._check_folder('/data/odoo')
+        self.assertNotIn('runbot', github_teams)
+        self.assertIn('website', github_teams)
+
+        cow_crm = self.env['runbot.codeowner'].create({
+            'project_id' : self.project.id,
+            'github_teams': 'crm',
+            'regex': '.*crm.*'
+        })
+
+        github_teams = cow_crm._check_folder('/data/odoo')
+        self.assertNotIn('runbot', github_teams)
+        self.assertNotIn('website', github_teams)
+        self.assertNotIn('crm', github_teams)
+
+        cow_all = cow_deb | cow_web | cow_crm
+
+        github_teams = cow_all._check_folder('/data/odoo')
+        self.assertIn('runbot', github_teams)
+        self.assertIn('website', github_teams)
+        self.assertNotIn('crm', github_teams)
