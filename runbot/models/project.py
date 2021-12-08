@@ -10,6 +10,7 @@ class Project(models.Model):
 
     trigger_ids = fields.One2many('runbot.trigger', 'project_id', string='Triggers')
     dockerfile_id = fields.Many2one('runbot.dockerfile', index=True, help="Project Default Dockerfile")
+    repo_ids = fields.One2many('runbot.repo', 'project_id', string='Repos')
 
 
 class Category(models.Model):
