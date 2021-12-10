@@ -50,7 +50,6 @@ class Bundle(models.Model):
     commit_limit = fields.Integer("Commit limit")
     file_limit = fields.Integer("File limit")
 
-    @api.depends('name')
     def _compute_host_id(self):
         assigned_only = None
         runbots = {}
@@ -180,6 +179,11 @@ class Bundle(models.Model):
             batchs = self.env['runbot.batch'].browse([r[0] for r in self.env.cr.fetchall()])
             for batch in batchs:
                 batch.bundle_id.last_done_batch = batch
+
+    def _url(self):
+        self.ensure_one()
+        return "/runbot/bundle/%s" % self.id
+
 
     def create(self, values_list):
         res = super().create(values_list)
