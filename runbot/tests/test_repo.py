@@ -81,7 +81,7 @@ class TestRepo(RunbotCaseMinimalSetup):
         self.commit_list[self.repo_server.id] = first_commit
 
         self.patchers['github_patcher'].side_effect = github
-        repos._update_batches()
+        self.repo_server._update_batches()
 
         dev_branch = self.env['runbot.branch'].search([('remote_id', '=', self.remote_server_dev.id)])
 
@@ -106,7 +106,7 @@ class TestRepo(RunbotCaseMinimalSetup):
                                                   'Marc Bidule',
                                                   '<marc.bidule@somewhere.com>')]
 
-        repos._update_batches()
+        self.repo_addons._update_batches()
 
         addons_dev_branch = self.env['runbot.branch'].search([('remote_id', '=', self.remote_addons_dev.id)])
 
@@ -135,7 +135,7 @@ class TestRepo(RunbotCaseMinimalSetup):
              '<marc.bidule@somewhere.com>')]
 
         # Create Batches
-        repos._update_batches()
+        self.repo_server._update_batches()
 
         pull_request = self.env['runbot.branch'].search([('remote_id', '=', self.remote_server.id), ('id', '!=', self.branch_server.id)])
         self.assertEqual(pull_request.bundle_id, bundle)
@@ -176,7 +176,7 @@ class TestRepo(RunbotCaseMinimalSetup):
             )]
 
         # Create Batches
-        repos._update_batches()
+        self.repo_server._update_batches()
 
         self.assertEqual(dev_branch, self.env['runbot.branch'].search([('remote_id', '=', self.remote_server_dev.id)]))
         self.assertEqual(pull_request + self.branch_server, self.env['runbot.branch'].search([('remote_id', '=', self.remote_server.id)]))
@@ -199,7 +199,8 @@ class TestRepo(RunbotCaseMinimalSetup):
 
         batch.state = 'done'
 
-        repos._update_batches()
+        for repo in repos:
+            repo._update_batches()
 
         batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)])
         self.assertEqual(len(batch), 1, 'No new batch created, no head change')
@@ -214,7 +215,7 @@ class TestRepo(RunbotCaseMinimalSetup):
              'Marc Bidule',
              '<marc.bidule@somewhere.com>')]
 
-        repos._update_batches()
+        self.repo_server._update_batches()
 
         bundles = self.env['runbot.bundle'].search([('id', '>', max_bundle_id)])
         self.assertEqual(bundles, bundle)
@@ -225,7 +226,7 @@ class TestRepo(RunbotCaseMinimalSetup):
 
         self.commit_list[self.repo_server.id] = first_commit  # branch reset hard to an old commit (and pr closed)
 
-        repos._update_batches()
+        self.repo_server._update_batches()
 
         batches = self.env['runbot.batch'].search([('bundle_id', '=', bundle.id)], order='id desc')
         last_batch = bundle.last_batch

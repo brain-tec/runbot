@@ -41,6 +41,8 @@ access_runbot_host_manager,runbot_host_manager,runbot.model_runbot_host,runbot.g
 access_runbot_error_log_user,runbot_error_log_user,runbot.model_runbot_error_log,group_user,1,0,0,0
 access_runbot_error_log_manager,runbot_error_log_manager,runbot.model_runbot_error_log,runbot.group_runbot_admin,1,1,1,1
 
+access_runbot_repo_referencetime,runbot_repo_referencetime,runbot.model_runbot_repo_reftime,group_user,1,0,0,0
+
 access_runbot_build_stat_user,runbot_build_stat_user,runbot.model_runbot_build_stat,group_user,1,0,0,0
 access_runbot_build_stat_admin,runbot_build_stat_admin,runbot.model_runbot_build_stat,runbot.group_runbot_admin,1,1,1,1
 
@@ -56,6 +58,9 @@ access_runbot_trigger_runbot_admin,access_runbot_trigger_runbot_admin,runbot.mod
 
 access_runbot_repo_user,access_runbot_repo_user,runbot.model_runbot_repo,runbot.group_user,1,0,0,0
 access_runbot_repo_runbot_admin,access_runbot_repo_runbot_admin,runbot.model_runbot_repo,runbot.group_runbot_admin,1,1,1,1
+
+access_runbot_repo_hook_user,access_runbot_repo_hook_user,runbot.model_runbot_repo_hook,runbot.group_user,1,0,0,0
+access_runbot_repo_runbot_hook_admin,access_runbot_repo_runbot_hook_admin,runbot.model_runbot_repo_hook,runbot.group_runbot_admin,1,1,1,1
 
 access_runbot_commit_user,access_runbot_commit_user,runbot.model_runbot_commit,runbot.group_user,1,0,0,0
 

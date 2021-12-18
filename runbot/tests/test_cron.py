@@ -24,6 +24,7 @@ class TestCron(RunbotCase):
         self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_update_frequency', 1)
         self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_do_fetch', True)
         self.env['runbot.repo'].search([('id', '!=', self.repo_server.id)]).write({'mode': 'disabled'})  # disable all other existing repo than repo_server
+        self.repo_server.hooked = True
         try:
             self.Runbot._cron()
         except SleepException:

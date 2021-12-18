@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-import time
 import json
 import logging
 
@@ -27,13 +26,13 @@ class Hook(http.Controller):
                 remote = request.env['runbot.remote'].sudo().search(
                     remote_domain, limit=1)
                 remote_id = remote.id
-        if not remote:
+        if not remote_id:
             return
 
-        request.env['runbot.hook.queue'].sudo().create({
+        request.env['runbot.hook'].sudo().create({
             'payload': payload,
             'github_event': event,
-            'remote_id': remote.id
+            'remote_id': remote_id
         })
 
         return ""

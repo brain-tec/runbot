@@ -245,7 +245,7 @@ class Runbot(models.AbstractModel):
             for hook in self.env['runbot.hook'].search([]):
                 hook._process()
             self.env['runbot.repo'].flush()
-            for repo in self.env['runbot.repo'].search([('mode', '!=', 'disabled'), ('hooked', '=', True)]):
+            for repo in self.env['runbot.repo'].search([('mode', '!=', 'disabled'), ('repo_hook_id.hooked', '=', True)]):
                 try:
                     repo._update_batches(ignore=pull_info_failures)
                     repo.hooked = False

@@ -1,6 +1,7 @@
+import datetime
 import logging
 
-from odoo import models, fields
+from odoo import models, fields, api
 
 from ..fields import JsonDictField
 
@@ -16,8 +17,13 @@ class Hook(models.Model):
     payload = JsonDictField(help="Json content received from github")
     remote_id = fields.Many2one('runbot.remote')
     github_event = fields.Char('Github Event')
+    active = fields.Boolean('Active', default=True)
 
-# TODO add active and vaccum (to remove those who were processed to keep one day of history or something like that)
+    @api.model
+    def _gc_hooks(self):
+        limit_date = fields.datetime.now() - datetime.timedelta(days=1)
+        self.env['runbot.hook'].search([('create_date', '<', limit_date)]).unlink()
+        return True
 
     def _process(self):
         self.ensure_one()
@@ -38,3 +44,4 @@ class Hook(models.Model):
                 _logger.info('Branch %s in repo %s was deleted', branch_ref, self.remote_id.repo_id.name)
                 branch = self.env['runbot.branch'].sudo().search([('remote_id', '=', self.remote_id.id), ('name', '=', branch_ref)])
                 branch.alive = False
+        self.active = False

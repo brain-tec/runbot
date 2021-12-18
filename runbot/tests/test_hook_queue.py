@@ -8,7 +8,7 @@ from .common import RunbotCase
 class TestHookQueue(RunbotCase):
 
     def test_json_field(self):
-        HookQueue = self.env['runbot.hook.queue']
+        HookQueue = self.env['runbot.hook']
         hook_queue = HookQueue.create({'payload': {"action": "edited"}})
         self.assertEqual(hook_queue.payload, {'action': 'edited'}, "payload should return a valid python object")
 
@@ -53,7 +53,7 @@ class TestHookController(HttpCase):
         res = self.url_open(f'/runbot/hook/{self.remote_server.id}', data=test_data, headers={'X-Github-Event': 'pull_request'})
         self.assertEqual(res.status_code, 200)
 
-        latest_hook = self.env['runbot.hook.queue'].search([], limit=1)
+        latest_hook = self.env['runbot.hook'].search([('remote_id', '=', self.remote_server.id)], limit=1)
         self.assertTrue(latest_hook.exists())
         self.assertEqual(latest_hook.payload, json.loads(test_data['payload']))
         self.assertEqual(latest_hook.payload.get('pull_request').get('number'), 12345)

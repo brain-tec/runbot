@@ -210,6 +210,13 @@ class Remote(models.Model):
                                     raise
 
 
+class RepoHook(models.Model):
+
+    _name = 'runbot.repo.hook'
+    _description = "Technical object to avoid serialization errors on repo model"
+
+    hooked = fields.Boolean('Webhook received')
+
 class Repo(models.Model):
 
     _name = 'runbot.repo'
@@ -237,11 +244,17 @@ class Repo(models.Model):
                              ('hook', 'Hook')],
                             default='hook',
                             string="Mode", required=True, help="hook: Wait for webhook on /runbot/hook/<id> i.e. github push event", tracking=True)
-    hooked = fields.Boolean('Webhook received')
+    repo_hook_id = fields.Many2one('runbot.repo.hook')
+    hooked = fields.Boolean(related='repo_hook_id.hooked', readonly=False)
     get_ref_time = fields.Float('Last refs db update', compute='_compute_get_ref_time')
     trigger_ids = fields.Many2many('runbot.trigger', relation='runbot_trigger_triggers', readonly=True)
     forbidden_regex = fields.Char('Forbidden regex', help="Regex that forid bundle creation if branch name is matching", tracking=True)
     invalid_branch_message = fields.Char('Forbidden branch message', tracking=True)
+
+    def create(self, values):
+        repo_hook_id = self.env['runbot.repo.hook'].create({})
+        values.update({'repo_hook_id': repo_hook_id.id})
+        return super().create(values)
 
     def _compute_get_ref_time(self):
         self.env.cr.execute("""
@@ -265,11 +278,6 @@ class Repo(models.Model):
         self.env.cr.execute("""
             DELETE from runbot_repo_reftime WHERE id NOT IN (
                 SELECT max(id) FROM runbot_repo_reftime GROUP BY repo_id
-            )
-        """)
-        self.env.cr.execute("""
-            DELETE from runbot_repo_hooktime WHERE id NOT IN (
-                SELECT max(id) FROM runbot_repo_hooktime GROUP BY repo_id
             )
         """)
 
