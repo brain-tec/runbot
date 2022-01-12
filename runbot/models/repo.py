@@ -242,6 +242,7 @@ class Repo(models.Model):
     last_processed_hook_time = fields.Float('Last processed hook time')
     get_ref_time = fields.Float('Last refs db update', compute='_compute_get_ref_time')
     trigger_ids = fields.Many2many('runbot.trigger', relation='runbot_trigger_triggers', readonly=True)
+    single_version = fields.Many2one('runbot.version', "Single version", help="Limit the repo to a single version for non versionned repo")
     forbidden_regex = fields.Char('Forbidden regex', help="Regex that forid bundle creation if branch name is matching", tracking=True)
     invalid_branch_message = fields.Char('Forbidden branch message', tracking=True)
 
@@ -471,6 +472,9 @@ class Repo(models.Model):
     def _update_git_config(self):
         """ Update repo git config file """
         for repo in self:
+            if repo.mode == 'disabled':
+                _logger.info(f'skipping disabled repo {repo.name}')
+                continue
             if os.path.isdir(os.path.join(repo.path, 'refs')):
                 git_config_path = os.path.join(repo.path, 'config')
                 template_params = {'repo': repo}
