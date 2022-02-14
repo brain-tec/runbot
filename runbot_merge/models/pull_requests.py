@@ -531,6 +531,9 @@ class PullRequests(models.Model):
     url = fields.Char(compute='_compute_url')
     github_url = fields.Char(compute='_compute_url')
 
+    repo_name = fields.Char(related='repository.name')
+    message_title = fields.Char(compute='_compute_message_title')
+
     @api.depends('repository.name', 'number')
     def _compute_url(self):
         base = werkzeug.urls.url_parse(self.env['ir.config_parameter'].sudo().get_param('web.base.url', 'http://localhost:8069'))
@@ -540,15 +543,20 @@ class PullRequests(models.Model):
             pr.url = str(base.join(path))
             pr.github_url = str(gh_base.join(path))
 
-    @api.depends('repository.name', 'number')
+    @api.depends('message')
+    def _compute_message_title(self):
+        for pr in self:
+            pr.message_title = next(iter(pr.message.splitlines()), '')
+
+    @api.depends('repository.name', 'number', 'message')
     def _compute_display_name(self):
         return super(PullRequests, self)._compute_display_name()
 
     def name_get(self):
-        return [
-            (p.id, '%s#%d' % (p.repository.name, p.number))
-            for p in self
-        ]
+        name_template = '%(repo_name)s#%(number)d'
+        if self.env.context.get('pr_include_title'):
+            name_template += ' (%(message_title)s)'
+        return [(p.id, name_template % p) for p in self]
 
     @api.model
     def name_search(self, name='', args=None, operator='ilike', limit=100):
@@ -1252,20 +1260,12 @@ class PullRequests(models.Model):
             gh, target, pr_commits, related_prs=related_prs)
 
     def _stage_squash(self, gh, target, commits, related_prs=()):
-        original_head = gh.head(target)
+        assert len(commits) == 1, "can only squash a single commit"
         msg = self._build_merge_message(self, related_prs=related_prs)
-        [commit] = commits
-        merge_tree = gh.merge(commit['sha'], target, 'temp')['tree']['sha']
-        squashed = gh('post', 'git/commits', json={
-            'message': str(msg),
-            'tree': merge_tree,
-            'author': commit['commit']['author'],
-            'committer': commit['commit']['committer'],
-            'parents': [original_head],
-        }).json()['sha']
-        gh.set_ref(target, squashed)
-        self.commits_map = json.dumps({commit['sha']: squashed, '': squashed})
-        return squashed
+        commits[0]['commit']['message'] = str(msg)
+        head, mapping = gh.rebase(self.number, target, commits=commits)
+        self.commits_map = json.dumps({**mapping, '': head})
+        return head
 
     def _stage_rebase_ff(self, gh, target, commits, related_prs=()):
         # updates head commit with PR number (if necessary) then rebases

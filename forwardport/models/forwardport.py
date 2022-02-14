@@ -34,7 +34,7 @@ class Queue:
     def _search_domain(self):
         return []
 
-class BatchQueue(models.Model, Queue):
+class ForwardPortTasks(models.Model, Queue):
     _name = 'forwardport.batches'
     _description = 'batches which got merged and are candidates for forward-porting'
 
@@ -49,19 +49,7 @@ class BatchQueue(models.Model, Queue):
 
     def _process_item(self):
         batch = self.batch_id
-
         newbatch = batch.prs._port_forward()
-        # insert new barch in ancestry sequence unless conflict (= no parent)
-        if self.source == 'insert':
-            for pr in newbatch.prs:
-                if not pr.parent_id:
-                    break
-                newchild = pr.search([
-                    ('parent_id', '=', pr.parent_id.id),
-                    ('id', '!=', pr.id),
-                ])
-                if newchild:
-                    newchild.parent_id = pr.id
 
         if newbatch:
             _logger.info(
@@ -70,6 +58,17 @@ class BatchQueue(models.Model, Queue):
                 batch, batch.prs,
                 newbatch, newbatch.prs,
             )
+            # insert new batch in ancestry sequence unless conflict (= no parent)
+            if self.source == 'insert':
+                for pr in newbatch.prs:
+                    if not pr.parent_id:
+                        break
+                    newchild = pr.search([
+                        ('parent_id', '=', pr.parent_id.id),
+                        ('id', '!=', pr.id),
+                    ])
+                    if newchild:
+                        newchild.parent_id = pr.id
         else: # reached end of seq (or batch is empty)
             # FIXME: or configuration is fucky so doesn't want to FP (maybe should error and retry?)
             _logger.info(

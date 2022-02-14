@@ -24,9 +24,9 @@ def make_basic(env, config, make_repo, *, fp_token, fp_remote):
             'github_prefix': 'hansen',
             'fp_github_token': fp_token and config['github']['token'],
             'branch_ids': [
-                (0, 0, {'name': 'a', 'fp_sequence': 2, 'fp_target': True}),
-                (0, 0, {'name': 'b', 'fp_sequence': 1, 'fp_target': True}),
-                (0, 0, {'name': 'c', 'fp_sequence': 0, 'fp_target': True}),
+                (0, 0, {'name': 'a', 'sequence': 2, 'fp_target': True}),
+                (0, 0, {'name': 'b', 'sequence': 1, 'fp_target': True}),
+                (0, 0, {'name': 'c', 'sequence': 0, 'fp_target': True}),
             ],
         })
 
@@ -659,6 +659,88 @@ def test_skip_ci_next(env, config, make_repo):
     assert pr1_id.state == 'opened'
     assert pr2_id.state == 'opened'
 
+def test_retarget_after_freeze(env, config, make_repo, users):
+    """Turns out it was possible to trip the forwardbot if you're a bit of a
+    dick: the forward port cron was not resilient to forward port failure in
+    case of filling in new branches (forward ports existing across a branch
+    insertion so the fwbot would have to "fill in" for the new branch).
+
+    But it turns out causing such failure is possible by e.g. regargeting the
+    latter port. In that case the reinsertion task should just do nothing, and
+    the retargeted PR should be forward-ported normally once merged.
+    """
+    project, prod, _ = make_basic(env, config, make_repo, fp_token=True, fp_remote=True)
+    with prod:
+        [c] = prod.make_commits('b', Commit('thing', tree={'x': '1'}), ref='heads/mypr')
+        pr = prod.make_pr(target='b', head='mypr')
+        prod.post_status(c, 'success', 'ci/runbot')
+        prod.post_status(c, 'success', 'legal/cla')
+        pr.post_comment('hansen r+', config['role_reviewer']['token'])
+    env.run_crons()
+
+    original_pr_id = to_pr(env, pr)
+    assert original_pr_id.state == 'ready'
+    assert original_pr_id.staging_id
+
+    with prod:
+        prod.post_status('staging.b', 'success', 'ci/runbot')
+        prod.post_status('staging.b', 'success', 'legal/cla')
+    env.run_crons()
+    # should have created a pr targeted to C
+    port_id = env['runbot_merge.pull_requests'].search([('state', 'not in', ('merged', 'closed'))])
+    assert len(port_id) == 1
+    assert port_id.target.name == 'c'
+    assert port_id.source_id == original_pr_id
+    assert port_id.parent_id == original_pr_id
+
+    # because the module doesn't update the ordering of `branch_ids` to take
+    # `fp_sequence` in account so it's misleading
+    branch_c, branch_b, branch_a = branches_before = project.branch_ids.sorted('fp_sequence')
+    assert [branch_a.name, branch_b.name, branch_c.name] == ['a', 'b', 'c']
+    # create branch so cron runs correctly
+    with prod: prod.make_ref('heads/bprime', prod.get_ref('c'))
+    project.write({
+        'branch_ids': [
+            (1, branch_c.id, {'sequence': 1, 'fp_sequence': 20}),
+            (0, 0, {'name': 'bprime', 'sequence': 2, 'fp_sequence': 20, 'fp_target': True}),
+            (1, branch_b.id, {'sequence': 3, 'fp_sequence': 20}),
+            (1, branch_a.id, {'sequence': 4, 'fp_sequence': 20}),
+        ]
+    })
+    new_branch = project.branch_ids - branches_before
+    assert new_branch.name == 'bprime'
+
+    # should have added a job for the new fp
+    job = env['forwardport.batches'].search([])
+    assert job
+
+    # fuck up yo life: retarget the existing FP PR to the new branch
+    port_id.target = new_branch.id
+
+    env.run_crons('forwardport.port_forward')
+    assert not job.exists(), "job should have succeeded and apoptosed"
+
+    # since the PR was "already forward-ported" to the new branch it should not
+    # be touched
+    assert env['runbot_merge.pull_requests'].search([('state', 'not in', ('merged', 'closed'))]) == port_id
+
+    # merge the retargered PR
+    port_pr = prod.get_pr(port_id.number)
+    with prod:
+        prod.post_status(port_pr.head, 'success', 'ci/runbot')
+        prod.post_status(port_pr.head, 'success', 'legal/cla')
+        port_pr.post_comment('hansen r+', config['role_reviewer']['token'])
+    env.run_crons()
+    with prod:
+        prod.post_status('staging.bprime', 'success', 'ci/runbot')
+        prod.post_status('staging.bprime', 'success', 'legal/cla')
+    env.run_crons()
+
+    new_pr_id = env['runbot_merge.pull_requests'].search([('state', 'not in', ('merged', 'closed'))])
+    assert len(new_pr_id) == 1
+    assert new_pr_id.parent_id == port_id
+    assert new_pr_id.target == branch_c
+
 def test_approve_draft(env, config, make_repo, users):
     _, prod, _ = make_basic(env, config, make_repo, fp_token=True, fp_remote=True)
 
@@ -683,3 +765,47 @@ def test_approve_draft(env, config, make_repo, users):
         pr.post_comment('hansen r+', config['role_reviewer']['token'])
     env.run_crons()
     assert pr_id.state == 'approved'
+
+def test_freeze(env, config, make_repo, users):
+    """Freeze:
+
+    - should not forward-port the freeze PRs themselves
+    """
+    project, prod, _ = make_basic(env, config, make_repo, fp_token=True, fp_remote=True)
+    # branches here are "a" (older), "b", and "c" (master)
+    with prod:
+        [root, _] = prod.make_commits(
+            None,
+            Commit('base', tree={'version': '', 'f': '0'}),
+            Commit('release 1.0', tree={'version': '1.0'}),
+            ref='heads/b'
+        )
+        prod.make_commits(root, Commit('other', tree={'f': '1'}), ref='heads/c')
+    with prod:
+        prod.make_commits(
+            'c',
+            Commit('Release 1.1', tree={'version': '1.1'}),
+            ref='heads/release-1.1'
+        )
+        release = prod.make_pr(target='c', head='release-1.1')
+    env.run_crons()
+
+    w = project.action_prepare_freeze()
+    assert w['res_model'] == 'runbot_merge.project.freeze'
+    w_id = env[w['res_model']].browse([w['res_id']])
+    assert w_id.release_pr_ids.repository_id.name == prod.name
+    release_id = to_pr(env, release)
+    w_id.release_pr_ids.pr_id = release_id.id
+
+    assert not w_id.errors
+    w_id.action_freeze()
+    env.run_crons() # stage freeze PRs
+    with prod:
+        prod.post_status('staging.post-b', 'success', 'ci/runbot')
+        prod.post_status('staging.post-b', 'success', 'legal/cla')
+    env.run_crons()
+
+    assert release_id.state == 'merged'
+    assert not env['runbot_merge.pull_requests'].search([
+        ('state', '!=', 'merged')
+    ]), "the release PRs should not be forward-ported"
