@@ -136,7 +136,10 @@ def docker_run(*args, **kwargs):
     return _docker_run(*args, **kwargs)
 
 
-def _docker_run(cmd=False, log_path=False, build_dir=False, container_name=False, image_tag=False, exposed_ports=None, cpu_limit=None, memory=None, preexec_fn=None, ro_volumes=None, env_variables=None):
+def _docker_run(
+        cmd=False, log_path=False, build_dir=False, container_name=False, image_tag=False,
+        exposed_ports=None, cpu_limit=None, memory=None, network_mode='bridge',
+        preexec_fn=None, ro_volumes=None, env_variables=None):
     """Run tests in a docker container
     :param run_cmd: command string to run in container
     :param log_path: path to the logfile that will contain odoo stdout and stderr
@@ -148,6 +151,7 @@ def _docker_run(cmd=False, log_path=False, build_dir=False, container_name=False
     :param memory: memory limit in bytes for the container
     :params ro_volumes: dict of dest:source volumes to mount readonly in builddir
     :params env_variables: list of environment variables
+    :params network_mode: string. A falsy value falls back to the `none` value.
     """
     assert cmd and log_path and build_dir and container_name
     run_cmd = cmd
@@ -197,7 +201,8 @@ def _docker_run(cmd=False, log_path=False, build_dir=False, container_name=False
     logs.close()
     docker_client = docker.from_env()
     docker_client.containers.run(image_tag, name=container_name, volumes=volumes, shm_size='128m', mem_limit=memory, ports=ports, ulimits=ulimits,
-                                 environement=env_variables, init=True, command=[f'/bin/bash', '-c', 'exec &>> /data/buildlogs.txt ;{cmd.build()}'], auto_remove=True, detach=True)
+                                 network_mode=network_mode or 'none', environement=env_variables, init=True,
+                                 command=[f'/bin/bash', '-c', 'exec &>> /data/buildlogs.txt ;{cmd.build()}'], auto_remove=True, detach=True)
     _logger.info('Started Docker container %s', container_name)
     return
 
