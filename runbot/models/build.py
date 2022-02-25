@@ -9,8 +9,11 @@ import time
 import datetime
 import hashlib
 from ..common import dt2time, fqdn, now, grep, local_pgadmin_cursor, s2human, dest_reg, os, list_local_dbs, pseudo_markdown, RunbotException
-from ..container import docker_stop, docker_state, Command, docker_run
+from ..container import docker_stop, docker_state, Command, docker_run, sanitize_container_name, docker_build
 from ..fields import JsonDictField
+
+from pathlib import Path
+
 from odoo import models, fields, api
 from odoo.exceptions import UserError, ValidationError
 from odoo.http import request
@@ -743,12 +746,49 @@ class BuildResult(models.Model):
                     build._log("run", message, level='ERROR')
                     build._kill(result='ko')
 
-    def _docker_run(self, **kwargs):
+    def _docker_build_requirements(self, requirements_path, source_image_tag, new_image_tag):
+        """ Build Docker image with requirements.
+        This makes some sort of requirements caching and allows running build with network connection
+        """
+        self.ensure_one()
+        py_version = self._get_py_version()
+        docker_build_path = Path(self._path()) / 'docker'
+
+        docker_build_path.mkdir(exist_ok=True)
+        dockerfile = docker_build_path / 'Dockerfile'
+        shutil.copy(requirements_path, docker_build_path)
+        pip_cmd = f'sudo pip{py_version} install -r /data/requirements.txt'
+        dockerfile.write(
+            f"""FROM {source_image_tag}
+            ADD requirements.txt /data/requirements.txt
+            RUN {pip_cmd}
+            """
+        )
+        return docker_build(docker_build_path, new_image_tag)
+
+    def _docker_run(self, cmd=False, container_name=False, **kwargs):
         self.ensure_one()
         if 'image_tag' not in kwargs:
             kwargs.update({'image_tag': self.params_id.dockerfile_id.image_tag})
         if kwargs['image_tag'] != 'odoo:DockerDefault':
             self._log('Preparing', 'Using Dockerfile Tag %s' % kwargs['image_tag'])
+
+        container_name = sanitize_container_name(container_name)
+        if not isinstance(cmd, Command):
+            cmd = Command([], cmd.split(' '), [])
+
+        for commit_id in self.env.context.get('defined_commit_ids') or self.params_id.commit_ids:
+            if not self.params_id.skip_requirements and os.path.isfile(commit_id._source_path('requirements.txt')):
+                repo_dir = self._docker_source_folder(commit_id)
+                requirements_path = Path(repo_dir / 'requirements.txt')
+                new_image_tag = f'{source_image_tag}-{self.dest}'
+                res = self._docker_build_requirements(requirements_path, kwargs['image_tag'], new_image_tag)
+                if not res[0]:
+                    pass
+                    # TODO handle build failure
+                kwargs['image_tag'] = new_image_tag
+                break
+
         containers_memory_limit = self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_containers_memory', 0)
         if containers_memory_limit and 'memory' not in kwargs:
             kwargs['memory'] = int(float(containers_memory_limit) * 1024 ** 3)
@@ -757,7 +797,7 @@ class BuildResult(models.Model):
             start_step_time = int(dt2time(self.docker_start) - dt2time(self.job_start))
             if start_step_time > 60:
                 _logger.info('Step took %s seconds before starting docker', start_step_time)
-        docker_run(**kwargs)
+        docker_run(container_name=container_name, **kwargs)
 
     def _path(self, *l, **kw):
         """Return the repo build path"""
@@ -961,11 +1001,6 @@ class BuildResult(models.Model):
         python_params = python_params or []
         py_version = py_version if py_version is not None else build._get_py_version()
         pres = []
-        for commit_id in self.env.context.get('defined_commit_ids') or self.params_id.commit_ids:
-            if not self.params_id.skip_requirements and os.path.isfile(commit_id._source_path('requirements.txt')):
-                repo_dir = self._docker_source_folder(commit_id)
-                requirement_path = os.path.join(repo_dir, 'requirements.txt')
-                pres.append(['sudo', 'pip%s' % py_version, 'install', '-r', '%s' % requirement_path])
 
         addons_paths = self._get_addons_path()
         (server_commit, server_file) = self._get_server_info()

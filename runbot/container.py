@@ -74,7 +74,7 @@ class Command():
         if self.cmd_checker:
             self.cmd_checker._cmd_check(self)
         cmd_chain = []
-        cmd_chain += [' '.join(pre) for pre in self.pres if pre]
+        cmd_chain += [self.get_pres()]
         cmd_chain.append(' '.join(self))
         cmd_chain += [' '.join(post) for post in self.posts if post]
         cmd_chain = [' && '.join(cmd_chain)]
@@ -100,6 +100,8 @@ class Command():
         res.seek(0)
         return res.read()
 
+    def get_pres(self):
+        return ''.join([' '.join(pre) for pre in self.pres if pre])
 
 def docker_build(build_dir, image_tag):
     return _docker_build(build_dir, image_tag)
@@ -141,7 +143,7 @@ def _docker_run(
         exposed_ports=None, cpu_limit=None, memory=None, network_mode='bridge',
         preexec_fn=None, ro_volumes=None, env_variables=None):
     """Run tests in a docker container
-    :param run_cmd: command string to run in container
+    :param cmd: Command instance to run in container
     :param log_path: path to the logfile that will contain odoo stdout and stderr
     :param build_dir: the build directory that contains the Odoo sources to build.
                       This directory is shared as a volume with the container
@@ -154,17 +156,11 @@ def _docker_run(
     :params network_mode: string. A falsy value falls back to the `none` value.
     """
     assert cmd and log_path and build_dir and container_name
-    run_cmd = cmd
     image_tag = image_tag or 'odoo:DockerDefault'
-    container_name = sanitize_container_name(container_name)
-    if isinstance(run_cmd, Command):
-        cmd_object = run_cmd
-        run_cmd = cmd_object.build()
-    else:
-        cmd_object = Command([], run_cmd.split(' '), [])
-    _logger.info('Docker run command: %s', run_cmd)
+
+    cmd.cmd = [f'cd /data/build ; touch start-{container_name} ;' ] +  cmd.cmd +  [f'; cd /data/build;touch end-{container_name}']
+    _logger.info('Docker run command: %s', cmd.build())
     logs = open(log_path, 'w')
-    run_cmd = 'cd /data/build;touch start-%s;%s;cd /data/build;touch end-%s' % (container_name, run_cmd, container_name)
     docker_clear_state(container_name, build_dir)  # ensure that no state are remaining
     open(os.path.join(build_dir, 'exist-%s' % container_name), 'w+').close()
     logs.write("Docker command:\n%s\n=================================================\n" % cmd_object)
@@ -199,7 +195,6 @@ def _docker_run(
         ulimits.append(docker.types.Ulimit(name='cpu', soft=cpu_limit, hard=cpu_limit))
 
     logs.close()
-    docker_client = docker.from_env()
     docker_client.containers.run(image_tag, name=container_name, volumes=volumes, shm_size='128m', mem_limit=memory, ports=ports, ulimits=ulimits,
                                  network_mode=network_mode or 'none', environement=env_variables, init=True,
                                  command=[f'/bin/bash', '-c', 'exec &>> /data/buildlogs.txt ;{cmd.build()}'], auto_remove=True, detach=True)
