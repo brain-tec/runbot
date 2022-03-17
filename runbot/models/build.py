@@ -329,6 +329,8 @@ class BuildResult(models.Model):
             build_by_old_values = defaultdict(lambda: self.env['runbot.build'])
             for record in self:
                 build_by_old_values[record.local_state] += record
+            if values['local_state'] == 'done':
+                self.env['runbot.commit.export'].search([('build_id', 'in', self.ids)]).unlink()
         local_result = values.get('local_result')
         for build in self:
             if local_result and local_result != self._get_worst_result([build.local_result, local_result]):  # dont write ok on a warn/error build
@@ -729,6 +731,7 @@ class BuildResult(models.Model):
                 build._github_status()
             build._run_job()
 
+
     def _run_job(self):
         # run job
         for build in self:
@@ -794,7 +797,7 @@ class BuildResult(models.Model):
             if build_export_path in exports:
                 self._log('_checkout', 'Multiple repo have same export path in build, some source may be missing for %s' % build_export_path, level='ERROR')
                 self._kill(result='ko')
-            exports[build_export_path] = commit.export()
+            exports[build_export_path] = commit.export(self)
 
         checkout_time = time.time() - start
         if checkout_time > 60:
