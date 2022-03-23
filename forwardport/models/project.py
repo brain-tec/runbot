@@ -210,27 +210,27 @@ class PullRequests(models.Model):
         for pr in self:
             pr.refname = pr.label.split(':', 1)[-1]
 
-    @api.model_create_single
-    def create(self, vals):
+    def create(self, vals_list):
         # PR opened event always creates a new PR, override so we can precreate PRs
-        existing = self.search([
-            ('repository', '=', vals['repository']),
-            ('number', '=', vals['number']),
-        ])
-        if existing:
-            return existing
+        for vals in vals_list:
+            existing = self.search([
+                ('repository', '=', vals['repository']),
+                ('number', '=', vals['number']),
+            ])
+            if existing:
+                return existing
 
-        if 'limit_id' not in vals:
-            branch = self.env['runbot_merge.branch'].browse(vals['target'])
-            repo = self.env['runbot_merge.repository'].browse(vals['repository'])
-            vals['limit_id'] = branch.project_id._forward_port_ordered(
-                ast.literal_eval(repo.branch_filter or '[]')
-            )[-1].id
-        if vals.get('parent_id') and 'source_id' not in vals:
-            vals['source_id'] = self.browse(vals['parent_id'])._get_root().id
-        if vals.get('state') == 'merged':
-            vals['merge_date'] = fields.Datetime.now()
-        return super().create(vals)
+            if 'limit_id' not in vals:
+                branch = self.env['runbot_merge.branch'].browse(vals['target'])
+                repo = self.env['runbot_merge.repository'].browse(vals['repository'])
+                vals['limit_id'] = branch.project_id._forward_port_ordered(
+                    ast.literal_eval(repo.branch_filter or '[]')
+                )[-1].id
+            if vals.get('parent_id') and 'source_id' not in vals:
+                vals['source_id'] = self.browse(vals['parent_id'])._get_root().id
+            if vals.get('state') == 'merged':
+                vals['merge_date'] = fields.Datetime.now()
+            return super().create(vals)
 
     def write(self, vals):
         # if the PR's head is updated, detach (should split off the FP lines as this is not the original code)

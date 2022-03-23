@@ -55,17 +55,17 @@ class BuildError(models.Model):
             if build_error.test_tags and '-' in build_error.test_tags:
                 raise ValidationError('Build error test_tags should not be negated')
 
-    @api.model_create_single
-    def create(self, vals):
-        cleaners = self.env['runbot.error.regex'].search([('re_type', '=', 'cleaning')])
-        content = vals.get('content')
-        cleaned_content = cleaners.r_sub('%', content)
-        vals.update({'cleaned_content': cleaned_content,
-                     'fingerprint': self._digest(cleaned_content)
-        })
-        if not 'team_id' in vals and 'module_name' in vals:
-            vals.update({'team_id': self.env['runbot.team']._get_team(vals['module_name'])})
-        return super().create(vals)
+    def create(self, vals_list):
+        for vals in vals_list:
+            cleaners = self.env['runbot.error.regex'].search([('re_type', '=', 'cleaning')])
+            content = vals.get('content')
+            cleaned_content = cleaners.r_sub('%', content)
+            vals.update({'cleaned_content': cleaned_content,
+                        'fingerprint': self._digest(cleaned_content)
+            })
+            if not 'team_id' in vals and 'module_name' in vals:
+                vals.update({'team_id': self.env['runbot.team']._get_team(vals['module_name'])})
+        return super().create(vals_list)
 
     def write(self, vals):
         if 'active' in vals:
@@ -253,14 +253,14 @@ class RunbotTeam(models.Model):
         'e.g.: `*website*,-*website_sale*`')
     upgrade_exception_ids = fields.One2many('runbot.upgrade.exception', 'team_id', string='Team Upgrade Exceptions')
 
-    @api.model_create_single
-    def create(self, values):
-        if 'dashboard_id' not in values or values['dashboard_id'] == False:
-            dashboard = self.env['runbot.dashboard'].search([('name', '=', values['name'])])
-            if not dashboard:
-                dashboard = dashboard.create({'name': values['name']})
-            values['dashboard_id'] = dashboard.id
-        return super().create(values)
+    def create(self, vals_list):
+        for values in vals_list:
+            if 'dashboard_id' not in values or values['dashboard_id'] == False:
+                dashboard = self.env['runbot.dashboard'].search([('name', '=', values['name'])])
+                if not dashboard:
+                    dashboard = dashboard.create({'name': values['name']})
+                values['dashboard_id'] = dashboard.id
+        return super().create(vals_list)
 
     @api.model
     def _get_team(self, module_name):

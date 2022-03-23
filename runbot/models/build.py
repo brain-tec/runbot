@@ -204,7 +204,7 @@ class BuildResult(models.Model):
     # -> build_link ?
 
     parent_id = fields.Many2one('runbot.build', 'Parent Build', index=True)
-    parent_path = fields.Char('Parent path', index=True)
+    parent_path = fields.Char('Parent path', index=True, unaccent=False)
     top_parent =  fields.Many2one('runbot.build', compute='_compute_top_parent')
     ancestors =  fields.Many2many('runbot.build', compute='_compute_ancestors')
     # should we add a has children stored boolean?

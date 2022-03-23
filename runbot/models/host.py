@@ -45,11 +45,11 @@ class Host(models.Model):
             host.nb_testing = count_by_host_state[host.name].get('testing', 0)
             host.nb_running = count_by_host_state[host.name].get('running', 0)
 
-    @api.model_create_single
-    def create(self, values):
-        if 'disp_name' not in values:
-            values['disp_name'] = values['name']
-        return super().create(values)
+    def create(self, vals_list):
+        for values in vals_list:
+            if 'disp_name' not in values:
+                values['disp_name'] = values['name']
+        return super().create(vals_list)
 
     def _bootstrap_db_template(self):
         """ boostrap template database if needed """

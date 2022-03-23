@@ -1,7 +1,7 @@
 import logging
 import re
 from odoo import models, fields, api
-from odoo.addons.base.models.qweb import QWebException
+from odoo.exceptions import QWebException
 
 _logger = logging.getLogger(__name__)
 

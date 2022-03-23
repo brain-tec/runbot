@@ -46,9 +46,8 @@ class Config(models.Model):
     group = fields.Many2one('runbot.build.config', 'Configuration group', help="Group of config's and config steps")
     group_name = fields.Char('Group name', related='group.name')
 
-    @api.model_create_single
-    def create(self, values):
-        res = super(Config, self).create(values)
+    def create(self, vals_list):
+        res = super(Config, self).create(vals_list)
         res._check_step_ids_order()
         return res
 
@@ -218,10 +217,10 @@ class ConfigStep(models.Model):
         copy._write({'protected': False})
         return copy
 
-    @api.model_create_single
-    def create(self, values):
-        self._check(values)
-        return super(ConfigStep, self).create(values)
+    def create(self, vals_list):
+        for vals in vals_list:
+            self._check(vals)
+        return super(ConfigStep, self).create(vals_list)
 
     def write(self, values):
         self._check(values)
@@ -1043,12 +1042,14 @@ class ConfigStepOrder(models.Model):
     def _onchange_step_id(self):
         self.sequence = self.step_id.default_sequence
 
-    @api.model_create_single
-    def create(self, values):
-        if 'sequence' not in values and values.get('step_id'):
-            values['sequence'] = self.env['runbot.build.config.step'].browse(values.get('step_id')).default_sequence
-        if self.pool._init:  # do not duplicate entry on install
-            existing = self.search([('sequence', '=', values.get('sequence')), ('config_id', '=', values.get('config_id')), ('step_id', '=', values.get('step_id'))])
-            if existing:
-                return
-        return super(ConfigStepOrder, self).create(values)
+    def create(self, vals_list):
+        to_create = []
+        for values in vals_list:
+            if 'sequence' not in values and values.get('step_id'):
+                values['sequence'] = self.env['runbot.build.config.step'].browse(values.get('step_id')).default_sequence
+            if self.pool._init:  # do not duplicate entry on install
+                existing = self.search([('sequence', '=', values.get('sequence')), ('config_id', '=', values.get('config_id')), ('step_id', '=', values.get('step_id'))])
+                if existing:
+                    continue
+            to_create.append(values)
+        return super(ConfigStepOrder, self).create(to_create)
