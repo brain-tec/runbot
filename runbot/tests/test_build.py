@@ -160,24 +160,6 @@ class TestBuildResult(RunbotCase):
 
         self.assertEqual(build.dest, '%05d-13-0' % build.id)
 
-        # Test domain compute with fqdn and ir.config_parameter
-        self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_nginx', False)
-        self.patchers['fqdn_patcher'].return_value = 'runbot98.nowhere.org'
-        self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_domain', False)
-        self.assertEqual(build.domain, 'runbot98.nowhere.org:1234')
-        self.env['ir.config_parameter'].set_param('runbot.runbot_domain', 'runbot99.example.org')
-        build._compute_domain()
-        self.assertEqual(build.domain, 'runbot99.example.org:1234')
-
-        # test json stored _data field and data property
-        #self.assertEqual(build.params_id.config_data, {})
-        #build.params_id.config_data = {'restore_url': 'foobar'}
-        #self.assertEqual(build.params_id.config_data, {'restore_url': 'foobar'})
-        #build.params_id.config_data['test_info'] = 'dummy'
-        #self.assertEqual(build.params_id.config_data, {"restore_url": "foobar", "test_info": "dummy"})
-        #del build.params_id.config_data['restore_url']
-        #self.assertEqual(build.params_id.config_data, {"test_info": "dummy"})
-
         other = self.Build.create({
             'params_id': self.server_params.id,
             'local_result': 'ko'
@@ -198,8 +180,8 @@ class TestBuildResult(RunbotCase):
         })
         self.assertEqual(build.md_description, 'A nice <strong>description</strong>')
 
-        build.description = "<script>console.log('foo')</script>"
-        self.assertEqual(build.md_description, "&lt;script&gt;console.log('foo')&lt;/script&gt;")
+        build.description = "<script>console.log(foo)</script>"
+        self.assertEqual(build.md_description, "&lt;script&gt;console.log(foo)&lt;/script&gt;")
 
     @patch('odoo.addons.runbot.models.build.BuildResult._get_available_modules')
     def test_filter_modules(self, mock_get_available_modules):
