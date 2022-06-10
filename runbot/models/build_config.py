@@ -251,7 +251,12 @@ class ConfigStep(models.Model):
     def _run(self, build):
         log_path = build._path('logs', '%s.txt' % self.name)
         build.write({'job_start': now(), 'job_end': False})  # state, ...
-        build._log('run', 'Starting step **%s** from config **%s**' % (self.name, build.params_id.config_id.name), log_type='markdown', level='SEPARATOR')
+        log_link = ''
+        if self._has_log():
+            log_url = f'http://{build.host}'
+            url = f"{log_url}/runbot/static/build/{build.dest}/logs/{self.name}.txt"
+            log_link = f'[@icon-file-text]({url})'
+        build._log('run', 'Starting step **%s** from config **%s** %s' % (self.name, build.params_id.config_id.name, log_link), log_type='markdown', level='SEPARATOR')
         self._run_step(build, log_path)
 
     def _run_step(self, build, log_path, **kwargs):
@@ -714,13 +719,14 @@ class ConfigStep(models.Model):
             'echo "### restoring filestore"',
             'mkdir -p /data/build/datadir/filestore/%s' % restore_db_name,
             'mv filestore/* /data/build/datadir/filestore/%s' % restore_db_name,
-            'echo "###restoring db"',
+            'echo "### restoring db"',
             'psql -q %s < dump.sql' % (restore_db_name),
             'cd /data/build',
             'echo "### cleaning"',
             'rm -r restore',
             'echo "### listing modules"',
             """psql %s -c "select name from ir_module_module where state = 'installed'" -t -A > /data/build/logs/restore_modules_installed.txt""" % restore_db_name,
+            'echo "### restore" "successful"', # two part string to avoid miss grep
 
             ])
 
@@ -872,6 +878,9 @@ class ConfigStep(models.Model):
                 build_values.update(self._make_tests_results(build))
         elif self.job_type == 'test_upgrade':
             build_values.update(self._make_upgrade_results(build))
+        elif self.job_type == 'restore':
+            build_values.update(self._make_restore_results(build))
+
         return build_values
 
     def _make_python_results(self, build):
@@ -966,6 +975,13 @@ class ConfigStep(models.Model):
             return 'ko'
         return 'ok'
 
+    def _check_restore_ended(self, build):
+        log_path = build._path('logs', '%s.txt' % self.name)
+        if not grep(log_path, "### restore successful"):
+            build._log('_make_tests_results', 'Restore failed, check text logs for more info', level="ERROR")
+            return 'ko'
+        return 'ok'
+
     def _get_log_last_write(self, build):
         log_path = build._path('logs', '%s.txt' % self.name)
         if os.path.isfile(log_path):
@@ -992,6 +1008,17 @@ class ConfigStep(models.Model):
             if build.local_result != 'warn':
                 checkers.append(self._check_warning)
 
+            local_result = self._get_checkers_result(build, checkers)
+            build_values['local_result'] = build._get_worst_result([build.local_result, local_result])
+        return build_values
+
+    def _make_restore_results(self, build):
+        build_values = {}
+        if build.local_result != 'warn':
+            checkers = [
+                self._check_log,
+                self._check_restore_ended
+            ]
             local_result = self._get_checkers_result(build, checkers)
             build_values['local_result'] = build._get_worst_result([build.local_result, local_result])
         return build_values

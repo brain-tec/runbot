@@ -144,6 +144,8 @@ class Runbot(models.AbstractModel):
         env = self.env
         settings = {}
         settings['port'] = config.get('http_port')
+        settings['runbot_static'] = os.path.join(get_module_resource('runbot', 'static'), '')
+        settings['base_url'] = self.get_base_url()
         nginx_dir = os.path.join(self._root(), 'nginx')
         settings['nginx_dir'] = nginx_dir
         settings['re_escape'] = re.escape
@@ -262,7 +264,7 @@ class Runbot(models.AbstractModel):
             for pr_number, t in pull_info_failures.items():
                 if t + 15*60 < time.time():
                     _logger.warning('Removing %s from pull_info_failures', pr_number)
-                    del self.pull_info_failures[pr_number]
+                    del pull_info_failures[pr_number]
 
         return manager.get('sleep', default_sleep)
 
