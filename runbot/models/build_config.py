@@ -33,6 +33,13 @@ class ReProxy():
     def compile(cls, *args, **kwrags):
         return re.compile(*args, **kwrags)
 
+    @classmethod
+    def findall(cls, *args, **kwrags):
+        return re.findall(*args, **kwrags)
+
+    VERBOSE = re.VERBOSE
+    MULTILINE = re.MULTILINE
+
 class Config(models.Model):
     _name = 'runbot.build.config'
     _description = "Build config"
