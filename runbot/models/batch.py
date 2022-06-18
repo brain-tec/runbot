@@ -138,7 +138,7 @@ class Batch(models.Model):
                 build.host = self.bundle_id.host_id.name
                 build.keep_host = True
 
-            build._github_status(post_commit=False)
+            build._github_status()
         return link_type, build
 
     def _prepare(self, auto_rebase=False):
@@ -343,7 +343,7 @@ class Batch(models.Model):
         if not bundle.sticky and self.category_id == default_category:
             skippable = self.env['runbot.batch'].search([
                 ('bundle_id', '=', bundle.id),
-                ('state', '!=', 'done'),
+                ('state', 'not in', ('done', 'skipped')),
                 ('id', '<', self.id),
                 ('category_id', '=', default_category.id)
             ])
