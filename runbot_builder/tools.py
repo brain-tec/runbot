@@ -4,8 +4,10 @@ import logging
 import os
 import sys
 import threading
+import random
 import signal
 
+from datetime import datetime, timedelta
 from logging.handlers import WatchedFileHandler
 
 LOG_FORMAT = '%(asctime)s %(levelname)s %(name)s: %(message)s'
@@ -35,6 +37,7 @@ class RunbotClient():
         signal.signal(signal.SIGTERM, self.signal_handler)
         signal.signal(signal.SIGQUIT, self.dump_stack)
         self.host = self.env['runbot.host']._get_current()
+        self.update_next_git_gc_date()
         self.host._bootstrap()
         logging.info(
             'Host %s running with %s slots on pid %s%s',
@@ -80,6 +83,21 @@ class RunbotClient():
     def sleep(self, t):
         self.ask_interrupt.wait(t)
 
+    def update_next_git_gc_date(self):
+        now = datetime.now()
+        gc_hour = int(self.env['ir.config_parameter'].sudo().get_param('runbot.git_gc_hour', '23'))
+        gc_minutes = self.host.id % 60  # deterministic minutes
+        self.next_git_gc_date = datetime(now.year, now.month, now.day, gc_hour, gc_minutes)
+        while self.next_git_gc_date <= now:
+            self.next_git_gc_date += timedelta(days=1)
+        _logger.info('Next git gc scheduled on %s', self.next_git_gc_date)
+
+    def git_gc(self):
+        """ git gc once a day """
+        if self.next_git_gc_date < datetime.now():
+            _logger.info('Starting git gc on repositories')
+            self.env['runbot.runbot']._git_gc(self.host)
+            self.update_next_git_gc_date()
 
 def run(client_class):
     # parse args
@@ -125,5 +143,9 @@ def run(client_class):
             env = odoo.api.Environment(cr, odoo.SUPERUSER_ID, {})
             client = client_class(env)
             # run main loop
-            client.main_loop()
+            try:
+                client.main_loop()
+            except Exception as e:
+                _logger.exception(str(e))
+                raise e
     _logger.info("Stopping gracefully")
