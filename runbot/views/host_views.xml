@@ -18,6 +18,7 @@
                         <field name="nb_worker"/>
                         <field name="last_exception" readonly='1'/>
                         <field name="exception_count" readonly='1'/>
+                        <field name="host_infos" readonly='1'/>
                     </group>
                 </sheet>
                 <div class="oe_chatter">
@@ -33,10 +34,11 @@
         <field name="model">runbot.host</field>
         <field name="arch" type="xml">
             <tree string="Builds">
-                <field name="name"/>
+                <field name="name" readonly='1'/>
                 <field name="disp_name"/>
                 <field name="assigned_only" widget="boolean_toggle"/>
                 <field name="nb_worker"/>
+                <field name="host_infos" readonly='1'/>
             </tree>
         </field>
     </record>

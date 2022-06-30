@@ -1,8 +1,20 @@
 import logging
-from odoo import models, fields, api
+import platform
+from pathlib import Path
+
+import docker
+from odoo import api, fields, models
+from odoo.modules import get_module_path
 from odoo.tools import config
+
 from ..common import fqdn, local_pgadmin_cursor, os
 from ..container import docker_build
+
+try:
+    import lsb_release
+except ImportError:
+    lsb_release = None
+
 _logger = logging.getLogger(__name__)
 
 forced_host_name = None
@@ -30,6 +42,7 @@ class Host(models.Model):
     last_exception = fields.Char('Last exception')
     exception_count = fields.Integer('Exception count')
     psql_conn_count = fields.Integer('SQL connections count', default=0)
+    host_infos = fields.Char('Host Infos')
 
     def _compute_nb(self):
         groups = self.env['runbot.build'].read_group(
@@ -123,3 +136,24 @@ class Host(models.Model):
         nb_reserved = self.env['runbot.host'].search_count([('assigned_only', '=', True)])
         if nb_reserved < (nb_hosts / 2):
             self.assigned_only = True
+
+    @staticmethod
+    def _get_sources_head(sources_path):
+        head_path = sources_path / '.git/HEAD'
+        if not head_path.exists():
+            return ''
+        ref = head_path.read_text().strip().split('ref: ')[-1]
+        commit = (head_path.parent / ref).read_text().strip()
+        return f'{ref.split("/")[-1]} -- {commit[:8]}'
+
+    def _set_host_infos(self):
+        """ Gater host informations """
+        self.ensure_one()
+        infos = {}
+        infos['OS'] = lsb_release.get_distro_information().get('DESCRIPTION', '') if lsb_release else ''  # e.g. 'Debian GNU/Linux 11 (bullseye)'
+        infos['Platform'] = f'{platform.system()}-{platform.release()}'  # e.g. 'Linux-5.10.0-13-amd64'
+        infos['Docker Lib'] = docker.__version__  # e.g. '4.1.0'
+        infos['Python'] = platform.python_version()  # e.g. '3.9.2'
+        infos['Odoo Head'] = self._get_sources_head(Path(config['root_path']).parent)  # e.g. '15.0 -- ff027d13'
+        infos['Runbot Head'] = self._get_sources_head(Path(get_module_path('runbot')).parent)
+        self.host_infos = ' / '.join(f'{k}: {v}' for k,v in infos.items())
