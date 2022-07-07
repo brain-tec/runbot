@@ -996,7 +996,7 @@ class BuildResult(models.Model):
                 command.add_config_tuple("xmlrpc_interface", "127.0.0.1")
 
         if grep(config_path, "log-db"):
-            logdb_uri = self.env['ir.config_parameter'].get_param('runbot.runbot_logdb_uri')
+            logdb_uri = 'runbot_logs'
             logdb = self.env.cr.dbname
             if logdb_uri and grep(build._server('sql_db.py'), 'allow_uri'):
                 logdb = '%s' % logdb_uri

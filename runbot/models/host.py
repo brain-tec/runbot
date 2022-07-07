@@ -1,11 +1,32 @@
+import contextlib
 import logging
-from odoo import models, fields, api
+
+import psycopg2
+
+from collections import defaultdict
+from psycopg2 import sql
+from psycopg2.extras import execute_values
+
+from odoo import models, fields, api, sql_db
 from odoo.tools import config
-from ..common import fqdn, local_pgadmin_cursor, os
+from ..common import fqdn, local_pgadmin_cursor, os, list_local_dbs
 from ..container import docker_build
+
 _logger = logging.getLogger(__name__)
+LOGSDB = 'runbot_logs'  # hard coded for tests
 
 forced_host_name = None
+
+@contextlib.contextmanager
+def local_logs_cursor():
+    cnx = None
+    try:
+        cnx = psycopg2.connect(f"dbname={LOGSDB}")
+        yield cnx.cursor()
+    finally:
+        if cnx:
+            cnx.close()
+
 
 class Host(models.Model):
     _name = 'runbot.host'
@@ -51,6 +72,30 @@ class Host(models.Model):
             values['disp_name'] = values['name']
         return super().create(values)
 
+    def _bootstrap_local_logs_db(self):
+        """ boostrap a local database that will collect logs from builds """
+        if 'runbot_logs' not in list_local_dbs():
+            _logger.info('Logging database not found. Creating it ...')
+            with local_pgadmin_cursor() as local_cr:
+                db_logs = LOGSDB
+                local_cr.execute(f"""CREATE DATABASE "{db_logs}" TEMPLATE template0 LC_COLLATE 'C' ENCODING 'unicode'""")
+
+            with sql_db.db_connect('runbot_logs').cursor() as cr:
+                # create_date, type, dbname, name, level, message, path, line, func
+                cr.execute("""CREATE TABLE ir_logging (
+                    id bigserial NOT NULL,
+                    create_uid integer,
+                    create_date timestamp without time zone,
+                    name character varying NOT NULL,
+                    level character varying,
+                    dbname character varying,
+                    func character varying NOT NULL,
+                    path character varying NOT NULL,
+                    line character varying NOT NULL,
+                    type character varying NOT NULL,
+                    message text NOT NULL);
+                """)
+
     def _bootstrap_db_template(self):
         """ boostrap template database if needed """
         icp = self.env['ir.config_parameter']
@@ -71,6 +116,7 @@ class Host(models.Model):
         for dir, path in static_dirs.items():
             os.makedirs(path, exist_ok=True)
         self._bootstrap_db_template()
+        self._bootstrap_local_logs_db()
 
     def _docker_build(self):
         """ build docker images needed by locally pending builds"""
@@ -123,3 +169,56 @@ class Host(models.Model):
         nb_reserved = self.env['runbot.host'].search_count([('assigned_only', '=', True)])
         if nb_reserved < (nb_hosts / 2):
             self.assigned_only = True
+
+    def _fetch_local_logs(self, build_ids=None):
+        """ fetch build logs from local database """
+        with local_logs_cursor() as local_cr:
+            query = sql.SQL("""
+                    SELECT id, create_date, name, level, dbname, func, path, line, type, message
+                    FROM ir_logging ORDER BY id
+                """).format(
+                fields=sql.SQL(',').join([sql.Identifier(field) for field in fields])
+            )
+            local_cr.execute(query)
+            return local_cr.dictfetchall()
+
+    def process_logs(self, build_ids=None):
+        """move logs from host to the leader"""
+        ir_logs = self._fetch_local_logs()
+        logs_by_build_id = defaultdict(list)
+
+        for log in ir_logs:
+            logs_by_build_id[int(log['dbname'].split('-', maxsplit=1)[0])].append(log)
+
+        builds = self.env['runbot.build'].browse(logs_by_build_id.keys())
+
+        logs_to_send = []
+        local_log_ids = []
+
+        for build in builds:
+            build_logs = logs_by_build_id[build.id]
+            for ir_log in build_logs:
+                local_log_ids.append(ir_log['id'])
+                ir_log['active_step_id'] = build.active_step.id
+                if ir_log['type'] == 'server':
+                    build.log_counter -= 1
+                if build.log_counter == 0:
+                    ir_log['level'] = 'SEPARATOR'
+                    ir_log['func'] = ''
+                    ir_log['type'] = 'runbot'
+                    ir_log['message'] = 'Log limit reached (full logs are still available in the log file)'
+                elif build.log_counter < 0:
+                    continue
+                if ir_log['level'].upper() == 'WARNING':
+                    build.triggered_result = 'warn'
+                elif ir_log['level'].upper() == 'ERROR':
+                    build.triggered_result = 'ko'
+                ir_log['build_id'] = build.id
+                logs_to_send.append({k:ir_log[k] for k in ir_log if k != 'id'})
+
+        if logs_to_send:
+            self.env['ir.logging'].create(logs_to_send)
+
+        if local_log_ids:
+            with local_logs_cursor() as local_cr:
+                local_cr.execute("DELETE FROM ir_logging WHERE build_id in %s", local_log_ids)

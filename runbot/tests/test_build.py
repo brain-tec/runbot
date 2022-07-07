@@ -212,7 +212,7 @@ class TestBuildResult(RunbotCase):
 
     def test_build_cmd_log_db(self, ):
         """ test that the logdb connection URI is taken from the .odoorc file """
-        uri = 'postgres://someone:pass@somewhere.com/db'
+        uri = 'runbot_logs'
         self.env['ir.config_parameter'].sudo().set_param("runbot.runbot_logdb_uri", uri)
 
         build = self.Build.create({
@@ -242,7 +242,8 @@ class TestBuildResult(RunbotCase):
                 '/tmp/runbot_test/static/sources/addons/d0d0caca0000ffffffffffffffffffffffffffff/requirements.txt',
                 '/tmp/runbot_test/static/sources/server/dfdfcfcf0000ffffffffffffffffffffffffffff/requirements.txt',
                 '/tmp/runbot_test/static/sources/server/dfdfcfcf0000ffffffffffffffffffffffffffff/server.py',
-                '/tmp/runbot_test/static/sources/server/dfdfcfcf0000ffffffffffffffffffffffffffff/openerp/tools/config.py'
+                '/tmp/runbot_test/static/sources/server/dfdfcfcf0000ffffffffffffffffffffffffffff/openerp/tools/config.py',
+                '/tmp/runbot_test/static/sources/server/dfdfcfcf0000ffffffffffffffffffffffffffff/openerp/sql_db.py'
             ])
             if file == '/tmp/runbot_test/static/sources/addons/d0d0caca0000ffffffffffffffffffffffffffff/requirements.txt':
                 return False
