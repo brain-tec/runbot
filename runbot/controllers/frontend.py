@@ -504,7 +504,8 @@ class Runbot(Controller):
         request.env.cr.execute("SELECT build_id, values FROM runbot_build_stat WHERE build_id IN %s AND category = %s", [tuple(builds.ids), key_category]) # read manually is way faster than using orm
         res = {}
         for (build_id, values) in request.env.cr.fetchall():
-            res.setdefault(parents[build_id], {}).update(values)
+            if values:
+                res.setdefault(parents[build_id], {}).update(values)
             # we need to update here to manage the post install case: we want to combine stats from all post_install childrens.
         return res
 
