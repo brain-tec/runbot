@@ -12,6 +12,17 @@ class Project(models.Model):
     dockerfile_id = fields.Many2one('runbot.dockerfile', index=True, help="Project Default Dockerfile")
     repo_ids = fields.One2many('runbot.repo', 'project_id', string='Repos')
 
+    def _get_description(self):
+        return[
+            {
+                'id': r.id,
+                'url': f'{r.get_base_url()}/runbot/json/projects/{r.id}',
+                'name': r.name,
+                'keep_sticky_running': r.keep_sticky_running,
+                'bundles_url': f'{r.get_base_url()}/runbot/json/projects/{r.id}/bundles'
+            }
+            for r in self
+        ]
 
 class Category(models.Model):
     _name = 'runbot.category'

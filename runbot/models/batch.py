@@ -168,7 +168,6 @@ class Batch(models.Model):
             lambda t: not t.version_domain or \
             self.bundle_id.version_id.filtered_domain(t.get_version_domain())
         )
-
         pushed_repo = self.commit_link_ids.mapped('commit_id.repo_id')
         dependency_repos = triggers.mapped('dependency_ids')
         all_repos = triggers.mapped('repo_ids') | dependency_repos
@@ -321,7 +320,6 @@ class Batch(models.Model):
                 'used_custom_trigger': bool(trigger_custom),
             }
             params_value['builds_reference_ids'] = trigger._reference_builds(bundle)
-
             params = self.env['runbot.build.params'].create(params_value)
 
             build = self.env['runbot.build']
@@ -403,6 +401,23 @@ class Batch(models.Model):
             'level': level,
         })
 
+    def _get_description(self):
+        return[
+            {
+                'id': r.id,
+                'url': f'{r.get_base_url()}/runbot/json/batches/{r.id}',
+                'state': r.state,
+                'last_update': r.last_update,
+                'bundle_name' : r.bundle_id.name,
+                'bundle_url': f'{r.get_base_url()}/runbot/json/bundles/{r.bundle_id.id}',
+                'commits_url': f'{r.get_base_url()}/runbot/json/batches/{r.id}/commits',
+                'commits': [l for commit in r.commit_ids for l in commit._get_description()],
+                'slots_url': f'{r.get_base_url()}/runbot/json/batches/{r.id}/slots',
+                'slots' : [l for slot in r.slot_ids for l in slot._get_description()],
+            }
+            for r in self
+        ]
+
 
 class BatchLog(models.Model):
     _name = 'runbot.batch.log'
@@ -457,3 +472,14 @@ class BatchSlot(models.Model):
             return self.build_id
         self.link_type, self.build_id = self.batch_id._create_build(self.params_id)
         return self.build_id
+
+    def _get_description(self):
+        return[
+            {
+                'id': r.id,
+                'url': f'{r.get_base_url()}/runbot/json/batch_slots/{r.id}',
+                'trigger_name': r.trigger_id.name,
+                'build_url': f'{r.get_base_url()}/runbot/json/builds/{r.build_id.id}',
+            }
+            for r in self
+        ]
