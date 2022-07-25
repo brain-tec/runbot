@@ -791,7 +791,7 @@ class BuildResult(models.Model):
             if build_export_path in exports:
                 self._log('_checkout', 'Multiple repo have same export path in build, some source may be missing for %s' % build_export_path, level='ERROR')
                 self._kill(result='ko')
-            exports[build_export_path] = commit.export(self)
+            exports[build_export_path] = commit._export(self)
 
         checkout_time = time.time() - start
         if checkout_time > 60:
