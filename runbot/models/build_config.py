@@ -154,7 +154,7 @@ class ConfigStep(models.Model):
     enable_auto_tags = fields.Boolean('Allow auto tag', default=False, tracking=True)
     sub_command = fields.Char('Subcommand', tracking=True)
     extra_params = fields.Char('Extra cmd args', tracking=True)
-    additionnal_env = fields.Char('Extra env', help='Example: foo="bar",bar="foo". Cannot contains \' ', tracking=True)
+    additionnal_env = fields.Char('Extra env', help='Example: foo="bar";bar="foo". Cannot contains \' ', tracking=True)
     # python
     python_code = fields.Text('Python code', tracking=True, default=PYTHON_DEFAULT)
     python_result_code = fields.Text('Python code for result', tracking=True, default=PYTHON_DEFAULT)
@@ -175,7 +175,7 @@ class ConfigStep(models.Model):
     upgrade_to_all_versions = fields.Boolean() # upgrade niglty (no master)
     upgrade_to_version_ids = fields.Many2many('runbot.version', relation='runbot_upgrade_to_version_ids', string='Forced version to use as target')
     # 2. define source from target
-    #upgrade_from_current = fields.Boolean()  #usefull for future migration (13.0-dev/13.3-dev  -> master) AVOID TO USE THAT
+    upgrade_from_current = fields.Boolean(help="If checked, only upgrade from current will be used, other options will be ignored Template should be installed in the same build")
     upgrade_from_previous_major_version = fields.Boolean() # 13.0
     upgrade_from_last_intermediate_version = fields.Boolean() # 13.3
     upgrade_from_all_intermediate_version = fields.Boolean() # 13.2 # 13.1
@@ -277,17 +277,21 @@ class ConfigStep(models.Model):
         count = 0
         config_data = build.params_id.config_data
         config_ids = config_data.get('create_config_ids', self.create_config_ids)
-        for create_config in config_ids:
-            child_data = {'config_id': create_config.id}
-            if 'child_data' in config_data:
-                child_data.update(config_data['child_data'])
-            for _ in range(config_data.get('number_build', self.number_builds)):
-                count += 1
-                if count > 200:
-                    build._logger('Too much build created')
-                    break
-                child = build._add_child(child_data, orphan=self.make_orphan)
-                build._log('create_build', 'created with config %s' % create_config.name, log_type='subbuild', path=str(child.id))
+
+        child_data_list = config_data.get('child_data',[{}])
+        if not isinstance(child_data_list, list):
+            child_data_list = [child_data_list]
+
+        for child_data in child_data_list:
+            for create_config in self.env['runbot.build.config'].browse(child_data.get('config_id', config_ids.ids)):
+                _child_data = {**child_data, 'config_id': create_config}
+                for _ in range(_child_data.get('number_build', self.number_builds)):
+                    count += 1
+                    if count > 200:
+                        build._logger('Too much build created')
+                        break
+                    child = build._add_child(_child_data, orphan=self.make_orphan)
+                    build._log('create_build', 'created with config %s' % create_config.name, log_type='subbuild', path=str(child.id))
 
 
     def make_python_ctx(self, build):
@@ -382,12 +386,11 @@ class ConfigStep(models.Model):
         env_variables = self.additionnal_env.split(';') if self.additionnal_env else []
 
         docker_name = build._get_docker_name()
-        build_path = build._path()
         build_port = build.port
         self.env.cr.commit()  # commit before docker run to be 100% sure that db state is consistent with dockers
         self.invalidate_cache()
         self.env['runbot.runbot']._reload_nginx()
-        return dict(cmd=cmd, log_path=log_path, build_dir=build_path, container_name=docker_name, exposed_ports=[build_port, build_port + 1], ro_volumes=exports, env_variables=env_variables)
+        return dict(cmd=cmd, log_path=log_path, container_name=docker_name, exposed_ports=[build_port, build_port + 1], ro_volumes=exports, env_variables=env_variables)
 
 
     def _run_install_odoo(self, build, log_path):
@@ -472,7 +475,7 @@ class ConfigStep(models.Model):
         max_timeout = int(self.env['ir.config_parameter'].get_param('runbot.runbot_timeout', default=10000))
         timeout = min(self.cpu_limit, max_timeout)
         env_variables = self.additionnal_env.split(';') if self.additionnal_env else []
-        return dict(cmd=cmd, log_path=log_path, build_dir=build._path(), container_name=build._get_docker_name(), cpu_limit=timeout, ro_volumes=exports, env_variables=env_variables)
+        return dict(cmd=cmd, log_path=log_path, container_name=build._get_docker_name(), cpu_limit=timeout, ro_volumes=exports, env_variables=env_variables)
 
     def _upgrade_create_childs(self):
         pass
@@ -590,8 +593,11 @@ class ConfigStep(models.Model):
             if param.upgrade_from_build_id:
                 source_builds_by_target[target_build] = param.upgrade_from_build_id
             else:
-                target_version = target_build.params_id.version_id
-                from_builds = self._get_upgrade_source_builds(target_version, builds_references_by_version_id)
+                if self.upgrade_from_current:
+                    from_builds = build
+                else:
+                    target_version = target_build.params_id.version_id
+                    from_builds = self._get_upgrade_source_builds(target_version, builds_references_by_version_id)
                 source_builds_by_target[target_build] = from_builds
                 if from_builds:
                     build._log('', 'Defining source version(s) for %s: %s' % (target_build.params_id.version_id.name, ', '.join(source_builds_by_target[target_build].mapped('params_id.version_id.name'))))
@@ -606,10 +612,11 @@ class ConfigStep(models.Model):
             return  # replace this by a python job friendly solution
 
         assert not param.dump_db
-        if not self.upgrade_dbs:
-            build._log('configure_upgrade', 'No upgrade dbs defined in step %s' % self.name, level='WARN')
         for target, sources in source_builds_by_target.items():
             for source in sources:
+                valid_databases = []
+                if not self.upgrade_dbs:
+                    valid_databases = source.database_ids
                 for upgrade_db in self.upgrade_dbs:
                     if not upgrade_db.min_target_version_id or upgrade_db.min_target_version_id.number <= target.params_id.version_id.number:
                         config_id = upgrade_db.config_id
@@ -618,32 +625,32 @@ class ConfigStep(models.Model):
                         if not dump_builds:
                             build._log('_run_configure_upgrade', 'No child build found with config %s in %s' % (config_id.name, source.id), level='ERROR')
                         dbs = dump_builds.database_ids.sorted('db_suffix')
-                        valid_databases = list(self._filter_upgrade_database(dbs, upgrade_db.db_pattern))
+                        valid_databases += list(self._filter_upgrade_database(dbs, upgrade_db.db_pattern))
                         if not valid_databases:
                             build._log('_run_configure_upgrade', 'No datase found for pattern %s' % (upgrade_db.db_pattern), level='ERROR')
-                        for db in valid_databases:
-                            #commit_ids = build.params_id.commit_ids
-                            #if commit_ids != target.params_id.commit_ids:
-                            #    repo_ids = commit_ids.mapped('repo_id')
-                            #    for commit_link in target.params_id.commit_link_ids:
-                            #        if commit_link.commit_id.repo_id not in repo_ids:
-                            #            additionnal_commit_links |= commit_link
-                            #    build._log('', 'Adding sources from build [%s](%s)' % (target.id, target.build_url), log_type='markdown')
+                for db in valid_databases:
+                    #commit_ids = build.params_id.commit_ids
+                    #if commit_ids != target.params_id.commit_ids:
+                    #    repo_ids = commit_ids.mapped('repo_id')
+                    #    for commit_link in target.params_id.commit_link_ids:
+                    #        if commit_link.commit_id.repo_id not in repo_ids:
+                    #            additionnal_commit_links |= commit_link
+                    #    build._log('', 'Adding sources from build [%s](%s)' % (target.id, target.build_url), log_type='markdown')
 
-                            child = build._add_child({
-                                'upgrade_to_build_id': target.id,
-                                'upgrade_from_build_id': source,
-                                'dump_db': db.id,
-                                'config_id': self.upgrade_config_id
-                            })
+                    child = build._add_child({
+                        'upgrade_to_build_id': target.id,
+                        'upgrade_from_build_id': source,
+                        'dump_db': db.id,
+                        'config_id': self.upgrade_config_id
+                    })
 
-                            child.description = 'Testing migration from %s to %s using db %s (%s)' % (
-                                source.params_id.version_id.name,
-                                target.params_id.version_id.name,
-                                db.name,
-                                config_id.name
-                            )
-                        # TODO log somewhere if no db at all is found for a db_suffix
+                    child.description = 'Testing migration from %s to %s using db %s (%s)' % (
+                        source.params_id.version_id.name,
+                        target.params_id.version_id.name,
+                        db.name,
+                        config_id.name
+                    )
+                # TODO log somewhere if no db at all is found for a db_suffix
 
     def _get_upgrade_source_versions(self, target_version):
         if self.upgrade_from_version_ids:
@@ -705,7 +712,7 @@ class ConfigStep(models.Model):
         exception_env = self.env['runbot.upgrade.exception']._generate()
         if exception_env:
             env_variables.append(exception_env)
-        return dict(cmd=migrate_cmd, log_path=log_path, build_dir=build._path(), container_name=build._get_docker_name(), cpu_limit=timeout, ro_volumes=exports, env_variables=env_variables, image_tag=target.params_id.dockerfile_id.image_tag)
+        return dict(cmd=migrate_cmd, log_path=log_path, container_name=build._get_docker_name(), cpu_limit=timeout, ro_volumes=exports, env_variables=env_variables, image_tag=target.params_id.dockerfile_id.image_tag)
 
     def _run_restore(self, build, log_path):
         # exports = build._checkout()
@@ -748,7 +755,7 @@ class ConfigStep(models.Model):
 
             ])
 
-        return dict(cmd=cmd, log_path=log_path, build_dir=build._path(), container_name=build._get_docker_name(), cpu_limit=self.cpu_limit)
+        return dict(cmd=cmd, log_path=log_path, container_name=build._get_docker_name(), cpu_limit=self.cpu_limit)
 
     def _reference_builds(self, bundle, trigger):
         upgrade_dumps_trigger_id = trigger.upgrade_dumps_trigger_id

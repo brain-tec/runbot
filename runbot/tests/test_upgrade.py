@@ -1,4 +1,6 @@
+import getpass
 import logging
+import getpass
 from odoo.exceptions import UserError
 from odoo.tools import mute_logger
 from .common import RunbotCase
@@ -438,11 +440,13 @@ class TestUpgradeFlow(RunbotCase):
         self.patchers['docker_run'].assert_called()
 
         def docker_run_upgrade(cmd, *args, ro_volumes=False, **kwargs):
+            user = getpass.getuser()
+            self.assertTrue(ro_volumes.pop(f'/home/{user}/.odoorc').startswith('/tmp/runbot_test/static/build/'))
             self.assertEqual(
                 ro_volumes, {
-                    'addons': '/tmp/runbot_test/static/sources/addons/addons120',
-                    'server': '/tmp/runbot_test/static/sources/server/server120',
-                    'upgrade': '/tmp/runbot_test/static/sources/upgrade/123abc789'
+                    '/data/build/addons': '/tmp/runbot_test/static/sources/addons/addons120',
+                    '/data/build/server': '/tmp/runbot_test/static/sources/server/server120',
+                    '/data/build/upgrade': '/tmp/runbot_test/static/sources/upgrade/123abc789',
                 },
                 "other commit should have been added automaticaly"
             )

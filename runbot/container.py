@@ -28,15 +28,6 @@ with warnings.catch_warnings():
 
 _logger = logging.getLogger(__name__)
 
-DOCKERUSER = """
-RUN groupadd -g %(group_id)s odoo \\
-&& useradd -u %(user_id)s -g odoo -G audio,video odoo \\
-&& mkdir /home/odoo \\
-&& chown -R odoo:odoo /home/odoo
-USER odoo
-ENV COVERAGE_FILE /data/build/.coverage
-""" % {'group_id': os.getgid(), 'user_id': os.getuid()}
-
 
 class Command():
 
@@ -113,9 +104,6 @@ def _docker_build(build_dir, image_tag):
     :param image_tag: name used to tag the resulting docker image
     :return: tuple(success, msg) where success is a boolean and msg is the error message or None
     """
-    # synchronise the current user with the odoo user inside the Dockerfile
-    with open(os.path.join(build_dir, 'Dockerfile'), 'a') as df:
-        df.write(DOCKERUSER)
     docker_client = docker.from_env()
     try:
         docker_client.images.build(path=build_dir, tag=image_tag, rm=True)
@@ -172,17 +160,8 @@ def _docker_run(cmd=False, log_path=False, build_dir=False, container_name=False
     if ro_volumes:
         for dest, source in ro_volumes.items():
             logs.write("Adding readonly volume '%s' pointing to %s \n" % (dest, source))
-            volumes[source] = {'bind': f'/data/build/{dest}', 'mode': 'ro'}
+            volumes[source] = {'bind': dest, 'mode': 'ro'}
     logs.close()
-
-    serverrc_path = os.path.expanduser('~/.openerp_serverrc')
-    odoorc_path = os.path.expanduser('~/.odoorc')
-    final_rc = odoorc_path if os.path.exists(odoorc_path) else serverrc_path if os.path.exists(serverrc_path) else None
-    rc_content = cmd_object.get_config(starting_config=open(final_rc, 'r').read() if final_rc else '')
-    rc_path = os.path.join(build_dir, '.odoorc')
-    with open(rc_path, 'w') as rc_file:
-        rc_file.write(rc_content)
-    volumes[rc_path] = {'bind': '/home/odoo/.odoorc', 'mode': 'ro'}
 
     ports = {}
     if exposed_ports:

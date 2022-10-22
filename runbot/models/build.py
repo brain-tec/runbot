@@ -17,8 +17,9 @@ from odoo.http import request
 from odoo.tools import appdirs
 from odoo.tools.safe_eval import safe_eval
 from collections import defaultdict
+from pathlib import Path
 from psycopg2 import sql
-from subprocess import CalledProcessError
+import getpass
 
 _logger = logging.getLogger(__name__)
 
@@ -253,7 +254,7 @@ class BuildResult(models.Model):
 
     @api.depends('gc_delay', 'job_end')
     def _compute_gc_date(self):
-        icp = self.env['ir.config_parameter']
+        icp = self.env['ir.config_parameter'].sudo()
         max_days_main = int(icp.get_param('runbot.db_gc_days', default=30))
         max_days_child = int(icp.get_param('runbot.db_gc_days_child', default=15))
         for build in self:
@@ -534,36 +535,37 @@ class BuildResult(models.Model):
             self._logger('Removing database')
             self._local_pg_dropdb(db)
 
-        root = self.env['runbot.runbot']._root()
-        builds_dir = os.path.join(root, 'build')
+        builds_dir = Path(self.env['runbot.runbot']._root()) / 'build'
 
         if force is True:
             dests = [(build.dest, full) for build in self]
         else:
-            dests = _filter(dest_list=os.listdir(builds_dir), label='workspace')
+            dests = _filter(dest_list=builds_dir.iterdir(), label='workspace')
 
         for dest, full in dests:
-            build_dir = os.path.join(builds_dir, dest)
+            build_dir = Path(builds_dir) / dest
             if full:
                 _logger.info('Removing build dir "%s"', dest)
                 shutil.rmtree(build_dir, ignore_errors=True)
                 continue
-            for f in os.listdir(build_dir):
-                path = os.path.join(build_dir, f)
-                if os.path.isdir(path) and f not in ('logs', 'tests'):
-                    shutil.rmtree(path)
-                elif f == 'logs':
-                    log_path = os.path.join(build_dir, 'logs')
-                    for f in os.listdir(log_path):
-                        log_file_path = os.path.join(log_path, f)
-                        if os.path.isdir(log_file_path):
+            gcstamp = build_dir / '.gcstamp'
+            if gcstamp.exists():
+                continue
+            for bdir_file in build_dir.iterdir():
+                if bdir_file.is_dir() and bdir_file.name not in ('logs', 'tests'):
+                    shutil.rmtree(bdir_file)
+                elif bdir_file.name == 'logs':
+                    for log_file_path in (bdir_file / 'logs').iterdir():
+                        if log_file_path.is_dir():
                             shutil.rmtree(log_file_path)
-                        elif f in ('run.txt', 'wake_up.txt') or not f.endswith('.txt'):
-                            os.unlink(log_file_path)
+                        elif log_file_path.name in ('run.txt', 'wake_up.txt') or not log_file_path.name.endswith('.txt'):
+                            log_file_path.unlink()
+                gcstamp.write_text(f'gc date: {datetime.datetime.now()}')
 
     def _find_port(self):
         # currently used port
-        ids = self.search([('local_state', 'not in', ['pending', 'done']), ('host', '=', fqdn())])
+        host_name = self.env['runbot.host']._get_current_name()
+        ids = self.search([('local_state', 'not in', ['pending', 'done']), ('host', '=', host_name)])
         ports = set(i['port'] for i in ids.read(['port']))
 
         # starting port
@@ -659,7 +661,7 @@ class BuildResult(models.Model):
 
     def _schedule(self):
         """schedule the build"""
-        icp = self.env['ir.config_parameter']
+        icp = self.env['ir.config_parameter'].sudo()
         for build in self:
             if build.local_state not in ['testing', 'running']:
                 raise UserError("Build %s is not testing/running: %s" % (build.id, build.local_state))
@@ -744,8 +746,12 @@ class BuildResult(models.Model):
                     build._log("run", message, level='ERROR')
                     build._kill(result='ko')
 
-    def _docker_run(self, **kwargs):
+    def _docker_run(self, cmd=None, ro_volumes=None, **kwargs):
         self.ensure_one()
+        _ro_volumes = ro_volumes or {}
+        ro_volumes = {}
+        for dest, source in _ro_volumes.items():
+            ro_volumes[f'/data/build/{dest}'] = source
         if 'image_tag' not in kwargs:
             kwargs.update({'image_tag': self.params_id.dockerfile_id.image_tag})
         if kwargs['image_tag'] != 'odoo:DockerDefault':
@@ -758,7 +764,17 @@ class BuildResult(models.Model):
             start_step_time = int(dt2time(self.docker_start) - dt2time(self.job_start))
             if start_step_time > 60:
                 _logger.info('Step took %s seconds before starting docker', start_step_time)
-        docker_run(**kwargs)
+
+        starting_config = self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_default_odoorc')
+        if isinstance(cmd, Command):
+            rc_content = cmd.get_config(starting_config=starting_config)
+        else:
+            rc_content = starting_config
+        self.write_file('.odoorc', rc_content)
+        user = getpass.getuser()
+        ro_volumes[f'/home/{user}/.odoorc'] = self._path('.odoorc')
+        kwargs.pop('build_dir', False)  # todo check python steps
+        docker_run(cmd=cmd, build_dir=self._path(), ro_volumes=ro_volumes, **kwargs)
 
     def _path(self, *l, **kw):
         """Return the repo build path"""
@@ -887,9 +903,9 @@ class BuildResult(models.Model):
         })
 
     def _kill(self, result=None):
-        host = fqdn()
+        host_name = self.env['runbot.host']._get_current_name()
         for build in self:
-            if build.host != host:
+            if build.host != host_name:
                 continue
             build._log('kill', 'Kill build %s' % build.dest)
             docker_stop(build._get_docker_name(), build._path())
@@ -998,7 +1014,7 @@ class BuildResult(models.Model):
         if grep(config_path, "log-db"):
             logdb_uri = self.env['ir.config_parameter'].get_param('runbot.runbot_logdb_uri')
             logdb = self.env.cr.dbname
-            if logdb_uri and grep(build._server('sql_db.py'), 'allow_uri'):
+            if logdb_uri: # this looks useless
                 logdb = '%s' % logdb_uri
             command.add_config_tuple("log_db", "%s" % logdb)
             if grep(config_path, 'log-db-level'):

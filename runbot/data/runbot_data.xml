@@ -35,6 +35,11 @@
             </field>
         </record>
 
+        <record model="ir.config_parameter" id="runbot.runbot_default_odoorc">
+            <field name="key">runbot.runbot_default_odoorc</field>
+            <field name="value">[options]\nadmin_passwd=running_master_password</field>
+        </record>
+
     </data>
 
     <record model="ir.config_parameter" id="runbot.runbot_is_base_regex">
@@ -75,6 +80,7 @@
 
     <record id="ir_cron_runbot" model="ir.cron">
         <field name="name">Runbot</field>
+        <field name="active" eval="False"/>
         <field name="interval_number">10</field>
         <field name="interval_type">seconds</field>
         <field name="numbercall">-1</field>
