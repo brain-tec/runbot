@@ -170,8 +170,10 @@ class TestBuildResult(RunbotCase):
 
         # test a bulk write, that one cannot change from 'ko' to 'ok'
         builds = self.Build.browse([build.id, other.id])
-        with self.assertRaises(ValidationError):
-            builds.write({'local_result': 'ok'})
+        builds.write({'local_result': 'warn'})
+        self.assertEqual(build.local_result, 'warn')
+        self.assertEqual(other.local_result, 'ko')
+
 
     def test_markdown_description(self):
         build = self.Build.create({
@@ -348,6 +350,8 @@ class TestBuildResult(RunbotCase):
             'parent_id': build1_1.id,
         })
 
+        builds = build1_1_1 | build1_1_2 | build1_1 | build1_2 | build1
+
         def assert_state(global_state, build):
             self.assertEqual(build.global_state, global_state)
 
@@ -362,6 +366,8 @@ class TestBuildResult(RunbotCase):
         build1.local_state = 'done'
         build1_1.local_state = 'done'
 
+        builds._update_globals()
+
         assert_state('waiting', build1)
         assert_state('waiting', build1_1)
         assert_state('pending', build1_2)
@@ -369,6 +375,7 @@ class TestBuildResult(RunbotCase):
         assert_state('pending', build1_1_2)
 
         build1_1_1.local_state = 'testing'
+        builds._update_globals()
 
         assert_state('waiting', build1)
         assert_state('waiting', build1_1)
@@ -377,6 +384,7 @@ class TestBuildResult(RunbotCase):
         assert_state('pending', build1_1_2)
 
         build1_2.local_state = 'testing'
+        builds._update_globals()
 
         assert_state('waiting', build1)
         assert_state('waiting', build1_1)
@@ -385,6 +393,7 @@ class TestBuildResult(RunbotCase):
         assert_state('pending', build1_1_2)
 
         build1_2.local_state = 'testing'  # writing same state a second time
+        builds._update_globals()
 
         assert_state('waiting', build1)
         assert_state('waiting', build1_1)
@@ -395,6 +404,7 @@ class TestBuildResult(RunbotCase):
         build1_1_2.local_state = 'done'
         build1_1_1.local_state = 'done'
         build1_2.local_state = 'done'
+        builds._update_globals()
 
         assert_state('done', build1)
         assert_state('done', build1_1)
@@ -458,6 +468,7 @@ class TestGc(RunbotCaseMinimalSetup):
         bundle_a.last_batch._prepare()
         build_a_last = bundle_a.last_batch.slot_ids[0].build_id
         self.assertEqual(build_a_last.local_state, 'pending')
+        build_a_last._update_globals()
         self.assertTrue(build_a.killable, 'The previous build in the batch should be killable')
 
         # the build_b create a child build

@@ -272,7 +272,7 @@ class TestUpgradeFlow(RunbotCase):
         upgrade_current_build = batch.slot_ids.filtered(lambda slot: slot.trigger_id == self.trigger_upgrade_server).build_id
         host = self.env['runbot.host']._get_current()
         upgrade_current_build.host = host.name
-        upgrade_current_build._init_pendings(host)
+        upgrade_current_build._schedule()
         self.start_patcher('fetch_local_logs', 'odoo.addons.runbot.models.host.Host._fetch_local_logs', [])  # the local logs have to be empty
         upgrade_current_build._schedule()
         self.assertEqual(upgrade_current_build.local_state, 'done')
@@ -298,7 +298,7 @@ class TestUpgradeFlow(RunbotCase):
         upgrade_build = batch.slot_ids.filtered(lambda slot: slot.trigger_id == self.trigger_upgrade).build_id
         host = self.env['runbot.host']._get_current()
         upgrade_build.host = host.name
-        upgrade_build._init_pendings(host)
+        upgrade_build._schedule()
         upgrade_build._schedule()
         self.assertEqual(upgrade_build.local_state, 'done')
         self.assertEqual(len(upgrade_build.children_ids), 2)
@@ -339,7 +339,7 @@ class TestUpgradeFlow(RunbotCase):
         upgrade_nightly = batch.slot_ids.filtered(lambda slot: slot.trigger_id == trigger_upgrade_addons_nightly).build_id
         host = self.env['runbot.host']._get_current()
         upgrade_nightly.host = host.name
-        upgrade_nightly._init_pendings(host)
+        upgrade_nightly._schedule()
         upgrade_nightly._schedule()
         to_version_builds = upgrade_nightly.children_ids
         self.assertEqual(upgrade_nightly.local_state, 'done')
@@ -353,7 +353,7 @@ class TestUpgradeFlow(RunbotCase):
             []
         )
         to_version_builds.host = host.name
-        to_version_builds._init_pendings(host)
+        to_version_builds._schedule()
         to_version_builds._schedule()
         self.assertEqual(to_version_builds.mapped('local_state'), ['done']*4)
         from_version_builds = to_version_builds.children_ids
@@ -368,7 +368,7 @@ class TestUpgradeFlow(RunbotCase):
             ['11.0->12.0', 'saas-11.3->12.0', '12.0->13.0', 'saas-12.3->13.0', '13.0->master', 'saas-13.1->master', 'saas-13.2->master', 'saas-13.3->master']
         )
         from_version_builds.host = host.name
-        from_version_builds._init_pendings(host)
+        from_version_builds._schedule()
         from_version_builds._schedule()
         self.assertEqual(from_version_builds.mapped('local_state'), ['done']*8)
         db_builds = from_version_builds.children_ids
@@ -437,7 +437,7 @@ class TestUpgradeFlow(RunbotCase):
             )
         self.patchers['docker_run'].side_effect = docker_run_restore
         first_build.host = host.name
-        first_build._init_pendings(host)
+        first_build._schedule()
         self.patchers['docker_run'].assert_called()
 
         def docker_run_upgrade(cmd, *args, ro_volumes=False, **kwargs):
@@ -525,7 +525,7 @@ class TestUpgradeFlow(RunbotCase):
         for db in ['base', 'all', 'no-demo-all']:
             upgrade_complement_build_13.database_ids = [(0, 0, {'name': '%s-%s' % (upgrade_complement_build_13.dest, db)})]
 
-        upgrade_complement_build_13._init_pendings(host)
+        upgrade_complement_build_13._schedule()
 
         self.assertEqual(len(upgrade_complement_build_13.children_ids), 5)
         master_child = upgrade_complement_build_13.children_ids[0]

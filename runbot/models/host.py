@@ -1,5 +1,6 @@
 import logging
 import getpass
+import time
 
 from collections import defaultdict
 
@@ -112,9 +113,11 @@ class Host(models.Model):
         self.clear_caches()  # needed to ensure that content is updated on all hosts
         for dockerfile in self.env['runbot.dockerfile'].search([('to_build', '=', True)]):
             self._docker_build_dockerfile(dockerfile, static_path)
+        _logger.info('Done...')
 
     def _docker_build_dockerfile(self, dockerfile, workdir):
-        _logger.info('Building %s, %s', dockerfile.name, hash(str(dockerfile.dockerfile)))
+        start = time.time()
+        # _logger.info('Building %s, %s', dockerfile.name, hash(str(dockerfile.dockerfile)))
         docker_build_path = os.path.join(workdir, 'docker', dockerfile.image_tag)
         os.makedirs(docker_build_path, exist_ok=True)
 
@@ -137,6 +140,10 @@ class Host(models.Model):
             dockerfile.to_build = False
             dockerfile.message_post(body=f'Build failure:\n{msg}')
             self.env['runbot.runbot'].warning(f'Dockerfile build "{dockerfile.image_tag}" failed on host {self.name}')
+        else:
+            duration = time.time() - start
+            if duration > 1:
+                _logger.info('Dockerfile %s finished build in %s', dockerfile.image_tag, duration)
 
     def _get_work_path(self):
         return os.path.abspath(os.path.join(os.path.dirname(__file__), '../static'))
@@ -244,3 +251,10 @@ class Host(models.Model):
             logs_db_name = self.env['ir.config_parameter'].get_param('runbot.logdb_name')
             with local_pg_cursor(logs_db_name) as local_cr:
                 local_cr.execute("DELETE FROM ir_logging WHERE id in %s", [tuple(local_log_ids)])
+
+    def get_build_domain(self, domain=None):
+        domain = domain or []
+        return [('host', '=', self.name)] + domain
+
+    def get_builds(self, domain, order=None):
+        return self.env['runbot.build'].search(self.get_build_domain(domain), order=order)

@@ -109,11 +109,11 @@ class BuildParameters(models.Model):
 
     def create(self, values):
         params = self.new(values)
-        match = self._find_existing(params.fingerprint)
-        if match:
-            return match
-        values = self._convert_to_write(params._cache)
-        return super().create(values)
+        record = self._find_existing(params.fingerprint)
+        if not record:
+            values = self._convert_to_write(params._cache)
+            record = super().create(values)
+        return record
 
     def _find_existing(self, fingerprint):
         return self.env['runbot.build.params'].search([('fingerprint', '=', fingerprint)], limit=1)
@@ -156,10 +156,10 @@ class BuildResult(models.Model):
     trigger_id = fields.Many2one('runbot.trigger', related='params_id.trigger_id', store=True, index=True)
 
     # state machine
-    global_state = fields.Selection(make_selection(state_order), string='Status', compute='_compute_global_state', store=True, recursive=True)
+    global_state = fields.Selection(make_selection(state_order), string='Status', default='pending', required=True)
     local_state = fields.Selection(make_selection(state_order), string='Build Status', default='pending', required=True, index=True)
-    global_result = fields.Selection(make_selection(result_order), string='Result', compute='_compute_global_result', store=True, recursive=True)
-    local_result = fields.Selection(make_selection(result_order), string='Build Result')
+    global_result = fields.Selection(make_selection(result_order), string='Result')
+    local_result = fields.Selection(make_selection(result_order), string='Build Result', default='ok')
     triggered_result = fields.Selection(make_selection(result_order), string='Triggered Result')  # triggered by db only
 
     requested_action = fields.Selection([('wake_up', 'To wake up'), ('deathrow', 'To kill')], string='Action requested', index=True)
@@ -240,20 +240,6 @@ class BuildResult(models.Model):
             build.log_list = ','.join({step.name for step in build.params_id.config_id.step_ids() if step._has_log()})
         # TODO replace logic, add log file to list when executed (avoid 404, link log on docker start, avoid fake is_docker_step)
 
-    @api.depends('children_ids.global_state', 'local_state')
-    def _compute_global_state(self):
-        for record in self:
-            waiting_score = record._get_state_score('waiting')
-            children_ids = [child for child in record.children_ids if not child.orphan_result]
-            if record._get_state_score(record.local_state) > waiting_score and children_ids:  # if finish, check children
-                children_state = record._get_youngest_state([child.global_state for child in children_ids])
-                if record._get_state_score(children_state) > waiting_score:
-                    record.global_state = record.local_state
-                else:
-                    record.global_state = 'waiting'
-            else:
-                record.global_state = record.local_state
-
     @api.depends('gc_delay', 'job_end')
     def _compute_gc_date(self):
         icp = self.env['ir.config_parameter'].sudo()
@@ -285,22 +271,6 @@ class BuildResult(models.Model):
     def _get_state_score(self, result):
         return state_order.index(result)
 
-    @api.depends('children_ids.global_result', 'local_result', 'children_ids.orphan_result')
-    def _compute_global_result(self):
-        for record in self:
-            if record.local_result and record._get_result_score(record.local_result) >= record._get_result_score('ko'):
-                record.global_result = record.local_result
-            else:
-                children_ids = [child for child in record.children_ids if not child.orphan_result]
-                if children_ids:
-                    children_result = record._get_worst_result([child.global_result for child in children_ids], max_res='ko')
-                    if record.local_result:
-                        record.global_result = record._get_worst_result([record.local_result, children_result])
-                    else:
-                        record.global_result = children_result
-                else:
-                    record.global_result = record.local_result
-
     def _get_worst_result(self, results, max_res=False):
         results = [result for result in results if result]  # filter Falsy values
         index = max([self._get_result_score(result) for result in results]) if results else 0
@@ -310,6 +280,11 @@ class BuildResult(models.Model):
 
     def _get_result_score(self, result):
         return result_order.index(result)
+
+    def _set_result(self, result):
+        for record in self:
+            if self._get_result_score(record.result) < self._get_result_score(result):
+                record.local_result = result
 
     @api.depends('active_step')
     def _compute_job(self):
@@ -332,14 +307,24 @@ class BuildResult(models.Model):
             if values['local_state'] == 'done':
                 self.env['runbot.commit.export'].search([('build_id', 'in', self.ids)]).unlink()
         local_result = values.get('local_result')
-        for build in self:
-            if local_result and local_result != self._get_worst_result([build.local_result, local_result]):  # dont write ok on a warn/error build
-                if len(self) == 1:
-                    values.pop('local_result')
+        skip_local_result_builds = self.browse()
+        update_local_result_builds = self.browse()
+        if not local_result:
+            update_local_result_builds = self
+        else:
+            for build in self:
+                if local_result == build.local_result or local_result != self._get_worst_result([build.local_result, local_result]):
+                    skip_local_result_builds |= build
                 else:
-                    raise ValidationError('Local result cannot be set to a less critical level')
-        res = super(BuildResult, self).write(values)
-        return res
+                    update_local_result_builds |= build
+
+        if update_local_result_builds:
+            super(BuildResult, update_local_result_builds).write(values)
+        if skip_local_result_builds:
+            values.pop('local_result')
+            if values:
+                super(BuildResult, skip_local_result_builds).write(values)
+        return True
 
     def _add_child(self, param_values, orphan=False, description=False, additionnal_commit_links=False):
 
@@ -373,11 +358,6 @@ class BuildResult(models.Model):
             return 'warning'
         return 'ko'  # ?
 
-    def update_build_end(self):
-        for build in self:
-            build.build_end = now()
-            if build.parent_id and build.parent_id.local_state in ('running', 'done'):
-                build.parent_id.update_build_end()
 
     @api.depends('params_id.version_id.name')
     def _compute_dest(self):
@@ -444,6 +424,7 @@ class BuildResult(models.Model):
             values['host'] = self.host
             values['keep_host'] = True
         if self.parent_id:
+            self._check_parent_state()
             values.update({
                 'parent_id': self.parent_id.id,
                 'description': self.description,
@@ -451,8 +432,6 @@ class BuildResult(models.Model):
             self.orphan_result = True
 
         new_build = self.create(values)
-        if self.parent_id:
-            new_build._github_status()
         user = request.env.user if request else self.env.user
         new_build._log('rebuild', 'Rebuild initiated by %s%s' % (user.name, (' :%s' % message) if message else ''))
 
@@ -468,6 +447,12 @@ class BuildResult(models.Model):
                 })
                 slot.active = False
         return new_build
+
+    def _check_parent_state(self):
+        if self.parent_id and self.parent_id.global_state in ('running', 'done'):
+            # when adding a multi
+            self.parent_id.global_state = 'waiting'
+            self.parent_id.check_parent_state()
 
     def _skip(self, reason=None):
         """Mark builds ids as skipped"""
@@ -590,34 +575,21 @@ class BuildResult(models.Model):
         self.ensure_one()
         return '%s_%s' % (self.dest, self.active_step.name)
 
-    def _init_pendings(self, host):
-        for build in self:
-            if build.local_state != 'pending':
-                raise UserError("Build %s is not pending" % build.id)
-            if build.host != host.name:
-                raise UserError("Build %s does not have correct host" % build.id)
-            # allocate port and schedule first job
-            values = {
-                'port': self._find_port(),
-                'job_start': now(),
-                'build_start': now(),
-                'job_end': False,
-            }
-            values.update(build._next_job_values())
-            build.write(values)
-            if not build.active_step:
-                build._log('_schedule', 'No job in config, doing nothing')
-                build.local_result = 'warn'
-                continue
-            try:
-                build._log('_schedule', 'Init build environment with config %s ' % build.params_id.config_id.name)
-                os.makedirs(build._path('logs'), exist_ok=True)
-            except Exception:
-                _logger.exception('Failed initiating build %s', build.dest)
-                build._log('_schedule', 'Failed initiating build')
-                build._kill(result='ko')
-                continue
-            build._run_job()
+    def _init_pendings(self):
+        self.ensure_one()
+        build = self
+        build.port = self._find_port()
+        build.job_start = now()
+        build.build_start = now()
+        build.job_end = False
+        build._log('_schedule', 'Init build environment with config %s ' % build.params_id.config_id.name)
+        try:
+            build._log('_schedule', 'Init build environment with config %s ' % build.params_id.config_id.name)
+            os.makedirs(build._path('logs'), exist_ok=True)
+        except Exception:
+            _logger.exception('Failed initiating build %s', build.dest)
+            build._log('_schedule', 'Failed initiating build')
+            build._kill(result='ko')
 
     def _process_requested_actions(self):
         for build in self:
@@ -629,12 +601,15 @@ class BuildResult(models.Model):
                 continue
 
             if build.requested_action == 'wake_up':
-                if docker_state(build._get_docker_name(), build._path()) == 'RUNNING':
+                if build.local_state != 'done':
+                    build.requested_action = False
+                    build._log('wake_up', 'Impossible to wake-up, build is not done', log_type='markdown', level='SEPARATOR')
+                elif not os.path.exists(build._path()):
+                    build.requested_action = False
+                    build._log('wake_up', 'Impossible to wake-up, **build dir does not exists anymore**', log_type='markdown', level='SEPARATOR')
+                elif docker_state(build._get_docker_name(), build._path()) == 'RUNNING':
                     build.write({'requested_action': False, 'local_state': 'running'})
                     build._log('wake_up', 'Waking up failed, **docker is already running**', log_type='markdown', level='SEPARATOR')
-                elif not os.path.exists(build._path()):
-                    build.write({'requested_action': False, 'local_state': 'done'})
-                    build._log('wake_up', 'Impossible to wake-up, **build dir does not exists anymore**', log_type='markdown', level='SEPARATOR')
                 else:
                     try:
                         log_path = build._path('logs', 'wake_up.txt')
@@ -654,7 +629,7 @@ class BuildResult(models.Model):
                             run_step = step_ids[-1]
                         else:
                             run_step = self.env.ref('runbot.runbot_build_config_step_run')
-                        run_step._run_step(build, log_path, force=True)
+                        run_step._run_step(build, log_path, force=True)()
                         # reload_nginx will be triggered by _run_run_odoo
                     except Exception:
                         _logger.exception('Failed to wake up build %s', build.dest)
@@ -662,48 +637,72 @@ class BuildResult(models.Model):
                         build.write({'requested_action': False, 'local_state': 'done'})
                 continue
 
+    def _update_globals(self):
+        for record in self:
+            init_state = record.global_state
+            children = record.children_ids.filtered(lambda child: not child.orphan_result)
+            global_result = record.local_result
+            if children:
+                child_result = record._get_worst_result(children.mapped('global_result'), max_res='ko')
+                global_result = record._get_worst_result([record.local_result, child_result])
+            if global_result != record.global_result:
+                record.global_result = global_result
+                if not record.parent_id:
+                    record._github_status()  # failfast
+
+            testing_children = any(child.global_state not in ('running', 'done') for child in children)
+            global_state = record.local_state
+            if testing_children:
+                child_state = 'waiting'
+                global_state = record._get_youngest_state([record.local_state, child_state])
+            if global_state != record.global_state:
+                record.global_state = global_state
+
+            ending_build = init_state not in ('done', 'running') and record.global_state in ('done', 'running')
+
+            if ending_build:
+                if not record.local_result:  # Set 'ok' result if no result set (no tests job on build)
+                    record.local_result = 'ok'
+                record.build_end = now()
+                if not record.parent_id:
+                    record._github_status()
+
     def _schedule(self):
         """schedule the build"""
         icp = self.env['ir.config_parameter'].sudo()
-        hosts_by_name = {h.name: h for h in self.env['runbot.host'].search([('name', 'in', self.mapped('host'))])}
-        hosts_by_build = {b.id: hosts_by_name[b.host] for b in self}
-        for build in self:
-            if build.local_state not in ['testing', 'running']:
-                raise UserError("Build %s is not testing/running: %s" % (build.id, build.local_state))
-            if build.local_state == 'testing':
-                # failfast in case of docker error (triggered in database)
-                if build.triggered_result and not build.active_step.ignore_triggered_result:
-                    worst_result = self._get_worst_result([build.triggered_result, build.local_result])
-                    if worst_result != build.local_result:
-                        build.local_result = build.triggered_result
-                        build._github_status()  # failfast
-            # check if current job is finished
+        self.ensure_one()
+        build = self
+        if build.local_state not in ['testing', 'running', 'pending']:
+            return False
+        # check if current job is finished
+        if build.local_state == 'pending':
+            build._init_pendings()
+        else:
             _docker_state = docker_state(build._get_docker_name(), build._path())
             if _docker_state == 'RUNNING':
                 timeout = min(build.active_step.cpu_limit, int(icp.get_param('runbot.runbot_timeout', default=10000)))
                 if build.local_state != 'running' and build.job_time > timeout:
                     build._log('_schedule', '%s time exceeded (%ss)' % (build.active_step.name if build.active_step else "?", build.job_time))
                     build._kill(result='killed')
-                continue
+                return False
             elif _docker_state in ('UNKNOWN', 'GHOST') and (build.local_state == 'running' or build.active_step._is_docker_step()):  # todo replace with docker_start
                 docker_time = time.time() - dt2time(build.docker_start or build.job_start)
                 if docker_time < 5:
-                    continue
+                    return False
                 elif docker_time < 60:
                     _logger.info('container "%s" seems too take a while to start :%s' % (build.job_time, build._get_docker_name()))
-                    continue
+                    return False
                 else:
                     build._log('_schedule', 'Docker with state %s not started after 60 seconds, skipping' % _docker_state, level='ERROR')
-            if hosts_by_build[build.id]._fetch_local_logs(build_ids=build.ids):
-                continue  # avoid to make results with remaining logs
+            if self.env['runbot.host']._fetch_local_logs(build_ids=build.ids):
+                return True  # avoid to make results with remaining logs
             # No job running, make result and select next job
-            build_values = {
-                'job_end': now(),
-                'docker_start': False,
-            }
+
+            build.job_end = now()
+            build.docker_start = False
             # make result of previous job
             try:
-                results = build.active_step._make_results(build)
+                build.active_step._make_results(build)
             except Exception as e:
                 if isinstance(e, RunbotException):
                     message = e.args[0][:300000]
@@ -711,50 +710,70 @@ class BuildResult(models.Model):
                     message = 'An error occured while computing results of %s:\n %s' % (build.job, str(e).replace('\\n', '\n').replace("\\'", "'")[:10000])
                     _logger.exception(message)
                 build._log('_make_results', message, level='ERROR')
-                results = {'local_result': 'ko'}
-
-            build_values.update(results)
+                build.local_result = 'ko'
 
             # compute statistics before starting next job
             build.active_step._make_stats(build)
-
             build.active_step.log_end(build)
 
-            build_values.update(build._next_job_values())  # find next active_step or set to done
+        step_ids = self.params_id.config_id.step_ids()
+        if not step_ids:  # no job to do, build is done
+            self.active_step = False
+            self.local_state = 'done'
+            build._log('_schedule', 'No job in config, doing nothing')
+            build.local_result = 'warn'
 
+        if not self.active_step and self.local_state != 'pending':
+            # means that a step has been run manually without using config (wakeup)
+            build.active_step = False
+            build.local_state = 'done'
 
-            ending_build = build.local_state not in ('done', 'running') and build_values.get('local_state') in ('done', 'running')
-            if ending_build:
-                build.update_build_end()
+        if not self.active_step:
+            next_index = 0
+        else:
+            if self.active_step not in step_ids:
+                self._log('run', 'Config was modified and current step does not exists anymore, skipping.', level='ERROR')
+                self.active_step = False
+                self.local_state = 'done'
+                self.local_result = 'ko'
+                return False
+            next_index = step_ids.index(self.active_step) + 1
 
-            build.write(build_values)
-            if ending_build:
-                if not build.local_result:  # Set 'ok' result if no result set (no tests job on build)
-                    build.local_result = 'ok'
-                    build._logger("No result set, setting ok by default")
-                build._github_status()
-            build._run_job()
+        while True:
+            if next_index >= len(step_ids):  # final job, build is done
+                self.active_step = False
+                self.local_state = 'done'
+                return False
+            new_step = step_ids[next_index]  # job to do, state is job_state (testing or running)
+            if new_step.domain_filter and not self.filtered_domain(safe_eval(new_step.domain_filter)):
+                self._log('run', '**Skipping** step ~~%s~~ from config **%s**' % (new_step.name, self.params_id.config_id.name), log_type='markdown', level='SEPARATOR')
+                next_index += 1
+                continue
+            break
+        build.active_step = new_step.id
+        build.local_state = new_step._step_state()
 
+        return build._run_job()
 
     def _run_job(self):
-        # run job
-        for build in self:
-            if build.local_state != 'done':
-                build._logger('running %s', build.active_step.name)
-                os.makedirs(build._path('logs'), exist_ok=True)
-                os.makedirs(build._path('datadir'), exist_ok=True)
-                try:
-                    build.active_step._run(build)  # run should be on build?
-                except TransactionRollbackError:
-                    raise
-                except Exception as e:
-                    if isinstance(e, RunbotException):
-                        message = e.args[0]
-                    else:
-                        message = '%s failed running step %s:\n %s' % (build.dest, build.job, str(e).replace('\\n', '\n').replace("\\'", "'"))
-                    _logger.exception(message)
-                    build._log("run", message, level='ERROR')
-                    build._kill(result='ko')
+        self.ensure_one()
+        build = self
+        if build.local_state != 'done':
+            build._logger('running %s', build.active_step.name)
+            os.makedirs(build._path('logs'), exist_ok=True)
+            os.makedirs(build._path('datadir'), exist_ok=True)
+            try:
+                return build.active_step._run(build)  # run should be on build?
+            except TransactionRollbackError:
+                raise
+            except Exception as e:
+                if isinstance(e, RunbotException):
+                    message = e.args[0]
+                else:
+                    message = '%s failed running step %s:\n %s' % (build.dest, build.job, str(e).replace('\\n', '\n').replace("\\'", "'"))
+                _logger.exception(message)
+                build._log("run", message, level='ERROR')
+                build._kill(result='ko')
 
     def _docker_run(self, cmd=None, ro_volumes=None, **kwargs):
         self.ensure_one()
@@ -926,7 +945,6 @@ class BuildResult(models.Model):
                 v['local_result'] = result
             build.write(v)
             self.env.cr.commit()
-            build._github_status()
             self.invalidate_cache()
 
     def _ask_kill(self, lock=True, message=None):
@@ -1051,35 +1069,7 @@ class BuildResult(models.Model):
                 'build_id': self.id
             })
 
-    def _next_job_values(self):
-        self.ensure_one()
-        step_ids = self.params_id.config_id.step_ids()
-        if not step_ids:  # no job to do, build is done
-            return {'active_step': False, 'local_state': 'done'}
-
-        if not self.active_step and self.local_state != 'pending':
-            # means that a step has been run manually without using config
-            return {'active_step': False, 'local_state': 'done'}
-
-        if not self.active_step:
-            next_index = 0
-        else:
-            if self.active_step not in step_ids:
-                self._log('run', 'Config was modified and current step does not exists anymore, skipping.', level='ERROR')
-                return {'active_step': False, 'local_state': 'done', 'local_result': self._get_worst_result([self.local_result, 'ko'])}
-            next_index = step_ids.index(self.active_step) + 1
-
-        while True:
-            if next_index >= len(step_ids):  # final job, build is done
-                return {'active_step': False, 'local_state': 'done'}
-            new_step = step_ids[next_index]  # job to do, state is job_state (testing or running)
-            if new_step.domain_filter and not self.filtered_domain(safe_eval(new_step.domain_filter)):
-
-                self._log('run', '**Skipping** step ~~%s~~ from config **%s**' % (new_step.name, self.params_id.config_id.name), log_type='markdown', level='SEPARATOR')
-                next_index += 1
-                continue
-            break
-        return {'active_step': new_step.id, 'local_state': new_step._step_state()}
+   
 
     def _get_py_version(self):
         """return the python name to use from build batch"""
