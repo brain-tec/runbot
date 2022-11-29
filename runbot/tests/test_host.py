@@ -88,7 +88,7 @@ class TestHost(RunbotCase):
             ]),
             1,
         )
-        self.assertEqual(build.triggered_result, 'warn', 'A warning log should sets the build in warn')
+        self.assertEqual(build.local_result, 'warn', 'A warning log should sets the build in warn')
 
         # now check that error logs sets the build in ko
         logs = fetch_local_logs_return_value(nb_logs=1, build_dest=build.dest, level='ERROR')
@@ -103,7 +103,7 @@ class TestHost(RunbotCase):
             ]),
             1,
         )
-        self.assertEqual(build.triggered_result, 'ko', 'An error log should sets the build in ko')
+        self.assertEqual(build.local_result, 'ko', 'An error log should sets the build in ko')
 
         build.log_counter = 10
         # Test log limit

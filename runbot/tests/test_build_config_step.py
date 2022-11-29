@@ -214,7 +214,6 @@ class TestBuildConfigStepCreate(TestBuildConfigStepCommon):
     def test_config_step_create_results(self):
         """ Test child builds are taken into account"""
 
-
         self.config_step._run_create_build(self.parent_build, '/tmp/essai')
         self.assertEqual(len(self.parent_build.children_ids), 2, 'Two sub-builds should have been generated')
 
@@ -222,6 +221,7 @@ class TestBuildConfigStepCreate(TestBuildConfigStepCommon):
         for child_build in self.parent_build.children_ids:
             self.assertFalse(child_build.orphan_result)
             child_build.local_result = 'ko'
+            child_build._update_globals()
             self.assertEqual(child_build.global_result, 'ko')
 
         self.assertEqual(self.parent_build.global_result, 'ko')
@@ -455,19 +455,19 @@ class TestBuildConfigStep(TestBuildConfigStepCommon):
 
         self.patchers['docker_run'].side_effect = docker_run
 
-        config_step._run_step(self.parent_build, 'dev/null/logpath')
+        config_step._run_step(self.parent_build, 'dev/null/logpath')()
 
         assert_db_name = 'custom_build'
         parent_build_params = self.parent_build.params_id.copy({'config_data': {'db_name': 'custom_build'}})
         parent_build = self.parent_build.copy({'params_id': parent_build_params.id})
-        config_step._run_step(parent_build, 'dev/null/logpath')
+        config_step._run_step(parent_build, 'dev/null/logpath')()
 
         config_step = self.ConfigStep.create({
             'name': 'run_test',
             'job_type': 'run_odoo',
             'custom_db_name': 'custom',
         })
-        config_step._run_step(parent_build, 'dev/null/logpath')
+        config_step._run_step(parent_build, 'dev/null/logpath')()
 
         self.assertEqual(call_count, 3)
 
@@ -489,7 +489,7 @@ docker_params = dict(cmd=cmd)
             self.assertIn('-d test_database', run_cmd)
 
         self.patchers['docker_run'].side_effect = docker_run
-        config_step._run_step(self.parent_build, 'dev/null/logpath')
+        config_step._run_step(self.parent_build, 'dev/null/logpath')()
         self.patchers['docker_run'].assert_called_once()
         db = self.env['runbot.database'].search([('name', '=', 'test_database')])
         self.assertEqual(db.build_id, self.parent_build)
@@ -525,7 +525,7 @@ def run():
             call_count += 1
 
         self.patchers['docker_run'].side_effect = docker_run
-        config_step._run_step(self.parent_build, 'dev/null/logpath')
+        config_step._run_step(self.parent_build, 'dev/null/logpath')()
 
         self.assertEqual(call_count, 1)
 
@@ -564,9 +564,10 @@ Initiating shutdown
         })
         logs = []
         with patch('builtins.open', mock_open(read_data=file_content)):
-            result = config_step._make_results(build)
-        self.assertEqual(result, {'job_end': '1970-01-01 02:00:00', 'local_result': 'ok'})
+            config_step._make_results(build)
+        self.assertEqual(build.job_end, '1970-01-01 02:00:00')
         self.assertEqual(logs, [('INFO', 'Getting results for build %s' % build.dest)])
+        self.assertEqual(build.local_result, 'ok')
         # no shutdown
         logs = []
         file_content = """
@@ -575,8 +576,9 @@ odoo.stuff.modules.loading: Modules loaded.
 Some post install stuff
         """
         with patch('builtins.open', mock_open(read_data=file_content)):
-            result = config_step._make_results(build)
-        self.assertEqual(result, {'job_end': '1970-01-01 02:00:00', 'local_result': 'ko'})
+            config_step._make_results(build)
+        self.assertEqual(build.job_end, '1970-01-01 02:00:00')
+        self.assertEqual(build.local_result, 'ko')
         self.assertEqual(logs, [
             ('INFO', 'Getting results for build %s' % build.dest),
             ('ERROR', 'No "Initiating shutdown" found in logs, maybe because of cpu limit.')
@@ -587,8 +589,9 @@ Some post install stuff
 Loading stuff
 """
         with patch('builtins.open', mock_open(read_data=file_content)):
-            result = config_step._make_results(build)
-        self.assertEqual(result, {'job_end': '1970-01-01 02:00:00', 'local_result': 'ko'})
+            config_step._make_results(build)
+        self.assertEqual(build.job_end, '1970-01-01 02:00:00')
+        self.assertEqual(build.local_result, 'ko')
         self.assertEqual(logs, [
             ('INFO', 'Getting results for build %s' % build.dest),
             ('ERROR', 'Modules loaded not found in logs')
@@ -607,8 +610,9 @@ File "x.py", line a, in test_
 Initiating shutdown
 """
         with patch('builtins.open', mock_open(read_data=file_content)):
-            result = config_step._make_results(build)
-        self.assertEqual(result, {'job_end': '1970-01-01 02:00:00', 'local_result': 'ko'})
+            config_step._make_results(build)
+        self.assertEqual(build.job_end, '1970-01-01 02:00:00')
+        self.assertEqual(build.local_result, 'ko')
         self.assertEqual(logs, [
             ('INFO', 'Getting results for build %s' % build.dest),
             ('ERROR', 'Error or traceback found in logs')
@@ -624,8 +628,9 @@ Some post install stuff
 Initiating shutdown
 """
         with patch('builtins.open', mock_open(read_data=file_content)):
-            result = config_step._make_results(build)
-        self.assertEqual(result, {'job_end': '1970-01-01 02:00:00', 'local_result': 'warn'})
+            config_step._make_results(build)
+        self.assertEqual(build.job_end, '1970-01-01 02:00:00')
+        self.assertEqual(build.local_result, 'warn')
         self.assertEqual(logs, [
             ('INFO', 'Getting results for build %s' % build.dest),
             ('WARNING', 'Warning found in logs')
@@ -634,9 +639,9 @@ Initiating shutdown
         # no log file
         logs = []
         self.patchers['isfile'].return_value = False
-        result = config_step._make_results(build)
+        config_step._make_results(build)
 
-        self.assertEqual(result, {'local_result': 'ko'})
+        self.assertEqual(build.local_result, 'ko')
         self.assertEqual(logs, [
             ('INFO', 'Getting results for build %s' % build.dest),
             ('ERROR', 'Log file not found at the end of test job')
@@ -653,11 +658,12 @@ Initiating shutdown
         self.patchers['isfile'].return_value = True
         build.local_result = 'warn'
         with patch('builtins.open', mock_open(read_data=file_content)):
-            result = config_step._make_results(build)
+            config_step._make_results(build)
         self.assertEqual(logs, [
             ('INFO', 'Getting results for build %s' % build.dest)
         ])
-        self.assertEqual(result, {'job_end': '1970-01-01 02:00:00', 'local_result': 'warn'})
+        self.assertEqual(build.job_end, '1970-01-01 02:00:00')
+        self.assertEqual(build.local_result, 'warn')
 
     @patch('odoo.addons.runbot.models.build_config.ConfigStep._make_tests_results')
     def test_make_python_result(self, mock_make_tests_results):
@@ -672,18 +678,18 @@ Initiating shutdown
         })
         build.local_state = 'testing'
         self.patchers['isfile'].return_value = False
-        result = config_step._make_results(build)
-        self.assertEqual(result, {'local_result': 'ok'})
+        config_step._make_results(build)
+        self.assertEqual(build.local_result, 'ok')
 
         # invalid result code (no return_value set)
         config_step.python_result_code = """a = 2*5\nr = {'a': 'ok'}\nreturn_value = 'ko'"""
         with self.assertRaises(RunbotException):
-            result = config_step._make_results(build)
+            config_step._make_results(build)
 
         # no result defined
         config_step.python_result_code = ""
         mock_make_tests_results.return_value = {'local_result': 'warning'}
-        result = config_step._make_results(build)
-        self.assertEqual(result, {'local_result': 'warning'})
+        config_step._make_results(build)
+        self.assertEqual(build.local_result, 'warning')
 
 # TODO add generic test to copy_paste _run_* in a python step
