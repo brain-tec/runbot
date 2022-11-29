@@ -239,19 +239,19 @@ class BuildResult(models.Model):
             build.log_list = ','.join({step.name for step in build.params_id.config_id.step_ids() if step._has_log()})
         # TODO replace logic, add log file to list when executed (avoid 404, link log on docker start, avoid fake is_docker_step)
 
-    @api.depends('children_ids.global_state', 'local_state')
-    def _compute_global_state(self):
-        for record in self:
-            waiting_score = record._get_state_score('waiting')
-            children_ids = [child for child in record.children_ids if not child.orphan_result]
-            if record._get_state_score(record.local_state) > waiting_score and children_ids:  # if finish, check children
-                children_state = record._get_youngest_state([child.global_state for child in children_ids])
-                if record._get_state_score(children_state) > waiting_score:
-                    record.global_state = record.local_state
-                else:
-                    record.global_state = 'waiting'
-            else:
-                record.global_state = record.local_state
+    #@api.depends('children_ids.global_state', 'local_state')
+    #def _compute_global_state(self):
+    #    for record in self:
+    #        waiting_score = record._get_state_score('waiting')
+    #        children_ids = [child for child in record.children_ids if not child.orphan_result]
+    #        if record._get_state_score(record.local_state) > waiting_score and children_ids:  # if finish, check children
+    #            children_state = record._get_youngest_state([child.global_state for child in children_ids])
+    #            if record._get_state_score(children_state) > waiting_score:
+    #                record.global_state = record.local_state
+    #            else:
+    #                record.global_state = 'waiting'
+    #        else:
+    #            record.global_state = record.local_state
 
     @api.depends('gc_delay', 'job_end')
     def _compute_gc_date(self):
@@ -367,11 +367,11 @@ class BuildResult(models.Model):
             return 'warning'
         return 'ko'  # ?
 
-    def update_build_end(self):
-        for build in self:
-            build.build_end = now()
-            if build.parent_id and build.parent_id.local_state in ('running', 'done'):
-                build.parent_id.update_build_end()
+    #def update_build_end(self):
+    #    for build in self:
+    #        build.build_end = now()
+    #        if build.parent_id and build.parent_id.local_state in ('running', 'done'):
+    #            build.parent_id.update_build_end()
 
     @api.depends('params_id.version_id.name')
     def _compute_dest(self):
@@ -623,12 +623,15 @@ class BuildResult(models.Model):
                 continue
 
             if build.requested_action == 'wake_up':
-                if docker_state(build._get_docker_name(), build._path()) == 'RUNNING':
+                if build.local_state != 'done':
+                    build.requested_action = False
+                    build._log('wake_up', 'Impossible to wake-up, build is not done', log_type='markdown', level='SEPARATOR')
+                elif not os.path.exists(build._path()):
+                    build.requested_action = False
+                    build._log('wake_up', 'Impossible to wake-up, **build dir does not exists anymore**', log_type='markdown', level='SEPARATOR')
+                elif docker_state(build._get_docker_name(), build._path()) == 'RUNNING':
                     build.write({'requested_action': False, 'local_state': 'running'})
                     build._log('wake_up', 'Waking up failed, **docker is already running**', log_type='markdown', level='SEPARATOR')
-                elif not os.path.exists(build._path()):
-                    build.write({'requested_action': False, 'local_state': 'done'})
-                    build._log('wake_up', 'Impossible to wake-up, **build dir does not exists anymore**', log_type='markdown', level='SEPARATOR')
                 else:
                     try:
                         log_path = build._path('logs', 'wake_up.txt')
@@ -656,14 +659,25 @@ class BuildResult(models.Model):
                         build.write({'requested_action': False, 'local_state': 'done'})
                 continue
 
+    def _update_globals(self):
+        for record in self:
+            if record.global_state == 'waiting':
+                testing_children_ids = record.children_ids.filtered(lambda child: not child.orphan_result and child.global_state not in ('running', 'done'))
+                if not testing_children_ids:
+                    record.global_state = record.local_state
+
     def _schedule(self):
         """schedule the build"""
         icp = self.env['ir.config_parameter'].sudo()
         hosts_by_name = {h.name: h for h in self.env['runbot.host'].search([('name', 'in', self.mapped('host'))])}
         hosts_by_build = {b.id: hosts_by_name[b.host] for b in self}
         for build in self:
+            build._update_globals()
             if build.local_state not in ['testing', 'running']:
-                raise UserError("Build %s is not testing/running: %s" % (build.id, build.local_state))
+                return
+            build._update_globals()
+            if build.local_state in ('waiting', 'done'):
+                continue
             if build.local_state == 'testing':
                 # failfast in case of docker error (triggered in database)
                 if build.triggered_result and not build.active_step.ignore_triggered_result:
