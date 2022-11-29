@@ -19,6 +19,7 @@ from odoo.tools.safe_eval import safe_eval
 from collections import defaultdict
 from pathlib import Path
 from psycopg2 import sql
+from psycopg2.extensions import TransactionRollbackError
 import getpass
 
 _logger = logging.getLogger(__name__)
@@ -341,8 +342,6 @@ class BuildResult(models.Model):
                 else:
                     raise ValidationError('Local result cannot be set to a less critical level')
         res = super(BuildResult, self).write(values)
-        if 'log_counter' in values:  # not 100% usefull but more correct ( see test_ir_logging)
-            self.flush()
         return res
 
     def _add_child(self, param_values, orphan=False, description=False, additionnal_commit_links=False):
@@ -700,7 +699,7 @@ class BuildResult(models.Model):
                     build._log('_schedule', 'Docker with state %s not started after 60 seconds, skipping' % _docker_state, level='ERROR')
             if hosts_by_build[build.id]._fetch_local_logs(build_ids=build.ids):
                 continue  # avoid to make results with remaining logs
-            # No job running, make result and select nex job
+            # No job running, make result and select next job
             build_values = {
                 'job_end': now(),
                 'docker_start': False,
@@ -726,6 +725,7 @@ class BuildResult(models.Model):
 
             build_values.update(build._next_job_values())  # find next active_step or set to done
 
+
             ending_build = build.local_state not in ('done', 'running') and build_values.get('local_state') in ('done', 'running')
             if ending_build:
                 build.update_build_end()
@@ -748,6 +748,8 @@ class BuildResult(models.Model):
                 os.makedirs(build._path('datadir'), exist_ok=True)
                 try:
                     build.active_step._run(build)  # run should be on build?
+                except TransactionRollbackError:
+                    raise
                 except Exception as e:
                     if isinstance(e, RunbotException):
                         message = e.args[0]
