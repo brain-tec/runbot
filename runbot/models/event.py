@@ -35,10 +35,11 @@ class runbot_event(models.Model):
         for build in builds:
             build_logs = logs_by_build_id[build.id]
             for ir_log in build_logs:
-                if ir_log['level'].upper() == 'WARNING':
-                    build.triggered_result = 'warn'
-                elif ir_log['level'].upper() == 'ERROR':
-                    build.triggered_result = 'ko'
+                if not build.active_step.ignore_triggered_result:
+                    if ir_log['level'].upper() == 'WARNING':
+                        build._set_result('warn')
+                    elif ir_log['level'].upper() == 'ERROR':
+                        build._set_result('ko')
         return super().create(vals_list)
 
     def _markdown(self):

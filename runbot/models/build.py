@@ -109,11 +109,11 @@ class BuildParameters(models.Model):
 
     def create(self, values):
         params = self.new(values)
-        match = self._find_existing(params.fingerprint)
-        if match:
-            return match
-        values = self._convert_to_write(params._cache)
-        return super().create(values)
+        record = self._find_existing(params.fingerprint)
+        if not record:
+            values = self._convert_to_write(params._cache)
+            record = super().create(values)
+        return record
 
     def _find_existing(self, fingerprint):
         return self.env['runbot.build.params'].search([('fingerprint', '=', fingerprint)], limit=1)
@@ -156,9 +156,9 @@ class BuildResult(models.Model):
     trigger_id = fields.Many2one('runbot.trigger', related='params_id.trigger_id', store=True, index=True)
 
     # state machine
-    global_state = fields.Selection(make_selection(state_order), string='Status', compute='_compute_global_state', store=True, recursive=True)
+    global_state = fields.Selection(make_selection(state_order), string='Status', default='pending', required=True)
     local_state = fields.Selection(make_selection(state_order), string='Build Status', default='pending', required=True, index=True)
-    global_result = fields.Selection(make_selection(result_order), string='Result', compute='_compute_global_result', store=True, recursive=True)
+    global_result = fields.Selection(make_selection(result_order), string='Result')
     local_result = fields.Selection(make_selection(result_order), string='Build Result')
     triggered_result = fields.Selection(make_selection(result_order), string='Triggered Result')  # triggered by db only
 
@@ -239,20 +239,6 @@ class BuildResult(models.Model):
             build.log_list = ','.join({step.name for step in build.params_id.config_id.step_ids() if step._has_log()})
         # TODO replace logic, add log file to list when executed (avoid 404, link log on docker start, avoid fake is_docker_step)
 
-    #@api.depends('children_ids.global_state', 'local_state')
-    #def _compute_global_state(self):
-    #    for record in self:
-    #        waiting_score = record._get_state_score('waiting')
-    #        children_ids = [child for child in record.children_ids if not child.orphan_result]
-    #        if record._get_state_score(record.local_state) > waiting_score and children_ids:  # if finish, check children
-    #            children_state = record._get_youngest_state([child.global_state for child in children_ids])
-    #            if record._get_state_score(children_state) > waiting_score:
-    #                record.global_state = record.local_state
-    #            else:
-    #                record.global_state = 'waiting'
-    #        else:
-    #            record.global_state = record.local_state
-
     @api.depends('gc_delay', 'job_end')
     def _compute_gc_date(self):
         icp = self.env['ir.config_parameter'].sudo()
@@ -284,22 +270,6 @@ class BuildResult(models.Model):
     def _get_state_score(self, result):
         return state_order.index(result)
 
-    @api.depends('children_ids.global_result', 'local_result', 'children_ids.orphan_result')
-    def _compute_global_result(self):
-        for record in self:
-            if record.local_result and record._get_result_score(record.local_result) >= record._get_result_score('ko'):
-                record.global_result = record.local_result
-            else:
-                children_ids = [child for child in record.children_ids if not child.orphan_result]
-                if children_ids:
-                    children_result = record._get_worst_result([child.global_result for child in children_ids], max_res='ko')
-                    if record.local_result:
-                        record.global_result = record._get_worst_result([record.local_result, children_result])
-                    else:
-                        record.global_result = children_result
-                else:
-                    record.global_result = record.local_result
-
     def _get_worst_result(self, results, max_res=False):
         results = [result for result in results if result]  # filter Falsy values
         index = max([self._get_result_score(result) for result in results]) if results else 0
@@ -309,6 +279,11 @@ class BuildResult(models.Model):
 
     def _get_result_score(self, result):
         return result_order.index(result)
+
+    def _set_result(self, result):
+        for record in self:
+            if self._get_result_score(record.result) < self._get_result_score(result):
+                record.local_result = result
 
     @api.depends('active_step')
     def _compute_job(self):
@@ -367,11 +342,6 @@ class BuildResult(models.Model):
             return 'warning'
         return 'ko'  # ?
 
-    #def update_build_end(self):
-    #    for build in self:
-    #        build.build_end = now()
-    #        if build.parent_id and build.parent_id.local_state in ('running', 'done'):
-    #            build.parent_id.update_build_end()
 
     @api.depends('params_id.version_id.name')
     def _compute_dest(self):
@@ -438,6 +408,7 @@ class BuildResult(models.Model):
             values['host'] = self.host
             values['keep_host'] = True
         if self.parent_id:
+            self._check_parent_state()
             values.update({
                 'parent_id': self.parent_id.id,
                 'description': self.description,
@@ -445,8 +416,6 @@ class BuildResult(models.Model):
             self.orphan_result = True
 
         new_build = self.create(values)
-        if self.parent_id:
-            new_build._github_status()
         user = request.env.user if request else self.env.user
         new_build._log('rebuild', 'Rebuild initiated by %s%s' % (user.name, (' :%s' % message) if message else ''))
 
@@ -462,6 +431,12 @@ class BuildResult(models.Model):
                 })
                 slot.active = False
         return new_build
+
+    def _check_parent_state(self):
+        if self.parent_id and self.parent_id.global_state in ('running', 'done'):
+            # when adding a multi
+            self.parent_id.global_state = 'waiting'
+            self.parent_id.check_parent_state()
 
     def _skip(self, reason=None):
         """Mark builds ids as skipped"""
@@ -661,21 +636,43 @@ class BuildResult(models.Model):
 
     def _update_globals(self):
         for record in self:
-            if record.global_state == 'waiting':
-                testing_children_ids = record.children_ids.filtered(lambda child: not child.orphan_result and child.global_state not in ('running', 'done'))
-                if not testing_children_ids:
-                    record.global_state = record.local_state
+            init_state = record.global_state
+            children = record.children_ids.filtered(lambda child: not child.orphan_result)
+            global_result = record.local_result
+            if children:
+                child_result = record._get_worst_result(children.mapped('global_result'), max_res='ko')
+                global_result = record._get_worst_result([record.local_result, child_result])
+            if global_result != record.global_result:
+                record.global_result = global_result
+                if not record.parent_id:
+                    record._github_status()  # failfast
+
+            testing_children = any(child.global_state not in ('running', 'done') for child in children)
+            global_state = record.local_state
+            if testing_children:
+                child_state = 'waiting'
+                global_state = record._get_youngest_state([record.local_state, child_state])
+            if global_state != record.global_state:
+                record.global_state = global_state
+
+            ending_build = init_state not in ('done', 'running') and record.global_state in ('done', 'running')
+
+            if ending_build:
+                if not record.local_result:  # Set 'ok' result if no result set (no tests job on build)
+                    record.local_result = 'ok'
+                record.build_end = now()
+                if not record.parent_id:
+                    record._github_status()
 
     def _schedule(self):
         """schedule the build"""
         icp = self.env['ir.config_parameter'].sudo()
         hosts_by_name = {h.name: h for h in self.env['runbot.host'].search([('name', 'in', self.mapped('host'))])}
         hosts_by_build = {b.id: hosts_by_name[b.host] for b in self}
+
         for build in self:
-            build._update_globals()
             if build.local_state not in ['testing', 'running']:
                 return
-            build._update_globals()
             if build.local_state in ('waiting', 'done'):
                 continue
             if build.local_state == 'testing':
@@ -684,7 +681,6 @@ class BuildResult(models.Model):
                     worst_result = self._get_worst_result([build.triggered_result, build.local_result])
                     if worst_result != build.local_result:
                         build.local_result = build.triggered_result
-                        build._github_status()  # failfast
             # check if current job is finished
             _docker_state = docker_state(build._get_docker_name(), build._path())
             if _docker_state == 'RUNNING':
@@ -730,17 +726,8 @@ class BuildResult(models.Model):
 
             build_values.update(build._next_job_values())  # find next active_step or set to done
 
-
-            ending_build = build.local_state not in ('done', 'running') and build_values.get('local_state') in ('done', 'running')
-            if ending_build:
-                build.update_build_end()
-
             build.write(build_values)
-            if ending_build:
-                if not build.local_result:  # Set 'ok' result if no result set (no tests job on build)
-                    build.local_result = 'ok'
-                    build._logger("No result set, setting ok by default")
-                build._github_status()
+
             build._run_job()
 
 
@@ -934,7 +921,6 @@ class BuildResult(models.Model):
                 v['local_result'] = result
             build.write(v)
             self.env.cr.commit()
-            build._github_status()
             self.invalidate_cache()
 
     def _ask_kill(self, lock=True, message=None):

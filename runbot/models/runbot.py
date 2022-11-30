@@ -39,12 +39,15 @@ class Runbot(models.AbstractModel):
     def _scheduler(self, host):
         self._gc_testing(host)
         self._commit()
-        for build in self._get_builds_with_requested_actions(host):
+        for build in host.get_builds([('requested_action', 'in', ['wake_up', 'deathrow'])]):
             build._process_requested_actions()
             self._commit()
         host.process_logs()
         self._commit()
-        for build in self._get_builds_to_schedule(host):
+        for build in host.get_builds([('global_state', 'not in', ('running', 'done'))]).sorted(lambda b: -b.id):
+            build._update_globals()
+            self._commit()
+        for build in host.get_builds([('local_state', 'in', ['testing', 'running'])]):
             build._schedule()
             self._commit()
         self._assign_pending_builds(host, host.nb_worker, [('build_type', '!=', 'scheduled')])
@@ -58,20 +61,10 @@ class Runbot(models.AbstractModel):
         self._commit()
         self._reload_nginx()
 
-    def build_domain_host(self, host, domain=None):
-        domain = domain or []
-        return [('host', '=', host.name)] + domain
-
-    def _get_builds_with_requested_actions(self, host):
-        return self.env['runbot.build'].search(self.build_domain_host(host, [('requested_action', 'in', ['wake_up', 'deathrow'])]))
-
-    def _get_builds_to_schedule(self, host):
-        return self.env['runbot.build'].search(self.build_domain_host(host, [('local_state', 'in', ['testing', 'running'])]))
-
     def _assign_pending_builds(self, host, nb_worker, domain=None):
         if host.assigned_only or nb_worker <= 0:
             return
-        domain_host = self.build_domain_host(host)
+        domain_host = host.build_domain()
         reserved_slots = self.env['runbot.build'].search_count(domain_host + [('local_state', 'in', ('testing', 'pending'))])
         assignable_slots = (nb_worker - reserved_slots)
         if assignable_slots > 0:
@@ -81,7 +74,7 @@ class Runbot(models.AbstractModel):
                 _logger.info('Builds %s where allocated to runbot', allocated)
 
     def _get_builds_to_init(self, host):
-        domain_host = self.build_domain_host(host)
+        domain_host = ost.build_domain()
         used_slots = self.env['runbot.build'].search_count(domain_host + [('local_state', '=', 'testing')])
         available_slots = host.nb_worker - used_slots
         if available_slots <= 0:
@@ -90,7 +83,7 @@ class Runbot(models.AbstractModel):
 
     def _gc_running(self, host):
         running_max = host.get_running_max()
-        domain_host = self.build_domain_host(host)
+        domain_host = ost.build_domain()
         Build = self.env['runbot.build']
         cannot_be_killed_ids = Build.search(domain_host + [('keep_running', '=', True)]).ids
         sticky_bundles = self.env['runbot.bundle'].search([('sticky', '=', True), ('project_id.keep_sticky_running', '=', True)])
@@ -106,7 +99,7 @@ class Runbot(models.AbstractModel):
         """garbage collect builds that could be killed"""
         # decide if we need room
         Build = self.env['runbot.build']
-        domain_host = self.build_domain_host(host)
+        domain_host = host.build_domain()
         testing_builds = Build.search(domain_host + [('local_state', 'in', ['testing', 'pending']), ('requested_action', '!=', 'deathrow')])
         used_slots = len(testing_builds)
         available_slots = host.nb_worker - used_slots
