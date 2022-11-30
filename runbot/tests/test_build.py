@@ -348,6 +348,8 @@ class TestBuildResult(RunbotCase):
             'parent_id': build1_1.id,
         })
 
+        builds = build1_1_1 | build1_1_2 | build1_1 | build1_2 | build1
+
         def assert_state(global_state, build):
             self.assertEqual(build.global_state, global_state)
 
@@ -361,6 +363,8 @@ class TestBuildResult(RunbotCase):
         build1_1.local_state = 'testing'
         build1.local_state = 'done'
         build1_1.local_state = 'done'
+
+        builds._update_globals()
 
         assert_state('waiting', build1)
         assert_state('waiting', build1_1)

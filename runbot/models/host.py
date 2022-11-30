@@ -241,3 +241,10 @@ class Host(models.Model):
             logs_db_name = self.env['ir.config_parameter'].get_param('runbot.logdb_name')
             with local_pg_cursor(logs_db_name) as local_cr:
                 local_cr.execute("DELETE FROM ir_logging WHERE id in %s", [tuple(local_log_ids)])
+
+    def get_build_domain(self, domain=None):
+        domain = domain or []
+        return [('host', '=', self.name)] + domain
+
+    def get_builds(self, domain):
+        self.env['runbot.build'].search(self.get_build_domain(domain))
