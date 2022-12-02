@@ -258,11 +258,14 @@ class Branch(models.Model):
     def write(self, vals):
         super().write(vals)
         if vals.get('active') is False:
+            self.active_staging_id.cancel(
+                "Target branch deactivated by %r.",
+                self.env.user.login,
+            )
             self.env['runbot_merge.pull_requests.feedback'].create([{
                 'repository': pr.repository.id,
                 'pull_request': pr.number,
-                'close': True,
-                'message': f'{pr.ping()}the target branch {pr.target.name!r} has been disabled, closing this PR.',
+                'message': f'Hey {pr.ping()}the target branch {pr.target.name!r} has been disabled, you may want to close this PR.',
             } for pr in self.prs])
         return True
 
@@ -913,17 +916,14 @@ class PullRequests(models.Model):
                         )
             elif command == 'method':
                 if is_reviewer:
-                    if param == 'squash' and not self.squash:
-                        msg = "squash can only be used with a single commit at this time."
-                    else:
-                        self.merge_method = param
-                        ok = True
-                        explanation = next(label for value, label in type(self).merge_method.selection if value == param)
-                        Feedback.create({
-                            'repository': self.repository.id,
-                            'pull_request': self.number,
-                            'message':"Merge method set to %s." % explanation
-                        })
+                    self.merge_method = param
+                    ok = True
+                    explanation = next(label for value, label in type(self).merge_method.selection if value == param)
+                    Feedback.create({
+                        'repository': self.repository.id,
+                        'pull_request': self.number,
+                        'message':"Merge method set to %s." % explanation
+                    })
             elif command == 'override':
                 overridable = author.override_rights\
                     .filtered(lambda r: not r.repository_id or (r.repository_id == self.repository))\
@@ -1322,11 +1322,43 @@ class PullRequests(models.Model):
             gh, target, pr_commits, related_prs=related_prs)
 
     def _stage_squash(self, gh, target, commits, related_prs=()):
-        assert len(commits) == 1, "can only squash a single commit"
         msg = self._build_merge_message(self, related_prs=related_prs)
-        commits[0]['commit']['message'] = str(msg)
-        head, mapping = gh.rebase(self.number, target, commits=commits)
-        self.commits_map = json.dumps({**mapping, '': head})
+        authors = {
+            (c['commit']['author']['name'], c['commit']['author']['email'])
+            for c in commits
+        }
+        author = None
+        if len(authors) == 1:
+            name, email = authors.pop()
+            author = {'name': name, 'email': email}
+        for author in authors:
+            msg.headers['Co-Authored-By'] = "%s <%s>" % author
+
+        committers = {
+            (c['commit']['committer']['name'], c['commit']['committer']['email'])
+            for c in commits
+        }
+        committer = None
+        if len(committers) == 1:
+            name, email = committers.pop()
+            committer = {'name': name, 'email': email}
+        # should committers also be added to co-authors?
+
+        original_head = gh.head(target)
+        merge_tree = gh.merge(self.head, target, 'temp merge')['tree']['sha']
+        head = gh('post', 'git/commits', json={
+            'message': str(msg),
+            'tree': merge_tree,
+            'parents': [original_head],
+            'author': author,
+            'committer': committer,
+        }).json()['sha']
+        gh.set_ref(target, head)
+
+        commits_map = {c['sha']: head for c in commits}
+        commits_map[''] = head
+        self.commits_map = json.dumps(commits_map)
+
         return head
 
     def _stage_rebase_ff(self, gh, target, commits, related_prs=()):
@@ -1682,6 +1714,25 @@ class Stagings(models.Model):
     head_ids = fields.Many2many('runbot_merge.commit', compute='_compute_statuses')
 
     statuses = fields.Binary(compute='_compute_statuses')
+    statuses_cache = fields.Text()
+
+    def write(self, vals):
+        # don't allow updating the statuses_cache
+        vals.pop('statuses_cache', None)
+
+        if 'state' not in vals:
+            return super().write(vals)
+
+        previously_pending = self.filtered(lambda s: s.state == 'pending')
+        super(Stagings, self).write(vals)
+        for staging in previously_pending:
+            if staging.state != 'pending':
+                super(Stagings, staging).write({
+                    'statuses_cache': json.dumps(staging.statuses)
+                })
+
+        return True
+
 
     def name_get(self):
         return [
@@ -1706,6 +1757,10 @@ class Stagings(models.Model):
                 if not repo.endswith('^')
             }
             commits = st.head_ids = Commits.search([('sha', 'in', list(heads.keys()))])
+            if st.statuses_cache:
+                st.statuses = json.loads(st.statuses_cache)
+                continue
+
             st.statuses = [
                 (
                     heads[commit.sha],
