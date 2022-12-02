@@ -127,8 +127,20 @@ class ConfigStep(models.Model):
 
             if reviewers:
                 pr = pr_by_commit[commit_link]
-                new_reviewers = sorted(reviewers - set((pr.reviewers or '').split(',')))
+                new_reviewers = reviewers - set((pr.reviewers or '').split(','))
                 if new_reviewers:
+                    skipped_teams = {
+                        ownership.team_id.github_team
+                        for ownership in ownerships
+                        if ownerships.team_id.skip_team_pr
+                        and ownership.team_id.github_team in new_reviewers
+                        and pr.pr_author in ownerships.team_id._get_members_logins()}
+                    if skipped_teams:
+                        new_reviewers = new_reviewers - skipped_teams
+                        build._log('', 'Skipping teams %s since user is author is part of the team' % (sorted(skipped_teams),), log_type='markdown')
+                    new_reviewers = sorted(new_reviewers)
+                    
+
                     build._log('', 'Requesting review for pull request [%s](%s): %s' % (pr.dname, pr.branch_url, ', '.join(new_reviewers)), log_type='markdown')
                     response = pr.remote_id._github('/repos/:owner/:repo/pulls/%s/requested_reviewers' % pr.name, {"team_reviewers":list(new_reviewers)}, ignore_errors=False)
                     pr._compute_branch_infos(response)

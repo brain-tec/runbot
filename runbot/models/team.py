@@ -30,6 +30,8 @@ class RunbotTeam(models.Model):
     module_ownership_ids = fields.One2many('runbot.module.ownership', 'team_id')
     upgrade_exception_ids = fields.One2many('runbot.upgrade.exception', 'team_id', string='Team Upgrade Exceptions')
     github_team = fields.Char('Github team')
+    github_logins = fields.Char('Github logins', help='Additional github logins, prefer adding the login on the member of the team')
+    skip_team_pr = fields.Boolean('Skip team pr', help="Don't add codeowner if pr was created by a member of the team")
 
     @api.model_create_single
     def create(self, values):
@@ -41,13 +43,17 @@ class RunbotTeam(models.Model):
         return super().create(values)
 
     @api.model
-    def _get_team(self, module_name):
+    def _get_team(self, file_path):
         for team in self.env['runbot.team'].search([('path_glob', '!=', False)]):
-            if any([fnmatch(module_name, pattern.strip().strip('-')) for pattern in team.path_glob.split(',') if pattern.strip().startswith('-')]):
+            if any([fnmatch(file_path, pattern.strip().strip('-')) for pattern in team.path_glob.split(',') if pattern.strip().startswith('-')]):
                 continue
-            if any([fnmatch(module_name, pattern.strip()) for pattern in team.path_glob.split(',') if not pattern.strip().startswith('-')]):
+            if any([fnmatch(file_path, pattern.strip()) for pattern in team.path_glob.split(',') if not pattern.strip().startswith('-')]):
                 return team.id
         return False
+
+    def _get_members_logins(self):
+        self.ensure_one()
+        return set(self.github_logins.split(',')) + set(self.user_ids.filtered(lambda user: user.github_login).mapped('github_login'))
 
 class Module(models.Model):
     _name = 'runbot.module'
@@ -55,6 +61,12 @@ class Module(models.Model):
 
     name = fields.Char('Name')
     ownership_ids = fields.One2many('runbot.module.ownership', 'module_id')
+    team_ids = fields.Many2many('runbot.team', string="Teams", compute='_compute_team_ids')
+
+    @api.depends('ownership_ids')
+    def _compute_team_ids(self):
+        for record in self:
+            record.team_ids = record.ownership_ids.team_id
 
 
 class ModuleOwnership(models.Model):
@@ -64,6 +76,9 @@ class ModuleOwnership(models.Model):
     module_id = fields.Many2one('runbot.module', string='Module', required=True, ondelete='cascade')
     team_id = fields.Many2one('runbot.team', string='Team', required=True)
     is_fallback = fields.Boolean('Fallback')
+
+    def name_get(self):
+        return [(record.id, f'{record.module_id.name} -> {record.team_id.name}{" (fallback)" if record.is_fallback else ""}' ) for record in self]
 
 
 class RunbotDashboard(models.Model):
