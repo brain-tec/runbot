@@ -561,6 +561,13 @@ class Repo(models.Model):
         except Exception:
             _logger.exception('Fail to update repo %s', self.name)
 
+    def _get_module(self, file):
+        for addons_path in (self.addons_paths or '').split(','):
+            base_path = f'{self.name}/{addons_path}'
+            if file.startswith(base_path):
+                return file.replace(base_path, '').strip('/').split('/')[0]
+
+
 class RefTime(models.Model):
     _name = 'runbot.repo.reftime'
     _description = "Repo reftime"

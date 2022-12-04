@@ -44,11 +44,23 @@ class RunbotTeam(models.Model):
 
     @api.model
     def _get_team(self, file_path):
-        for team in self.env['runbot.team'].search([('path_glob', '!=', False)]):
+        path = self.file_path.removeprefix('/data/build/')
+        repo_name = path.split('/')[0]
+        module = None
+        for repo in self.env['runbot.repo'].search([('name', '=', repo_name)]):
+            module = repo._get_module(path)
+            if module:
+                break
+        if module:
+            for team in self.sorted(lambda t: not t.is_fallback()):
+                if module in team.module_id.name:
+                    return team
+
+        for team in self:
             if any([fnmatch(file_path, pattern.strip().strip('-')) for pattern in team.path_glob.split(',') if pattern.strip().startswith('-')]):
                 continue
             if any([fnmatch(file_path, pattern.strip()) for pattern in team.path_glob.split(',') if not pattern.strip().startswith('-')]):
-                return team.id
+                return team
         return False
 
     def _get_members_logins(self):

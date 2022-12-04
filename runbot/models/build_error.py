@@ -57,15 +57,21 @@ class BuildError(models.Model):
                 raise ValidationError('Build error test_tags should not be negated')
 
     @api.model_create_single
-    def create(self, vals):
+    def create(self, vals_list):
         cleaners = self.env['runbot.error.regex'].search([('re_type', '=', 'cleaning')])
-        content = vals.get('content')
-        cleaned_content = cleaners.r_sub('%', content)
-        vals.update({'cleaned_content': cleaned_content,
-                     'fingerprint': self._digest(cleaned_content)
-        })
-        if not 'team_id' in vals and 'module_name' in vals:
-            vals.update({'team_id': self.env['runbot.team']._get_team(vals['module_name'])})
+        teams = None
+        repos = None
+        for vals in vals_list:
+            content = vals.get('content')
+            cleaned_content = cleaners.r_sub('%', content)
+            vals.update({'cleaned_content': cleaned_content,
+                        'fingerprint': self._digest(cleaned_content)
+            })
+            if not 'team_id' in vals and 'file_path' in vals:
+                teams = teams or self.env['runbot.team'].search(['|', ('path_glob', '!=', False), ('module_ownership_ids', '!=', False)])
+                team = teams._get_team(vals['file_path'])
+                if team:
+                    vals.update({'team_id': team.id})
         return super().create(vals)
 
     def write(self, vals):

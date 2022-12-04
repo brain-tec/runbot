@@ -23,12 +23,7 @@ class ConfigStep(models.Model):
             else:
                 build._log('', 'No pr for repo %s, skipping' % commit.repo_id.name)
         return pr_by_commit
-    
-    def _get_module(self, repo, file):
-        for addons_path in (repo.addons_paths or '').split(','):
-            base_path = f'{repo.name}/{addons_path}'
-            if file.startswith(base_path):
-                return file.replace(base_path, '').strip('/').split('/')[0]
+
 
     def _codeowners_regexes(self, codeowners, version_id):
         regexes = {}
@@ -51,7 +46,7 @@ class ConfigStep(models.Model):
             if file_reviewers is None:
                 continue
 
-            file_module = self._get_module(repo, file)
+            file_module = repo._get_module(file)
             for ownership in ownerships:
                 if file_module == ownership.module_id.name and not ownership.is_fallback and ownership.team_id.github_team not in file_reviewers:
                     file_reviewers.add(ownership.team_id.github_team)
@@ -132,14 +127,13 @@ class ConfigStep(models.Model):
                     skipped_teams = {
                         ownership.team_id.github_team
                         for ownership in ownerships
-                        if ownerships.team_id.skip_team_pr
+                        if ownership.team_id.skip_team_pr
                         and ownership.team_id.github_team in new_reviewers
                         and pr.pr_author in ownerships.team_id._get_members_logins()}
                     if skipped_teams:
                         new_reviewers = new_reviewers - skipped_teams
                         build._log('', 'Skipping teams %s since user is author is part of the team' % (sorted(skipped_teams),), log_type='markdown')
                     new_reviewers = sorted(new_reviewers)
-                    
 
                     build._log('', 'Requesting review for pull request [%s](%s): %s' % (pr.dname, pr.branch_url, ', '.join(new_reviewers)), log_type='markdown')
                     response = pr.remote_id._github('/repos/:owner/:repo/pulls/%s/requested_reviewers' % pr.name, {"team_reviewers":list(new_reviewers)}, ignore_errors=False)

@@ -8,14 +8,14 @@
             <sheet>
               <group name="team_group">
                 <field name="name"/>
-                <field name="github_team"/>
+                <field name="github_team" widget="github_team"/>
                 <field name="github_logins"/>
                 <field name="skip_team_pr"/>
                 <field name="dashboard_id"/>
                 <field name="path_glob"/>
                 <field name="module_ownership_ids">
                   <tree>
-                    <field name="module_id"/>
+                    <field name="module_id" readonly="1"/>
                     <field name="is_fallback" widget="boolean_toggle"/>
                   </tree>
                 </field>

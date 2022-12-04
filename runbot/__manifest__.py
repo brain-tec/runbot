@@ -62,7 +62,7 @@
 
     'assets': {
         'web.assets_backend': [
-            'runbot/static/src/js/json_field.js',
+            'runbot/static/src/js/fields.js',
         ],
     }
 

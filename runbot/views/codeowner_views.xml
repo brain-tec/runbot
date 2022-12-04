@@ -9,7 +9,7 @@
                     <group>
                         <field name="project_id"/>
                         <field name="team_id"/>
-                        <field name="github_teams"/>
+                        <field name="github_teams" widget="github_team"/>
                         <field name="regex"/>
                         <field name="version_domain" widget="domain" options="{'model': 'runbot.version', 'in_dialog': True, 'operators': ['in','=', '&lt;', '&gt;']}"/>
                     </group>
@@ -31,7 +31,7 @@
                 <field name="team_id"/>
                 <field name="version_domain"/>
                 <field name="regex"/>
-                <field name="github_teams"/>
+                <field name="github_teams" widget="github_team"/>
             </tree>
         </field>
     </record>

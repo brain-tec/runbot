@@ -166,11 +166,10 @@ class TestBuildError(RunbotCase):
         })
 
         self.assertTrue(website_team.dashboard_id.exists())
-
-        self.assertFalse(self.BuildErrorTeam._get_team('odoo/addons/web_studio/tests/test_ui.py'))
-        self.assertFalse(self.BuildErrorTeam._get_team('odoo/addons/website_sale/tests/test_sale_process.py'))
-        self.assertEqual(website_team.id, self.BuildErrorTeam._get_team('odoo/addons/website_crm/tests/test_website_crm'))
-        self.assertEqual(website_team.id, self.BuildErrorTeam._get_team('odoo/addons/website/tests/test_ui'))
+        self.assertFalse(self.BuildErrorTeam._get_team('/data/build/odoo/addons/web_studio/tests/test_ui.py'))
+        self.assertFalse(self.BuildErrorTeam._get_team('/data/build/website_sale/tests/test_sale_process.py'))
+        self.assertEqual(website_team.id, self.BuildErrorTeam._get_team('/data/build/odoo/addons/website_crm/tests/test_website_crm'))
+        self.assertEqual(website_team.id, self.BuildErrorTeam._get_team('/data/build/odoo/addons/website/tests/test_ui'))
 
     def test_dashboard_tile_simple(self):
         self.additionnal_setup()
