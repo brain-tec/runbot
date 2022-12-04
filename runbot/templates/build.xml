@@ -239,6 +239,7 @@
                   </td>
                   <td style="white-space: nowrap; width:1%;">
                     <t t-if="l.level != 'SEPARATOR' and l.type not in ['link', 'markdown']" t-esc="l.type"/>
+                    <span t-if="l.level == 'SEPARATOR' and l.active_step_id.description" class="fa fa-info" t-att-title="l.active_step_id.description"/>
                   </td>
                   <t t-set="message_class" t-value="''"/>
                   <t t-if="subbuild" t-set="message_class">
