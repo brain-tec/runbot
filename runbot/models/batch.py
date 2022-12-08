@@ -162,8 +162,12 @@ class Batch(models.Model):
             _logger.error('No dockerfile found !')
 
         triggers = self.env['runbot.trigger'].search([  # could be optimised for multiple batches. Ormcached method?
+            '|',
+            ('category_id', '=', self.category_id.id),
+            ('category_id', '=', False),
+            '|',
             ('project_id', '=', project.id),
-            ('category_id', '=', self.category_id.id)
+            ('project_id', '=', False),
         ]).filtered(
             lambda t: not t.version_domain or \
             self.bundle_id.version_id.filtered_domain(t.get_version_domain())
@@ -172,6 +176,8 @@ class Batch(models.Model):
         pushed_repo = self.commit_link_ids.mapped('commit_id.repo_id')
         dependency_repos = triggers.mapped('dependency_ids')
         all_repos = triggers.mapped('repo_ids') | dependency_repos
+        if not trigger.project_id:
+            all_repos = pushed_repo or project.repo_ids
         missing_repos = all_repos - pushed_repo
 
         ######################################
