@@ -64,7 +64,7 @@ class Repository(models.Model):
     _name = _description = 'runbot_merge.repository'
     _order = 'sequence, id'
 
-    sequence = fields.Integer(default=50)
+    sequence = fields.Integer(default=50, group_operator=None)
     name = fields.Char(required=True)
     project_id = fields.Many2one('runbot_merge.project', required=True)
     status_ids = fields.One2many('runbot_merge.repository.status', 'repo_id', string="Required Statuses")
@@ -240,7 +240,7 @@ class Branch(models.Model):
     ])
 
     active = fields.Boolean(default=True)
-    sequence = fields.Integer()
+    sequence = fields.Integer(group_operator=None)
 
     def _auto_init(self):
         res = super(Branch, self)._auto_init()
@@ -509,7 +509,7 @@ class PullRequests(models.Model):
         ('error', 'Error'),
     ], default='opened', index=True)
 
-    number = fields.Integer(required=True, index=True)
+    number = fields.Integer(required=True, index=True, group_operator=None)
     author = fields.Many2one('res.partner')
     head = fields.Char(required=True)
     label = fields.Char(
@@ -530,7 +530,7 @@ class PullRequests(models.Model):
 
     reviewed_by = fields.Many2one('res.partner')
     delegates = fields.Many2many('res.partner', help="Delegate reviewers, not intrinsically reviewers but can review this PR")
-    priority = fields.Integer(default=2, index=True)
+    priority = fields.Integer(default=2, index=True, group_operator=None)
 
     overrides = fields.Char(required=True, default='{}')
     statuses = fields.Text(
@@ -1323,35 +1323,37 @@ class PullRequests(models.Model):
 
     def _stage_squash(self, gh, target, commits, related_prs=()):
         msg = self._build_merge_message(self, related_prs=related_prs)
+        authorship = {}
+
         authors = {
             (c['commit']['author']['name'], c['commit']['author']['email'])
             for c in commits
         }
-        author = None
         if len(authors) == 1:
             name, email = authors.pop()
-            author = {'name': name, 'email': email}
-        for author in authors:
-            msg.headers['Co-Authored-By'] = "%s <%s>" % author
+            authorship['author']  = {'name': name, 'email': email}
+        else:
+            msg.headers.extend(sorted(
+                ('Co-Authored-By', "%s <%s>" % author)
+                for author in authors
+            ))
 
         committers = {
             (c['commit']['committer']['name'], c['commit']['committer']['email'])
             for c in commits
         }
-        committer = None
         if len(committers) == 1:
             name, email = committers.pop()
-            committer = {'name': name, 'email': email}
+            authorship['committer'] = {'name': name, 'email': email}
         # should committers also be added to co-authors?
 
         original_head = gh.head(target)
         merge_tree = gh.merge(self.head, target, 'temp merge')['tree']['sha']
         head = gh('post', 'git/commits', json={
+            **authorship,
             'message': str(msg),
             'tree': merge_tree,
             'parents': [original_head],
-            'author': author,
-            'committer': committer,
         }).json()['sha']
         gh.set_ref(target, head)
 
@@ -1503,7 +1505,7 @@ class Tagging(models.Model):
     repository = fields.Many2one('runbot_merge.repository', required=True)
     # store the PR number (not id) as we need a Tagging for PR objects
     # being deleted (retargeted to non-managed branches)
-    pull_request = fields.Integer()
+    pull_request = fields.Integer(group_operator=None)
 
     tags_remove = fields.Char(required=True, default='[]')
     tags_add = fields.Char(required=True, default='[]')
@@ -1570,7 +1572,7 @@ class Feedback(models.Model):
     repository = fields.Many2one('runbot_merge.repository', required=True)
     # store the PR number (not id) as we may want to send feedback to PR
     # objects on non-handled branches
-    pull_request = fields.Integer()
+    pull_request = fields.Integer(group_operator=None)
     message = fields.Char()
     close = fields.Boolean()
     token_field = fields.Selection(
@@ -1829,8 +1831,17 @@ class Stagings(models.Model):
             s.write(vals)
 
     def action_cancel(self):
-        self.cancel("explicitly cancelled by %s", self.env.user.display_name)
-        return { 'type': 'ir.actions.act_window_close' }
+        w = self.env['runbot_merge.stagings.cancel'].create({
+            'staging_id': self.id,
+        })
+        return {
+            'type': 'ir.actions.act_window',
+            'target': 'new',
+            'name': f'Cancel staging {self.id} ({self.target.name})',
+            'view_mode': 'form',
+            'res_model': w._name,
+            'res_id': w.id,
+        }
 
     def cancel(self, reason, *args):
         self = self.filtered('active')
@@ -2177,7 +2188,7 @@ class FetchJob(models.Model):
 
     active = fields.Boolean(default=True)
     repository = fields.Many2one('runbot_merge.repository', required=True)
-    number = fields.Integer(required=True)
+    number = fields.Integer(required=True, group_operator=None)
 
     def _check(self, commit=False):
         """
