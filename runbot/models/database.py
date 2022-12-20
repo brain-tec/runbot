@@ -15,9 +15,10 @@ class Database(models.Model):
         for record in self:
             record.db_suffix = record.name.replace('%s-' % record.build_id.dest, '')
 
-    @api.model_create_single
-    def create(self, values):
-        res = self.search([('name', '=', values['name']), ('build_id', '=', values['build_id'])])
-        if res:
-            return res
-        return super().create(values)
+    @api.model_create_multi
+    def create(self, vals_list):
+        for vals in vals_list:
+            res = self.search([('name', '=', vals['name']), ('build_id', '=', vals['build_id'])])
+            if res:
+                return res
+        return super().create(vals_list)

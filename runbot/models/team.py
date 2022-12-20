@@ -39,14 +39,15 @@ class RunbotTeam(models.Model):
     github_logins = fields.Char('Github logins', help='Additional github logins, prefer adding the login on the member of the team')
     skip_team_pr = fields.Boolean('Skip team pr', help="Don't add codeowner if pr was created by a member of the team")
 
-    @api.model_create_single
-    def create(self, values):
-        if 'dashboard_id' not in values or values['dashboard_id'] == False:
-            dashboard = self.env['runbot.dashboard'].search([('name', '=', values['name'])])
-            if not dashboard:
-                dashboard = dashboard.create({'name': values['name']})
-            values['dashboard_id'] = dashboard.id
-        return super().create(values)
+    @api.model_create_multi
+    def create(self, vals_list):
+        for vals in vals_list:
+            if not vals.get('dashboard_id'):
+                dashboard = self.env['runbot.dashboard'].search([('name', '=', vals['name'])])
+                if not dashboard:
+                    dashboard = dashboard.create({'name': vals['name']})
+                vals['dashboard_id'] = dashboard.id
+        return super().create(vals_list)
 
     @api.model
     def _get_team(self, file_path, repos=None):

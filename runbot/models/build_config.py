@@ -59,9 +59,9 @@ class Config(models.Model):
     group = fields.Many2one('runbot.build.config', 'Configuration group', help="Group of config's and config steps")
     group_name = fields.Char('Group name', related='group.name')
 
-    @api.model_create_single
-    def create(self, values):
-        res = super(Config, self).create(values)
+    @api.model_create_multi
+    def create(self, vals_list):
+        res = super(Config, self).create(vals_list)
         res._check_step_ids_order()
         return res
 
@@ -85,19 +85,21 @@ class Config(models.Model):
         return [ordered_step.step_id for ordered_step in self.step_order_ids.sorted('sequence')]
 
     def _check_step_ids_order(self):
-        install_job = False
-        step_ids = self.step_ids()
-        for step in step_ids:
-            if step.job_type == 'install_odoo':
-                install_job = True
-            if step.job_type == 'run_odoo':
-                if step != step_ids[-1]:
-                    raise UserError('Jobs of type run_odoo should be the last one')
-                if not install_job:
-                    raise UserError('Jobs of type run_odoo should be preceded by a job of type install_odoo')
-        self._check_recustion()
+        for record in self:
+            install_job = False
+            step_ids = record.step_ids()
+            for step in step_ids:
+                if step.job_type == 'install_odoo':
+                    install_job = True
+                if step.job_type == 'run_odoo':
+                    if step != step_ids[-1]:
+                        raise UserError('Jobs of type run_odoo should be the last one')
+                    if not install_job:
+                        raise UserError('Jobs of type run_odoo should be preceded by a job of type install_odoo')
+            record._check_recustion()
 
     def _check_recustion(self, visited=None):
+        self.ensure_one()
         visited = visited or []
         recursion = False
         if self in visited:
@@ -236,10 +238,11 @@ class ConfigStep(models.Model):
         copy._write({'protected': False})
         return copy
 
-    @api.model_create_single
-    def create(self, values):
-        self._check(values)
-        return super(ConfigStep, self).create(values)
+    @api.model_create_multi
+    def create(self, vals_list):
+        for vals in vals_list:
+            self._check(vals)
+        return super(ConfigStep, self).create(vals_list)
 
     def write(self, values):
         self._check(values)
@@ -1141,12 +1144,17 @@ class ConfigStepOrder(models.Model):
     def _onchange_step_id(self):
         self.sequence = self.step_id.default_sequence
 
-    @api.model_create_single
-    def create(self, values):
-        if 'sequence' not in values and values.get('step_id'):
-            values['sequence'] = self.env['runbot.build.config.step'].browse(values.get('step_id')).default_sequence
-        if self.pool._init:  # do not duplicate entry on install
-            existing = self.search([('sequence', '=', values.get('sequence')), ('config_id', '=', values.get('config_id')), ('step_id', '=', values.get('step_id'))])
-            if existing:
-                return
-        return super(ConfigStepOrder, self).create(values)
+    @api.model_create_multi
+    def create(self, vals_list):
+        for vals in vals_list:
+            if 'sequence' not in vals and vals.get('step_id'):
+                vals['sequence'] = self.env['runbot.build.config.step'].browse(vals.get('step_id')).default_sequence
+            if self.pool._init:  # do not duplicate entry on install
+                existing = self.search([
+                    ('sequence', '=', vals.get('sequence')),
+                    ('config_id', '=', vals.get('config_id')),
+                    ('step_id', '=', vals.get('step_id'))
+                ])
+                if existing:
+                    return
+        return super(ConfigStepOrder, self).create(vals_list)
