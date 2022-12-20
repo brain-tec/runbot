@@ -265,7 +265,7 @@ class TestUpgradeFlow(RunbotCase):
 
         with self.assertRaises(UserError):
             self.step_upgrade_server.job_type = 'install_odoo'
-            self.trigger_upgrade_server.flush(['upgrade_step_id'])
+            self.trigger_upgrade_server.flush_record(['upgrade_step_id'])
 
         batch = self.master_bundle._force()
         batch._prepare()

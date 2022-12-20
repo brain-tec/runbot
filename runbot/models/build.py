@@ -341,7 +341,7 @@ class BuildResult(models.Model):
                     raise ValidationError('Local result cannot be set to a less critical level')
         res = super(BuildResult, self).write(values)
         if 'log_counter' in values:  # not 100% usefull but more correct ( see test_ir_logging)
-            self.flush()
+            self.flush_record()
         return res
 
     def _add_child(self, param_values, orphan=False, description=False, additionnal_commit_links=False):
