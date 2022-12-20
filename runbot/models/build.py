@@ -592,7 +592,9 @@ class BuildResult(models.Model):
         return '%s_%s' % (self.dest, self.active_step.name)
 
     def _init_pendings(self, host):
-        for build in self:
+        self.ensure_one()
+        build = self
+        if build:  # only to keep indent
             if build.local_state != 'pending':
                 raise UserError("Build %s is not pending" % build.id)
             if build.host != host.name:
@@ -609,7 +611,7 @@ class BuildResult(models.Model):
             if not build.active_step:
                 build._log('_schedule', 'No job in config, doing nothing')
                 build.local_result = 'warn'
-                continue
+                return
             try:
                 build._log('_schedule', 'Init build environment with config %s ' % build.params_id.config_id.name)
                 os.makedirs(build._path('logs'), exist_ok=True)
@@ -617,8 +619,8 @@ class BuildResult(models.Model):
                 _logger.exception('Failed initiating build %s', build.dest)
                 build._log('_schedule', 'Failed initiating build')
                 build._kill(result='ko')
-                continue
-            build._run_job()
+                return
+            return build._run_job()
 
     def _process_requested_actions(self):
         for build in self:
@@ -931,9 +933,7 @@ class BuildResult(models.Model):
             if result:
                 v['local_result'] = result
             build.write(v)
-            self.env.cr.commit()
             build._github_status()
-            self.invalidate_cache()
 
     def _ask_kill(self, lock=True, message=None):
         # if build remains in same bundle, it's ok like that

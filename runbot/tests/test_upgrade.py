@@ -265,7 +265,7 @@ class TestUpgradeFlow(RunbotCase):
 
         with self.assertRaises(UserError):
             self.step_upgrade_server.job_type = 'install_odoo'
-            self.trigger_upgrade_server.flush_record(['upgrade_step_id'])
+            self.trigger_upgrade_server.flush_recordset(['upgrade_step_id'])
 
         batch = self.master_bundle._force()
         batch._prepare()
@@ -353,8 +353,10 @@ class TestUpgradeFlow(RunbotCase):
             []
         )
         to_version_builds.host = host.name
-        to_version_builds._init_pendings(host)
-        to_version_builds._schedule()
+        for build in to_version_builds:
+            build._init_pendings(host)
+        for build in to_version_builds:
+            build._schedule()
         self.assertEqual(to_version_builds.mapped('local_state'), ['done']*4)
         from_version_builds = to_version_builds.children_ids
         self.assertEqual(
@@ -368,8 +370,10 @@ class TestUpgradeFlow(RunbotCase):
             ['11.0->12.0', 'saas-11.3->12.0', '12.0->13.0', 'saas-12.3->13.0', '13.0->master', 'saas-13.1->master', 'saas-13.2->master', 'saas-13.3->master']
         )
         from_version_builds.host = host.name
-        from_version_builds._init_pendings(host)
-        from_version_builds._schedule()
+        for build in from_version_builds:
+            build._init_pendings(host)
+        for build in from_version_builds:
+            build._schedule()
         self.assertEqual(from_version_builds.mapped('local_state'), ['done']*8)
         db_builds = from_version_builds.children_ids
         self.assertEqual(len(db_builds), 40)
@@ -437,7 +441,7 @@ class TestUpgradeFlow(RunbotCase):
             )
         self.patchers['docker_run'].side_effect = docker_run_restore
         first_build.host = host.name
-        first_build._init_pendings(host)
+        first_build._init_pendings(host)()
         self.patchers['docker_run'].assert_called()
 
         def docker_run_upgrade(cmd, *args, ro_volumes=False, **kwargs):
@@ -458,7 +462,7 @@ class TestUpgradeFlow(RunbotCase):
                     db_name='%s-master-account' % str(first_build.id).zfill(5))
             )
         self.patchers['docker_run'].side_effect = docker_run_upgrade
-        first_build._schedule()
+        first_build._schedule()()
         self.assertEqual(self.patchers['docker_run'].call_count, 2)
 
         # test_build_references

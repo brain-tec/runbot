@@ -403,8 +403,6 @@ class ConfigStep(models.Model):
 
         docker_name = build._get_docker_name()
         build_port = build.port
-        self.env.cr.commit()  # commit before docker run to be 100% sure that db state is consistent with dockers
-        self.invalidate_cache()
         self.env['runbot.runbot']._reload_nginx()
         return dict(cmd=cmd, log_path=log_path, container_name=docker_name, exposed_ports=[build_port, build_port + 1], ro_volumes=exports, env_variables=env_variables)
 

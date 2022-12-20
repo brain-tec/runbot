@@ -57,8 +57,10 @@ class Runbot(models.AbstractModel):
         self._commit()
         for build in self._get_builds_to_init(host):
             build = build.browse(build.id)  # remove preftech ids, manage build one by one
-            build._init_pendings(host)
+            start_docker = build._init_pendings(host)
             self._commit()
+            if start_docker:
+                start_docker()
         self._gc_running(host)
         self._commit()
         self._reload_nginx()

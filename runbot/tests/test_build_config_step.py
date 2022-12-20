@@ -453,19 +453,19 @@ class TestBuildConfigStep(TestBuildConfigStepCommon):
 
         self.patchers['docker_run'].side_effect = docker_run
 
-        config_step._run_step(self.parent_build, 'dev/null/logpath')
+        config_step._run_step(self.parent_build, 'dev/null/logpath')()
 
         assert_db_name = 'custom_build'
         parent_build_params = self.parent_build.params_id.copy({'config_data': {'db_name': 'custom_build'}})
         parent_build = self.parent_build.copy({'params_id': parent_build_params.id})
-        config_step._run_step(parent_build, 'dev/null/logpath')
+        config_step._run_step(parent_build, 'dev/null/logpath')()
 
         config_step = self.ConfigStep.create({
             'name': 'run_test',
             'job_type': 'run_odoo',
             'custom_db_name': 'custom',
         })
-        config_step._run_step(parent_build, 'dev/null/logpath')
+        config_step._run_step(parent_build, 'dev/null/logpath')()
 
         self.assertEqual(call_count, 3)
 
@@ -487,7 +487,7 @@ docker_params = dict(cmd=cmd)
             self.assertIn('-d test_database', run_cmd)
 
         self.patchers['docker_run'].side_effect = docker_run
-        config_step._run_step(self.parent_build, 'dev/null/logpath')
+        config_step._run_step(self.parent_build, 'dev/null/logpath')()
         self.patchers['docker_run'].assert_called_once()
         db = self.env['runbot.database'].search([('name', '=', 'test_database')])
         self.assertEqual(db.build_id, self.parent_build)
@@ -523,7 +523,7 @@ def run():
             call_count += 1
 
         self.patchers['docker_run'].side_effect = docker_run
-        config_step._run_step(self.parent_build, 'dev/null/logpath')
+        config_step._run_step(self.parent_build, 'dev/null/logpath')()
 
         self.assertEqual(call_count, 1)
 
