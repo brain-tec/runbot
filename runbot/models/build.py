@@ -340,8 +340,6 @@ class BuildResult(models.Model):
                 else:
                     raise ValidationError('Local result cannot be set to a less critical level')
         res = super(BuildResult, self).write(values)
-        if 'log_counter' in values:  # not 100% usefull but more correct ( see test_ir_logging)
-            self.flush_record()
         return res
 
     def _add_child(self, param_values, orphan=False, description=False, additionnal_commit_links=False):
@@ -670,7 +668,9 @@ class BuildResult(models.Model):
         icp = self.env['ir.config_parameter'].sudo()
         hosts_by_name = {h.name: h for h in self.env['runbot.host'].search([('name', 'in', self.mapped('host'))])}
         hosts_by_build = {b.id: hosts_by_name[b.host] for b in self}
-        for build in self:
+        self.ensure_one()
+        build = self
+        if build:  # just to keep indent for now
             if build.local_state not in ['testing', 'running']:
                 raise UserError("Build %s is not testing/running: %s" % (build.id, build.local_state))
             if build.local_state == 'testing':
@@ -687,18 +687,18 @@ class BuildResult(models.Model):
                 if build.local_state != 'running' and build.job_time > timeout:
                     build._log('_schedule', '%s time exceeded (%ss)' % (build.active_step.name if build.active_step else "?", build.job_time))
                     build._kill(result='killed')
-                continue
+                return
             elif _docker_state in ('UNKNOWN', 'GHOST') and (build.local_state == 'running' or build.active_step._is_docker_step()):  # todo replace with docker_start
                 docker_time = time.time() - dt2time(build.docker_start or build.job_start)
                 if docker_time < 5:
-                    continue
+                    return
                 elif docker_time < 60:
                     _logger.info('container "%s" seems too take a while to start :%s' % (build.job_time, build._get_docker_name()))
-                    continue
+                    return
                 else:
                     build._log('_schedule', 'Docker with state %s not started after 60 seconds, skipping' % _docker_state, level='ERROR')
             if hosts_by_build[build.id]._fetch_local_logs(build_ids=build.ids):
-                continue  # avoid to make results with remaining logs
+                return # avoid to make results with remaining logs
             # No job running, make result and select nex job
             build_values = {
                 'job_end': now(),
@@ -735,18 +735,19 @@ class BuildResult(models.Model):
                     build.local_result = 'ok'
                     build._logger("No result set, setting ok by default")
                 build._github_status()
-            build._run_job()
-
+            return build._run_job()
 
     def _run_job(self):
         # run job
-        for build in self:
+        self.ensure_one()
+        build = self
+        if build:  # just to keep indent
             if build.local_state != 'done':
                 build._logger('running %s', build.active_step.name)
                 os.makedirs(build._path('logs'), exist_ok=True)
                 os.makedirs(build._path('datadir'), exist_ok=True)
                 try:
-                    build.active_step._run(build)  # run should be on build?
+                    return build.active_step._run(build)  # run should be on build?
                 except Exception as e:
                     if isinstance(e, RunbotException):
                         message = e.args[0]
@@ -784,7 +785,12 @@ class BuildResult(models.Model):
         user = getpass.getuser()
         ro_volumes[f'/home/{user}/.odoorc'] = self._path('.odoorc')
         kwargs.pop('build_dir', False)  # todo check python steps
-        docker_run(cmd=cmd, build_dir=self._path(), ro_volumes=ro_volumes, **kwargs)
+        path = self._path()
+        self.env.flush_all()
+
+        def start_docker():
+            docker_run(cmd=cmd, build_dir=path, ro_volumes=ro_volumes, **kwargs)
+        return start_docker
 
     def _path(self, *l, **kw):
         """Return the repo build path"""

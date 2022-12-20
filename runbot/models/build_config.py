@@ -278,14 +278,14 @@ class ConfigStep(models.Model):
             url = f"{log_url}/runbot/static/build/{build.dest}/logs/{self.name}.txt"
             log_link = f'[@icon-file-text]({url})'
         build._log('run', 'Starting step **%s** from config **%s** %s' % (self.name, build.params_id.config_id.name, log_link), log_type='markdown', level='SEPARATOR')
-        self._run_step(build, log_path)
+        return self._run_step(build, log_path)
 
     def _run_step(self, build, log_path, **kwargs):
         build.log_counter = self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_maxlogs', 100)
         run_method = getattr(self, '_run_%s' % self.job_type)
         docker_params = run_method(build, log_path, **kwargs)
         if docker_params:
-            build._docker_run(**docker_params)
+            return build._docker_run(**docker_params)
 
     def _run_create_build(self, build, log_path):
         count = 0
