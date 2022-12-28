@@ -40,18 +40,23 @@ class Runbot(models.AbstractModel):
         self._gc_testing(host)
         self._commit()
         for build in self._get_builds_with_requested_actions(host):
+            build = build.browse(build.id)  # remove preftech ids, manage build one by one
             build._process_requested_actions()
             self._commit()
         host.process_logs()
         self._commit()
         for build in self._get_builds_to_schedule(host):
+            build = build.browse(build.id)  # remove preftech ids, manage build one by one
             build._schedule()
             self._commit()
         self._assign_pending_builds(host, host.nb_worker, [('build_type', '!=', 'scheduled')])
         self._commit()
-        self._assign_pending_builds(host, host.nb_worker-1 or host.nb_worker)
+        self._assign_pending_builds(host, host.nb_worker - 1 or host.nb_worker)
+        self._commit()
+        self._assign_pending_builds(host, host.nb_worker and host.nb_worker + 1, [('build_type', '=', 'priority')])
         self._commit()
         for build in self._get_builds_to_init(host):
+            build = build.browse(build.id)  # remove preftech ids, manage build one by one
             build._init_pendings(host)
             self._commit()
         self._gc_running(host)
@@ -77,7 +82,6 @@ class Runbot(models.AbstractModel):
         if assignable_slots > 0:
             allocated = self._allocate_builds(host, assignable_slots, domain)
             if allocated:
-
                 _logger.info('Builds %s where allocated to runbot', allocated)
 
     def _get_builds_to_init(self, host):

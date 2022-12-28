@@ -36,6 +36,7 @@ class RunbotTeam(models.Model):
     )
     module_ownership_ids = fields.One2many('runbot.module.ownership', 'team_id')
     codeowner_ids = fields.One2many('runbot.codeowner', 'team_id')
+    trigger_ids = fields.Many2many('runbot.trigger', string='Followed triggers')
     upgrade_exception_ids = fields.One2many('runbot.upgrade.exception', 'team_id', string='Team Upgrade Exceptions')
     github_team = fields.Char('Github team', tracking=True)
     github_logins = fields.Char('Github logins', help='Additional github logins, prefer adding the login on the member of the team', tracking=True)
@@ -73,6 +74,8 @@ class RunbotTeam(models.Model):
                     return ownership.team_id
 
         for team in self:
+            if not team.path_glob:
+                continue
             if any([fnmatch(file_path, pattern.strip().strip('-')) for pattern in team.path_glob.split(',') if pattern.strip().startswith('-')]):
                 continue
             if any([fnmatch(file_path, pattern.strip()) for pattern in team.path_glob.split(',') if not pattern.strip().startswith('-')]):
