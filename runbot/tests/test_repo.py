@@ -410,7 +410,7 @@ class TestIdentityFile(RunbotCase):
         def test_identity_file(self):
             """test that the identity file is used in git command"""
 
-            self.stop_patcher('git_patcher')
+            self.patcher_objects['git_patcher'].stop()
             self.start_patcher('check_output_patcher', 'odoo.addons.runbot.models.repo.subprocess.check_output', new=self.check_output_helper())
 
             self.repo_server.identity_file = 'fake_identity'

@@ -294,7 +294,7 @@ class TestBuildResult(RunbotCase):
         self.assertEqual(child_delta.days, 24)
 
         # test the real _local_cleanup method
-        self.stop_patcher('_local_cleanup_patcher')
+        self.patcher_objects['_local_cleanup_patcher'].stop()
         self.start_patcher('build_local_pgadmin_cursor_patcher', 'odoo.addons.runbot.models.build.local_pgadmin_cursor')
         self.start_patcher('build_path_patcher', 'odoo.addons.runbot.models.build.Path')
         dbname = '%s-foobar' % build.dest
