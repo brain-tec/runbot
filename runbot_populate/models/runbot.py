@@ -19,10 +19,11 @@ class Runbot(models.AbstractModel):
                 ('module', '=', 'runbot_populate'), ('model', '=', 'runbot.bundle')
             ]).mapped('res_id')
         )
-        bundles |= self.env.ref('runbot.bundle_master')
+        project = self.env.ref('runbot.main_project')
+        bundles |= project.master_bundle_id
         bundles = bundles.sorted('is_base', reverse=True)
 
-        assert bundles|self.env.ref('runbot.bundle_dummy') == bundles.search([])
+        assert bundles | project.dummy_bundle_id == bundles.search([])
 
         if bundles.branch_ids:
             # only populate data if no branch are found
