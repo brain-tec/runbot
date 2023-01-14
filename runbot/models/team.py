@@ -41,6 +41,7 @@ class RunbotTeam(models.Model):
     github_team = fields.Char('Github team', tracking=True)
     github_logins = fields.Char('Github logins', help='Additional github logins, prefer adding the login on the member of the team', tracking=True)
     skip_team_pr = fields.Boolean('Skip team pr', help="Don't add codeowner if pr was created by a member of the team", tracking=True)
+    skip_fw_pr = fields.Boolean('Skip forward-port pr', help="Don't add codeowner if pr is a forwardport, even when forced pushed", tracking=True)
 
     @api.model_create_single
     def create(self, values):
@@ -91,10 +92,12 @@ class RunbotTeam(models.Model):
         return team_loggins
 
     def _fetch_members(self):
+        self.check_access_rights('write')
+        self.check_access_rule('write')
         for team in self:
             if team.github_team:
                 url = f"https://api.github.com/orgs/{team.organisation}/teams/{team.github_team}"
-                session = _make_github_session(team.project_id.token)
+                session = _make_github_session(team.project_id.sudo().token)
                 response = session.get(url)
                 if response.status_code != 200:
                     raise UserError(f'Cannot find team {team.github_team}')

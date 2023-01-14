@@ -598,7 +598,10 @@ class ConfigStep(models.Model):
                 end = True
             elif len(target_builds) > 1 and not self.upgrade_flat:
                 for target_build in target_builds:
-                    build._add_child({'upgrade_to_build_id': target_build.id})
+                    build._add_child(
+                        {'upgrade_to_build_id': target_build.id},
+                        description="Testing migration to %s" % target_build.params_id.version_id.name
+                    )
                 end = True
         if end:
             return  # replace this by a python job friendly solution
@@ -619,7 +622,10 @@ class ConfigStep(models.Model):
                     build._log('_run_configure_upgrade', 'No source version found for %s, skipping' % target_version.name, level='INFO')
                 elif not self.upgrade_flat:
                     for from_build in from_builds:
-                        build._add_child({'upgrade_to_build_id': target_build.id, 'upgrade_from_build_id': from_build.id})
+                        build._add_child(
+                            {'upgrade_to_build_id': target_build.id, 'upgrade_from_build_id': from_build.id},
+                            description="Testing migration from %s to %s" % (from_build.params_id.version_id.name, target_build.params_id.version_id.name)
+                        )
                     end = True
 
         if end:
@@ -706,9 +712,8 @@ class ConfigStep(models.Model):
         build = build.with_context(defined_commit_ids=target_commit_ids)
         exports = build._checkout()
 
-        dump_db = build.params_id.dump_db
-
-        migrate_db_name = '%s-%s' % (build.dest, dump_db.db_suffix)  # only ok if restore does not force db_suffix
+        db_suffix = build.params_id.config_data.get('db_name') or build.params_id.dump_db.db_suffix
+        migrate_db_name = '%s-%s' % (build.dest, db_suffix)  # only ok if restore does not force db_suffix
 
         migrate_cmd = build._cmd()
         migrate_cmd += ['-u all']
@@ -925,7 +930,7 @@ class ConfigStep(models.Model):
     def _make_python_results(self, build):
         eval_ctx = self.make_python_ctx(build)
         safe_eval(self.python_result_code.strip(), eval_ctx, mode="exec", nocopy=True)
-        return_value = eval_ctx.get('return_value')
+        return_value = eval_ctx.get('return_value', {})
         # todo check return_value or write in try except. Example: local result setted to wrong value
         if not isinstance(return_value, dict):
             raise RunbotException('python_result_code must set return_value to a dict values on build')

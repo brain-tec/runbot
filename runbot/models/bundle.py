@@ -52,6 +52,10 @@ class Bundle(models.Model):
     file_limit = fields.Integer("File limit")
     disable_codeowner = fields.Boolean("Disable codeowners", tracking=True)
 
+    # extra_info
+    for_next_freeze = fields.Boolean('Should be in next freeze')
+
+
     @api.depends('name')
     def _compute_host_id(self):
         assigned_only = None
@@ -199,10 +203,11 @@ class Bundle(models.Model):
         return res
 
     def write(self, values):
-        super().write(values)
+        res = super().write(values)
         if 'is_base' in values:
             model = self.browse()
             model._get_base_ids.clear_cache(model)
+        return res
 
     def _force(self, category_id=None):
         self.ensure_one()
