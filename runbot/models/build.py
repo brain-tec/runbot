@@ -720,11 +720,17 @@ class BuildResult(models.Model):
             build_values.update(results)
 
             # compute statistics before starting next job
-            build.active_step._make_stats(build)
+            previous_step = build.active_step
+            previous_step._make_stats(build)
 
-            build.active_step.log_end(build)
+            previous_step.log_end(build)
 
             build_values.update(build._next_job_values())  # find next active_step or set to done
+
+            if previous_step.break_on_ko and (build.local_result == 'ko' or build_values['local_result'] == 'ko') and build_values['active_step']:
+                build._log('break_on_ko', 'Build is in failure, stopping')
+                build_values['local_state'] = 'done'
+                build_values['active_step'] = False
 
             ending_build = build.local_state not in ('done', 'running') and build_values.get('local_state') in ('done', 'running')
             if ending_build:
