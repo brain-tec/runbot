@@ -732,6 +732,12 @@ class Repo:
                 raise TimeoutError("No response for repo %s over 60s" % repo_name)
             time.sleep(1)
 
+        # wait for the branches (which should have been copied over) to be visible
+        while not s.get(f'{repo_url}/branches').json():
+            if time.time() > limit:
+                raise TimeoutError("No response for repo %s over 60s" % repo_name)
+            time.sleep(1)
+
         return Repo(s, repo_name, self._repos)
 
     def get_pr(self, number):
@@ -828,6 +834,8 @@ class Comment(tuple):
         self._c = c
         return self
     def __getitem__(self, item):
+        if isinstance(item, int):
+            return super().__getitem__(item)
         return self._c[item]
 
 
