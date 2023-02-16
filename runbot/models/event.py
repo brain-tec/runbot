@@ -4,7 +4,7 @@ import logging
 
 from collections import defaultdict
 
-from ..common import pseudo_markdown
+from ..common import pseudo_markdown, markdown_escape
 from odoo import models, fields, tools, api
 from odoo.exceptions import UserError
 
