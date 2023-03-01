@@ -6,9 +6,12 @@ import logging
 import time
 from collections import Counter
 
+from markupsafe import Markup
+
 from odoo import models, fields, api, Command
-from odoo.exceptions import UserError
 from odoo.addons.runbot_merge.exceptions import FastForwardError
+from odoo.exceptions import UserError
+from odoo.tools import drop_view_if_exists
 
 _logger = logging.getLogger(__name__)
 class FreezeWizard(models.Model):
@@ -25,11 +28,18 @@ class FreezeWizard(models.Model):
         help="Pull requests which must have been merged before the freeze is allowed",
     )
 
-    release_label = fields.Char(
-        string="Find by label",
-        help="Setting a (complete) PR label will automatically find and "
-             "configure the corresponding PRs as release",
-    )
+    pr_state_key = fields.Html(string="Color Key", compute='_compute_state_key', readonly=True)
+    def _compute_state_key(self):
+        s = dict(self.env['runbot_merge.pull_requests']._fields['state'].selection)
+        self.pr_state_key = Markup("""
+            <p>%s</p>
+        """) % Markup(" ").join(
+            Markup('<span class="badge border-0 fucking_color_key_{}">{}</span>').format(v, s[k])
+            for k, v in STATE_COLORMAP.items()
+            if v
+        )
+
+    release_label = fields.Many2one('runbot_merge.freeze.labels', store=False, string="Release label", help="Find release PRs by label")
     release_pr_ids = fields.One2many(
         'runbot_merge.project.freeze.prs', 'wizard_id',
         string="Release pull requests",
@@ -37,11 +47,7 @@ class FreezeWizard(models.Model):
              "one per repository",
     )
 
-    bump_label = fields.Char(
-        string="Find by label",
-        help="Setting a (complete) PR label will automatically find and "
-             "configure the corresponding PRs as bump",
-    )
+    bump_label = fields.Many2one('runbot_merge.freeze.labels', store=False, string="Bump label", help="Find bump PRs by label")
     bump_pr_ids = fields.One2many(
         'runbot_merge.project.freeze.bumps', 'wizard_id',
         string="Bump pull requests",
@@ -60,42 +66,51 @@ class FreezeWizard(models.Model):
             return
 
         prs = self.env['runbot_merge.pull_requests'].search([
-            ('label', '=', self.release_label)
+            ('label', '=', self.release_label.label),
+            ('state', 'not in', ('merged', 'closed')),
         ])
         for release_pr in self.release_pr_ids:
-            release_pr.pr_id = prs.filtered(lambda p: p.repository == release_pr.repository_id)
+            p = prs.filtered(lambda p: p.repository == release_pr.repository_id)
+            if len(p) < 2:
+                release_pr.pr_id = p
 
     @api.onchange('release_pr_ids')
     def _onchange_release_prs(self):
         labels = {p.pr_id.label for p in self.release_pr_ids if p.pr_id}
-        self.release_label = len(labels) == 1 and labels.pop()
+        self.release_label = len(labels) == 1 and self.env['runbot_merge.freeze.labels'].search([
+            ('label', '=', labels.pop()),
+        ])
 
     @api.onchange('bump_label')
     def _onchange_bump_label(self):
-        if not self.release_label:
+        if not self.bump_label:
             return
-
         prs = self.env['runbot_merge.pull_requests'].search([
-            ('label', '=', self.bump_label)
+            ('label', '=', self.bump_label.label),
+            ('state', 'not in', ('merged', 'closed')),
         ])
-
-        commands = [Command.clear()]
-        for pr in prs:
-            current = self.bump_pr_ids.filtered(lambda bump_pr: bump_pr.repository_id == pr.repository)
-            if current:
-                commands.append(Command.update(current.id, {'pr_id': pr.id}))
+        commands = []
+        for bump_pr in self.bump_pr_ids:
+            p = prs.filtered(lambda p: p.repository == bump_pr.repository_id)
+            if len(p) == 1:
+                commands.append(Command.update(bump_pr.id, {'pr_id': p.id}))
             else:
-                commands.append(Command.create({
-                    'repository_id': pr.repository.id,
-                    'pr_id': pr.id
-                }))
+                commands.append(Command.delete(bump_pr.id))
+            prs -= p
 
-        self.write({'bump_pr_ids': commands})
+        commands.extend(
+            Command.create({'repository_id': pr.repository.id, 'pr_id': pr.id})
+            for pr in prs
+        )
+
+        self.bump_pr_ids = commands
 
     @api.onchange('bump_pr_ids')
     def _onchange_bump_prs(self):
         labels = {p.pr_id.label for p in self.bump_pr_ids if p.pr_id}
-        self.bump_label = len(labels) == 1 and labels.pop()
+        self.bump_label = len(labels) == 1 and self.env['runbot_merge.freeze.labels'].search([
+            ('label', '=', labels.pop()),
+        ])
 
     @api.depends('release_pr_ids.pr_id.label', 'required_pr_ids.state')
     def _compute_errors(self):
@@ -314,6 +329,8 @@ class FreezeWizard(models.Model):
             })
         } for pr in all_prs])
 
+        if self.bump_pr_ids:
+            master.active_staging_id.cancel("freeze by %s", self.env.user.login)
         # delete wizard
         self.sudo().unlink()
         # managed to create all the things, show reminder text (or close)
@@ -411,7 +428,7 @@ STATE_COLORMAP = {
     'merged': Colors.Green,
     'error': Colors.Red,
 }
-class PullRequestColor(models.Model):
+class PullRequest(models.Model):
     _inherit = 'runbot_merge.pull_requests'
 
     state_color = fields.Integer(compute='_compute_state_color')
@@ -420,3 +437,38 @@ class PullRequestColor(models.Model):
     def _compute_state_color(self):
         for p in self:
             p.state_color = STATE_COLORMAP[p.state]
+
+class OpenPRLabels(models.Model):
+    """Hacking around using contextual display_name to try and autocomplete
+    labels through PRs doesn't work because the client fucks up the display_name
+    (apparently they're not keyed on the context), therefore the behaviour
+    is inconsistent as the label shown in the autocomplete will result in the
+    PR being shown as its label in the o2m, and the other way around (if a PR
+    is selected directly in the o2m, then the PR's base display_name will be
+    shown in the label lookup field).
+
+    Therefore create a dumbshit view of label records.
+
+    Under the assumption that we'll have less than 256 repositories, the id of a
+    label record is the PR's id shifted as the high 24 bits, and the repo id as
+    the low 8.
+    """
+    _name = 'runbot_merge.freeze.labels'
+    _description = "view representing labels for open PRs so they can autocomplete properly"
+    _rec_name = "label"
+    _auto = False
+
+    def init(self):
+        super().init()
+        drop_view_if_exists(self.env.cr, "runbot_merge_freeze_labels");
+        self.env.cr.execute("""
+        CREATE VIEW runbot_merge_freeze_labels AS (
+            SELECT DISTINCT ON (label)
+                id << 8 | repository as id,
+                label
+            FROM runbot_merge_pull_requests
+            WHERE state != 'merged' AND state != 'closed'
+            ORDER BY label, repository, id
+        )""")
+
+    label = fields.Char()

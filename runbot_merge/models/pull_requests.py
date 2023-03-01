@@ -14,6 +14,7 @@ import pprint
 import re
 import time
 
+from difflib import Differ
 from itertools import takewhile
 
 import requests
@@ -121,22 +122,31 @@ All substitutions are tentatively applied sequentially to the input.
             })
             return
 
-        # if the PR is already loaded, check... if the heads match?
+        # if the PR is already loaded, force sync a few attributes
         pr_id = self.env['runbot_merge.pull_requests'].search([
             ('repository.name', '=', pr['base']['repo']['full_name']),
             ('number', '=', number),
         ])
         if pr_id:
-            # TODO: edited, maybe (requires crafting a 'changes' object)
-            r = controllers.handle_pr(self.env, {
+            sync = controllers.handle_pr(self.env, {
                 'action': 'synchronize',
                 'pull_request': pr,
                 'sender': {'login': self.project_id.github_prefix}
             })
+            edit = controllers.handle_pr(self.env, {
+                'action': 'edited',
+                'pull_request': pr,
+                'changes': {
+                    'base': {'ref': {'from': pr_id.target.name}},
+                    'title': {'from': pr_id.message.splitlines()[0]},
+                    'body': {'from', ''.join(pr_id.message.splitlines(keepends=True)[2:])},
+                },
+                'sender': {'login': self.project_id.github_prefix},
+            })
             feedback({
                 'repository': pr_id.repository.id,
                 'pull_request': number,
-                'message': r,
+                'message': f"{edit}. {sync}.",
             })
             return
 
@@ -1111,10 +1121,6 @@ class PullRequests(models.Model):
                 ('github_login', '=', description['user']['login']),
             ], limit=1)
 
-        message = description['title'].strip()
-        body = description['body'] and description['body'].strip()
-        if body:
-            message += '\n\n' + body
         return self.env['runbot_merge.pull_requests'].create({
             'state': 'opened' if description['state'] == 'open' else 'closed',
             'number': description['number'],
@@ -1124,7 +1130,7 @@ class PullRequests(models.Model):
             'repository': repo.id,
             'head': description['head']['sha'],
             'squash': description['commits'] == 1,
-            'message': message,
+            'message': utils.make_message(description),
             'draft': description['draft'],
         })
 
@@ -1154,7 +1160,7 @@ class PullRequests(models.Model):
                         old_target.display_name, pr.target.display_name,
                     )
                 old_message = prev[pr.id]['message']
-                if pr.merge_method in ('merge', 'rebase-merge') and pr.message != old_message:
+                if pr.merge_method not in (False, 'rebase-ff') and pr.message != old_message:
                     pr.unstage("merge message updated")
         return w
 
@@ -1301,20 +1307,44 @@ class PullRequests(models.Model):
                     f"missing email on {c['sha']} indicates the authorship is "
                     f"most likely incorrect."
                 )
+
+        # sync and signal possibly missed updates
+        invalid = {}
+        diff = []
         pr_head = pr_commits[-1]['sha']
-        if pr_head != self.head:
-            raise exceptions.Mismatch(self.head, pr_head, commits == 1)
+        if self.head != pr_head:
+            invalid['head'] = pr_head
+            diff.append(('Head', self.head, pr_head))
+
+        if self.target.name != prdict['base']['ref']:
+            branch = self.env['runbot_merge.branch'].with_context(active_test=False).search([
+                ('name', '=', prdict['base']['ref']),
+                ('project_id', '=', self.repository.project_id.id),
+            ])
+            if not branch:
+                self.unlink()
+                raise exceptions.Unmergeable(self, "While staging, found this PR had been retargeted to an un-managed branch.")
+            invalid['target'] = branch.id
+            diff.append(('Target branch', self.target.name, branch.name))
+
+        if self.squash != commits == 1:
+            invalid['squash'] = commits == 1
+            diff.append(('Single commit', self.squash, commits == 1))
+
+        msg = utils.make_message(prdict)
+        if self.message != msg:
+            invalid['message'] = msg
+            diff.append(('Message', self.message, msg))
+
+        if invalid:
+            self.write({**invalid, 'state': 'opened', 'head': pr_head})
+            raise exceptions.Mismatch(invalid, diff)
 
         if self.reviewed_by and self.reviewed_by.name == self.reviewed_by.github_login:
             # XXX: find other trigger(s) to sync github name?
             gh_name = gh.user(self.reviewed_by.github_login)['name']
             if gh_name:
                 self.reviewed_by.name = gh_name
-
-        # update pr message in case an update was missed
-        msg = f'{prdict["title"]}\n\n{prdict.get("body") or ""}'.strip()
-        if self.message != msg:
-            self.message = msg
 
         # NOTE: lost merge v merge/copy distinction (head being
         #       a merge commit reused instead of being re-merged)
@@ -2123,6 +2153,7 @@ class Batch(models.Model):
         :return: () or Batch object (if all prs successfully staged)
         """
         new_heads = {}
+        pr_fields = self.env['runbot_merge.pull_requests']._fields
         for pr in prs:
             gh = meta[pr.repository]['gh']
 
@@ -2154,24 +2185,49 @@ class Batch(models.Model):
             except github.MergeError:
                 raise exceptions.MergeError(pr)
             except exceptions.Mismatch as e:
-                old_head, new_head, to_squash = e.args
-                pr.write({
-                    'state': 'opened',
-                    'squash': to_squash,
-                    'head': new_head,
-                })
+                def format_items(items):
+                    """ Bit of a pain in the ass because difflib really wants
+                    all lines to be newline-terminated, but not all values are
+                    actual lines, and also needs to split multiline values.
+                    """
+                    for name, value in items:
+                        yield name + ':\n'
+                        if not value.endswith('\n'):
+                            value += '\n'
+                        yield from value.splitlines(keepends=True)
+                        yield '\n'
+
+                old = list(format_items((n, v) for n, v, _ in e.args[1]))
+                new = list(format_items((n, v) for n, _, v in e.args[1]))
+                diff = ''.join(Differ().compare(old, new))
                 _logger.warning(
-                    "head mismatch on %s: had %s but found %s",
-                    pr.display_name, old_head, new_head
+                    "data mismatch on %s:\n%s",
+                    pr.display_name, diff
                 )
                 self.env['runbot_merge.pull_requests.feedback'].create({
                     'repository': pr.repository.id,
                     'pull_request': pr.number,
-                    'message': "%swe apparently missed an update to this PR "
-                               "and tried to stage it in a state which "
-                               "might not have been approved. PR has been "
-                               "updated to %s, please check and approve or "
-                               "re-approve." % (pr.ping(), new_head)
+                    'message': """\
+{ping}we apparently missed updates to this PR and tried to stage it in a state \
+which might not have been approved.
+
+The properties {mismatch} were not correctly synchronized and have been updated.
+
+<details><summary>differences</summary>
+
+```diff
+{diff}```
+</details>
+
+Note that we are unable to check the properties {unchecked}.
+
+Please check and re-approve.
+""".format(
+    ping=pr.ping(),
+    mismatch=', '.join(pr_fields[f].string for f in e.args[0]),
+    diff=diff,
+    unchecked=', '.join(pr_fields[f].string for f in UNCHECKABLE),
+)
                 })
                 return self.env['runbot_merge.batch']
 
@@ -2182,6 +2238,8 @@ class Batch(models.Model):
             'target': prs[0].target.id,
             'prs': [(4, pr.id, 0) for pr in prs],
         })
+
+UNCHECKABLE = ['merge_method', 'overrides', 'draft']
 
 class FetchJob(models.Model):
     _name = _description = 'runbot_merge.fetch_job'

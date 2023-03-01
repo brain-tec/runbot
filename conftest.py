@@ -721,13 +721,19 @@ class Repo:
         s = self._get_session(token)
 
         r = s.post('https://api.github.com/repos/{}/forks'.format(self.name))
-        assert 200 <= r.status_code < 300, r.json()
+        assert 200 <= r.status_code < 300, r.text
 
         repo_name = r.json()['full_name']
         repo_url = 'https://api.github.com/repos/' + repo_name
         # poll for end of fork
         limit = time.time() + 60
         while s.head(repo_url, timeout=5).status_code != 200:
+            if time.time() > limit:
+                raise TimeoutError("No response for repo %s over 60s" % repo_name)
+            time.sleep(1)
+
+        # wait for the branches (which should have been copied over) to be visible
+        while not s.get(f'{repo_url}/branches').json():
             if time.time() > limit:
                 raise TimeoutError("No response for repo %s over 60s" % repo_name)
             time.sleep(1)
@@ -828,6 +834,8 @@ class Comment(tuple):
         self._c = c
         return self
     def __getitem__(self, item):
+        if isinstance(item, int):
+            return super().__getitem__(item)
         return self._c[item]
 
 
