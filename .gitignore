@@ -1,6 +1,6 @@
 # dotfiles
-.*
-# compiled python files
+
+# compiled py.*thon files
 *.py[co]
 # emacs backup files
 *~

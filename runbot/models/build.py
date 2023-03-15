@@ -158,13 +158,14 @@ class BuildResult(models.Model):
     # state machine
     global_state = fields.Selection(make_selection(state_order), string='Status', default='pending', required=True)
     local_state = fields.Selection(make_selection(state_order), string='Build Status', default='pending', required=True, index=True)
-    global_result = fields.Selection(make_selection(result_order), string='Result')
+    global_result = fields.Selection(make_selection(result_order), string='Result', default='ok')
     local_result = fields.Selection(make_selection(result_order), string='Build Result', default='ok')
     triggered_result = fields.Selection(make_selection(result_order), string='Triggered Result')  # triggered by db only
 
     requested_action = fields.Selection([('wake_up', 'To wake up'), ('deathrow', 'To kill')], string='Action requested', index=True)
     # web infos
-    host = fields.Char('Host')
+    host = fields.Char('Host name')
+    host_id = fields.Many2one('runbot.host', string="Host", compute='_compute_host_id')
     keep_host = fields.Boolean('Keep host on rebuild and for children')
 
     port = fields.Integer('Port')
@@ -208,8 +209,8 @@ class BuildResult(models.Model):
 
     parent_id = fields.Many2one('runbot.build', 'Parent Build', index=True)
     parent_path = fields.Char('Parent path', index=True)
-    top_parent =  fields.Many2one('runbot.build', compute='_compute_top_parent')
-    ancestors =  fields.Many2many('runbot.build', compute='_compute_ancestors')
+    top_parent = fields.Many2one('runbot.build', compute='_compute_top_parent')
+    ancestors = fields.Many2many('runbot.build', compute='_compute_ancestors')
     # should we add a has children stored boolean?
     children_ids = fields.One2many('runbot.build', 'parent_id')
 
@@ -234,6 +235,12 @@ class BuildResult(models.Model):
     def _compute_display_name(self):
         for build in self:
             build.display_name = build.description or build.config_id.name
+
+    @api.depends('host')
+    def _compute_host_id(self):
+        get_host = self.env['runbot.host']._get_host
+        for record in self:
+            record.host_id = get_host(record.host)
 
     @api.depends('params_id.config_id')
     def _compute_log_list(self):  # storing this field because it will be access trhoug repo viewn and keep track of the list at create
@@ -306,8 +313,7 @@ class BuildResult(models.Model):
                 values['global_result'] = values['local_result']
         records = super().create(vals_list)
         if records.parent_id:
-            records.parent_id._update_global_state()
-            records.parent_id._update_global_result()
+            records.parent_id._update_globals()
         return records
 
     def write(self, values):
@@ -328,14 +334,16 @@ class BuildResult(models.Model):
 
         # local result is a special case since we don't only want to avoid an update if the value didn't change, but also if the value is less than the previous one
         # example: don't write 'ok' if result is 'ko' or 'warn'
+        updated = self.browse()
         if 'local_result' in values:
             to_update = self.filtered(lambda b: (self._get_result_score(values['local_result']) > self._get_result_score(b.local_result)))
             updated = minimal_update(to_update, 'local_result')
-            updated._update_global_result()
-        minimal_update(self, 'global_result').parent_id._update_global_result()
-        minimal_update(self, 'local_state')._update_global_state()
-        minimal_update(self, 'global_state').parent_id._update_global_state()
-        minimal_update(self, 'orphan_result').parent_id._update_global_result()
+        updated |= minimal_update(self, 'local_state')
+        updated._update_globals()
+        parents_to_update = minimal_update(self, 'global_result').parent_id
+        parents_to_update |= minimal_update(self, 'global_state').parent_id
+        parents_to_update |= minimal_update(self, 'orphan_result').parent_id
+        parents_to_update._notify_global_update()
 
         if values:
             super().write(values)
@@ -645,7 +653,18 @@ class BuildResult(models.Model):
                         build.write({'requested_action': False, 'local_state': 'done'})
                 continue
 
-    def _update_global_result(self):
+    def _notify_global_update(self):
+        for record in self:
+            if not record.host_id:
+                record._update_globals()
+            else:
+                self.env['runbot.host.message'].create({
+                    'host_id': record.host_id.id,
+                    'build_id': record.id,
+                    'message': 'globals_updated',
+                })
+
+    def _update_globals(self):
         for record in self:
             children = record.children_ids.filtered(lambda child: not child.orphan_result)
             global_result = record.local_result
@@ -657,9 +676,6 @@ class BuildResult(models.Model):
                 if not record.parent_id:
                     record._github_status()  # failfast
 
-    def _update_global_state(self):
-        for record in self:
-            children = record.children_ids.filtered(lambda child: not child.orphan_result)
             init_state = record.global_state
             testing_children = any(child.global_state not in ('running', 'done') for child in children)
             global_state = record.local_state

@@ -221,7 +221,6 @@ class TestBuildConfigStepCreate(TestBuildConfigStepCommon):
         for child_build in self.parent_build.children_ids:
             self.assertFalse(child_build.orphan_result)
             child_build.local_result = 'ko'
-
             self.assertEqual(child_build.global_result, 'ko')
 
 

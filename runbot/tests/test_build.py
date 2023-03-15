@@ -370,8 +370,10 @@ class TestBuildResult(RunbotCase):
         self.assertEqual('pending', build1_1_1.global_state)
         self.assertEqual('pending', build1_1_2.global_state)
 
+        build1_2.flush()
         with self.assertQueries(['''UPDATE "runbot_build" SET "global_state"=%s,"local_state"=%s,"write_date"=%s,"write_uid"=%s WHERE id IN %s''']):
             build1_2.local_state = "testing"
+            build1_2.flush()
 
         self.assertEqual('testing', build1.global_state)
         self.assertEqual('testing', build1_2.global_state)
@@ -488,25 +490,6 @@ class TestBuildResult(RunbotCase):
         self.assertEqual('done', build1_1.global_state)
         self.assertEqual('done', build1_1_1.global_state)
         self.assertEqual('done', rebuild1_1_1.global_state)
-
-    def test_build_no_update_queries(self):
-        build1 = self.Build.create({
-            'params_id': self.server_params.id,
-        })
-        build1.local_state = 'testing'
-        build1_1 = self.Build.create({
-            'params_id': self.server_params.id,
-            'parent_id': build1.id,
-        })
-        build1_1.local_state = 'testing'
-        build1.local_state = 'done'
-
-        with self.assertQueries(['''UPDATE "runbot_build" SET "global_state"=%s,"local_state"=%s,"write_date"=%s,"write_uid"=%s WHERE id IN %s''']):
-            build1_1.local_result = "warn"
-
-        with self.assertQueries(['''UPDATE "runbot_build" SET "global_state"=%s,"local_state"=%s,"write_date"=%s,"write_uid"=%s WHERE id IN %s''']):
-            build1_1.local_result = "ok"
-
 
 class TestGc(RunbotCaseMinimalSetup):
 

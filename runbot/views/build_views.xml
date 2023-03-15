@@ -69,6 +69,7 @@
                         <field name="local_result"/>
                         <field name="global_result"/>
                         <field name="host"/>
+                        <field name="host_id"/>
                         <field name="job_start" groups="base.group_no_one"/>
                         <field name="job_end" groups="base.group_no_one"/>
                         <field name="job_time" groups="base.group_no_one"/>

@@ -44,13 +44,10 @@ class Runbot(models.AbstractModel):
             processed += 1
             build._process_requested_actions()
             self._commit()
-        host.process_logs()
+        host._process_logs()
         self._commit()
-        #for build in host.get_builds([('global_state', 'not in', ('running', 'done'))]).sorted(lambda b: -b.id):
-        #    # processed += 1 # not sure if we should update
-        #    build = build.browse(build.id)  # remove preftech ids, manage build one by one
-
-        #    self._commit()
+        host._process_messages()
+        self._commit()
         for build in host.get_builds([('local_state', 'in', ['testing', 'running'])]) | self._get_builds_to_init(host):
             build = build.browse(build.id)  # remove preftech ids, manage build one by one
             result = build._schedule()
