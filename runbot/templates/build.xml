@@ -264,6 +264,14 @@
                           <t t-set="href" t-value="'https://%s/blob/%s/%s#L%s' % (repo_base_url, commit_hash, path, l.line)"/>
                         </t>
                         <a t-att-href="href" t-att-title="l.func"><t t-esc="l.name"/>:<t t-esc="l.line"/></a>
+                        <t t-if="l.level in ('CRITICAL', 'ERROR', 'WARNING') and not l.with_context(active_test=False).error_id">
+                          &amp;emsp;
+                          <small>
+                            <a groups="runbot.group_runbot_admin" t-attf-href="/runbot/parse_log/{{l.id}}" class="sm" title="Parse this log line to follow this error.">
+                              <i t-attf-class="fa fa-magic"/>
+                            </a>
+                          </small>
+                        </t>
                       </t>
                     </t>
                     <t t-if="l.type == 'link' and len(l.message.split('$$')) == 3">
