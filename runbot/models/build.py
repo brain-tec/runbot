@@ -631,50 +631,51 @@ class BuildResult(models.Model):
             build._kill(result='ko')
 
     def _process_requested_actions(self):
-        for build in self:
-            if build.requested_action == 'deathrow':
-                result = None
-                if build.local_state != 'running' and build.global_result not in ('warn', 'ko'):
-                    result = 'manually_killed'
-                build._kill(result=result)
-                continue
+        self.ensure_one()
+        build = self
+        if build.requested_action == 'deathrow':
+            result = None
+            if build.local_state != 'running' and build.global_result not in ('warn', 'ko'):
+                result = 'manually_killed'
+            build._kill(result=result)
+            return
 
-            if build.requested_action == 'wake_up':
-                if build.local_state != 'done':
-                    build.requested_action = False
-                    build._log('wake_up', 'Impossible to wake-up, build is not done', log_type='markdown', level='SEPARATOR')
-                elif not os.path.exists(build._path()):
-                    build.requested_action = False
-                    build._log('wake_up', 'Impossible to wake-up, **build dir does not exists anymore**', log_type='markdown', level='SEPARATOR')
-                elif docker_state(build._get_docker_name(), build._path()) == 'RUNNING':
-                    build.write({'requested_action': False, 'local_state': 'running'})
-                    build._log('wake_up', 'Waking up failed, **docker is already running**', log_type='markdown', level='SEPARATOR')
-                else:
-                    try:
-                        log_path = build._path('logs', 'wake_up.txt')
+        if build.requested_action == 'wake_up':
+            if build.local_state != 'done':
+                build.requested_action = False
+                build._log('wake_up', 'Impossible to wake-up, build is not done', log_type='markdown', level='SEPARATOR')
+            elif not os.path.exists(build._path()):
+                build.requested_action = False
+                build._log('wake_up', 'Impossible to wake-up, **build dir does not exists anymore**', log_type='markdown', level='SEPARATOR')
+            elif docker_state(build._get_docker_name(), build._path()) == 'RUNNING':
+                build.write({'requested_action': False, 'local_state': 'running'})
+                build._log('wake_up', 'Waking up failed, **docker is already running**', log_type='markdown', level='SEPARATOR')
+            else:
+                try:
+                    log_path = build._path('logs', 'wake_up.txt')
 
-                        port = self._find_port()
-                        build.write({
-                            'job_start': now(),
-                            'job_end': False,
-                            'active_step': False,
-                            'requested_action': False,
-                            'local_state': 'running',
-                            'port': port,
-                        })
-                        build._log('wake_up', '**Waking up build**', log_type='markdown', level='SEPARATOR')
-                        step_ids = build.params_id.config_id.step_ids()
-                        if step_ids and step_ids[-1]._step_state() == 'running':
-                            run_step = step_ids[-1]
-                        else:
-                            run_step = self.env.ref('runbot.runbot_build_config_step_run')
-                        run_step._run_step(build, log_path, force=True)()
-                        # reload_nginx will be triggered by _run_run_odoo
-                    except Exception:
-                        _logger.exception('Failed to wake up build %s', build.dest)
-                        build._log('_schedule', 'Failed waking up build', level='ERROR')
-                        build.write({'requested_action': False, 'local_state': 'done'})
-                continue
+                    port = self._find_port()
+                    build.write({
+                        'job_start': now(),
+                        'job_end': False,
+                        'active_step': False,
+                        'requested_action': False,
+                        'local_state': 'running',
+                        'port': port,
+                    })
+                    build._log('wake_up', '**Waking up build**', log_type='markdown', level='SEPARATOR')
+                    step_ids = build.params_id.config_id.step_ids()
+                    if step_ids and step_ids[-1]._step_state() == 'running':
+                        run_step = step_ids[-1]
+                    else:
+                        run_step = self.env.ref('runbot.runbot_build_config_step_run')
+                    run_step._run_step(build, log_path, force=True)()
+                    # reload_nginx will be triggered by _run_run_odoo
+                except Exception:
+                    _logger.exception('Failed to wake up build %s', build.dest)
+                    build._log('_schedule', 'Failed waking up build', level='ERROR')
+                    build.write({'requested_action': False, 'local_state': 'done'})
+            return
 
     def _schedule(self):
         """schedule the build"""
@@ -905,17 +906,28 @@ class BuildResult(models.Model):
         return sorted(modules_to_install)
 
     def _local_pg_dropdb(self, dbname):
-        with local_pgadmin_cursor() as local_cr:
-            pid_col = 'pid' if local_cr.connection.server_version >= 90200 else 'procpid'
-            query = 'SELECT pg_terminate_backend({}) FROM pg_stat_activity WHERE datname=%s'.format(pid_col)
-            local_cr.execute(query, [dbname])
-            local_cr.execute('DROP DATABASE IF EXISTS "%s"' % dbname)
-        # cleanup filestore
-        datadir = appdirs.user_data_dir()
-        paths = [os.path.join(datadir, pn, 'filestore', dbname) for pn in 'OpenERP Odoo'.split()]
-        cmd = ['rm', '-rf'] + paths
-        _logger.info(' '.join(cmd))
-        subprocess.call(cmd)
+        msg = ''
+        try:
+            with local_pgadmin_cursor() as local_cr:
+                pid_col = 'pid' if local_cr.connection.server_version >= 90200 else 'procpid'
+                query = 'SELECT pg_terminate_backend({}) FROM pg_stat_activity WHERE datname=%s'.format(pid_col)
+                local_cr.execute(query, [dbname])
+                local_cr.execute('DROP DATABASE IF EXISTS "%s"' % dbname)
+            # cleanup filestore
+            datadir = appdirs.user_data_dir()
+            paths = [os.path.join(datadir, pn, 'filestore', dbname) for pn in 'OpenERP Odoo'.split()]
+            cmd = ['rm', '-rf'] + paths
+            _logger.info(' '.join(cmd))
+            subprocess.call(cmd)
+        except psycopg2.errors.InsufficientPrivilege:
+            msg = f"Insuficient priveleges to drop local database '{dbname}'"
+            _logger.warning(msg)
+        except Exception as e:
+            msg = f"Failed to drop local logs database : {dbname} with exception: {e}"
+            _logger.exception(msg)
+        if msg:
+            host_name = self.env['runbot.host']._get_current_name()
+            self.env['runbot.runbot'].warning(f'Host {host_name}: {msg}')
 
     def _local_pg_createdb(self, dbname):
         icp = self.env['ir.config_parameter']
@@ -946,20 +958,18 @@ class BuildResult(models.Model):
 
     def _kill(self, result=None):
         host_name = self.env['runbot.host']._get_current_name()
-        for build in self:
-            if build.host != host_name:
-                continue
-            build._log('kill', 'Kill build %s' % build.dest)
-            docker_stop(build._get_docker_name(), build._path())
-            v = {'local_state': 'done', 'requested_action': False, 'active_step': False, 'job_end': now()}
-            if not build.build_end:
-                v['build_end'] = now()
-            if result:
-                v['local_result'] = result
-            build.write(v)
-            self.env.cr.commit()
-            build._github_status()
-            self.invalidate_cache()
+        self.ensure_one()
+        build = self
+        if build.host != host_name:
+            return
+        build._log('kill', 'Kill build %s' % build.dest)
+        docker_stop(build._get_docker_name(), build._path())
+        v = {'local_state': 'done', 'requested_action': False, 'active_step': False, 'job_end': now()}
+        if not build.build_end:
+            v['build_end'] = now()
+        if result:
+            v['local_result'] = result
+        build.write(v)
 
     def _ask_kill(self, lock=True, message=None):
         # if build remains in same bundle, it's ok like that
@@ -1012,7 +1022,7 @@ class BuildResult(models.Model):
         _logger.error('None of %s found in commit, actual commit content:\n %s' % (commit.repo_id.server_files, os.listdir(commit._source_path())))
         raise RunbotException('No server found in %s' % commit.dname)
 
-    def _cmd(self, python_params=None, py_version=None, local_only=True, sub_command=None):
+    def _cmd(self, python_params=None, py_version=None, local_only=True, sub_command=None, enable_log_db=True):
         """Return a list describing the command to start the build
         """
         self.ensure_one()
@@ -1056,11 +1066,12 @@ class BuildResult(models.Model):
             elif grep(config_path, "--xmlrpc-interface"):
                 command.add_config_tuple("xmlrpc_interface", "127.0.0.1")
 
-        log_db = self.env['ir.config_parameter'].get_param('runbot.logdb_name')
-        if grep(config_path, "log-db"):
-            command.add_config_tuple("log_db", log_db)
-            if grep(config_path, 'log-db-level'):
-                command.add_config_tuple("log_db_level", '25')
+        if enable_log_db:
+            log_db = self.env['ir.config_parameter'].get_param('runbot.logdb_name')
+            if grep(config_path, "log-db"):
+                command.add_config_tuple("log_db", log_db)
+                if grep(config_path, 'log-db-level'):
+                    command.add_config_tuple("log_db_level", '25')
 
         if grep(config_path, "data-dir"):
             datadir = build._path('datadir')

@@ -18,7 +18,7 @@ class BuildError(models.Model):
     _name = "runbot.build.error"
     _description = "Build error"
 
-    _inherit = "mail.thread"
+    _inherit = ['mail.thread', 'mail.activity.mixin']
     _rec_name = "id"
 
     content = fields.Text('Error message', required=True)
@@ -33,11 +33,13 @@ class BuildError(models.Model):
     team_id = fields.Many2one('runbot.team', 'Assigned team', tracking=True)
     fixing_commit = fields.Char('Fixing commit', tracking=True)
     fixing_pr_id = fields.Many2one('runbot.branch', 'Fixing PR', tracking=True, domain=[('is_pr', '=', True)])
+    fixing_pr_alive = fields.Boolean('Fixing PR alive', related='fixing_pr_id.alive')
+    fixing_pr_url = fields.Char('Fixing PR url', related='fixing_pr_id.branch_url')
     build_ids = fields.Many2many('runbot.build', 'runbot_build_error_ids_runbot_build_rel', string='Affected builds')
     bundle_ids = fields.One2many('runbot.bundle', compute='_compute_bundle_ids')
     version_ids = fields.One2many('runbot.version', compute='_compute_version_ids', string='Versions', search='_search_version')
     trigger_ids = fields.Many2many('runbot.trigger', compute='_compute_trigger_ids', string='Triggers', search='_search_trigger_ids')
-    active = fields.Boolean('Error is not fixed', default=True, tracking=True)
+    active = fields.Boolean('Active (not fixed)', default=True, tracking=True)
     tag_ids = fields.Many2many('runbot.build.error.tag', string='Tags')
     build_count = fields.Integer(compute='_compute_build_counts', string='Nb seen', store=True)
     parent_id = fields.Many2one('runbot.build.error', 'Linked to', index=True)
@@ -304,6 +306,8 @@ class ErrorReassignWizard(models.TransientModel):
 
     team_id = fields.Many2one('runbot.team', 'Assigned team')
     responsible_id = fields.Many2one('res.users', 'Assigned fixer')
+    fixing_pr_id = fields.Many2one('runbot.branch', 'Fixing PR', domain=[('is_pr', '=', True)])
+    fixing_commit = fields.Char('Fixing commit')
 
     def submit(self):
         error_ids = self.env['runbot.build.error'].browse(self.env.context.get('active_ids'))
@@ -312,3 +316,7 @@ class ErrorReassignWizard(models.TransientModel):
                 error_ids['team_id'] = self.team_id
             if self.responsible_id:
                 error_ids['responsible'] = self.responsible_id
+            if self.fixing_pr_id:
+                error_ids['fixing_pr_id'] = self.fixing_pr_id
+            if self.fixing_commit:
+                error_ids['fixing_commit'] = self.fixing_commit
