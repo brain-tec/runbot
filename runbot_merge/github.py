@@ -1,12 +1,11 @@
 import collections.abc
 import itertools
-import json as json_
+import json
 import logging
 import logging.handlers
 import os
 import pathlib
 import pprint
-import textwrap
 import unicodedata
 
 import requests
@@ -47,7 +46,7 @@ def _init_gh_logger():
 if odoo.netsvc._logger_init:
     _init_gh_logger()
 
-GH_LOG_PATTERN = """=> {method} /{self._repo}/{path}{qs}{body}
+GH_LOG_PATTERN = """=> {method} /{path}{qs}{body}
 
 <= {r.status_code} {r.reason}
 {headers}
@@ -62,7 +61,7 @@ class GH(object):
         session.headers['Authorization'] = 'token {}'.format(token)
         session.headers['Accept'] = 'application/vnd.github.symmetra-preview+json'
 
-    def _log_gh(self, logger, method, path, params, json, response, level=logging.INFO):
+    def _log_gh(self, logger: logging.Logger, response: requests.Response, level: int = logging.INFO, extra=None):
         """ Logs a pair of request / response to github, to the specified
         logger, at the specified level.
 
@@ -70,11 +69,14 @@ class GH(object):
         bodies, at least in part) so we have as much information as possible
         for post-mortems.
         """
-        body = body2 = ''
+        req = response.request
+        url = werkzeug.urls.url_parse(req.url)
+        if url.netloc is not 'api.github.com':
+            return
 
-        if json:
-            body = '\n' + textwrap.indent('\t', pprint.pformat(json, indent=4))
+        body = '' if not req.body else ('\n' + pprint.pformat(json.loads(req.body.decode()), indent=4))
 
+        body2 = ''
         if response.content:
             if _is_json(response):
                 body2 = pprint.pformat(response.json(), depth=4)
@@ -87,19 +89,15 @@ class GH(object):
                 )
 
         logger.log(level, GH_LOG_PATTERN.format(
-            self=self,
             # requests data
-            method=method, path=path,
-            qs='' if not params else ('?' + werkzeug.urls.url_encode(params)),
-            body=utils.shorten(body.strip(), 400),
+            method=req.method, path=url.path, qs=url.query, body=body,
             # response data
             r=response,
             headers='\n'.join(
                 '\t%s: %s' % (h, v) for h, v in response.headers.items()
             ),
             body2=utils.shorten(body2.strip(), 400)
-        ))
-        return body2
+        ), extra=extra)
 
     def __call__(self, method, path, params=None, json=None, check=True):
         """
@@ -107,21 +105,21 @@ class GH(object):
         """
         path = f'/repos/{self._repo}/{path}'
         r = self._session.request(method, self._url + path, params=params, json=json)
-        self._log_gh(_gh, method, path, params, json, r)
+        self._log_gh(_gh, r)
         if check:
-            if isinstance(check, collections.abc.Mapping):
-                exc = check.get(r.status_code)
-                if exc:
-                    raise exc(r.text)
-            if r.status_code >= 400:
-                body = self._log_gh(
-                    _logger, method, path, params, json, r, level=logging.ERROR)
-                if not isinstance(body, (bytes, str)):
-                    raise requests.HTTPError(
-                        json_.dumps(body, indent=4),
-                        response=r
-                    )
-            r.raise_for_status()
+            try:
+                if isinstance(check, collections.abc.Mapping):
+                    exc = check.get(r.status_code)
+                    if exc:
+                        raise exc(r.text)
+                if r.status_code >= 400:
+                    raise requests.HTTPError(r.text, response=r)
+            except Exception:
+                self._log_gh(_logger, r, level=logging.ERROR, extra={
+                    'github-request-id': r.headers.get('x-github-request-id'),
+                })
+                raise
+
         return r
 
     def user(self, username):
@@ -180,13 +178,17 @@ class GH(object):
         if r.status_code == 200:
             head = r.json()['object']['sha']
         else:
-            head = '<Response [%s]: %s)>' % (r.status_code, r.json() if _is_json(r) else r.text)
+            head = '<Response [%s]: %s)>' % (r.status_code, r.text)
 
         if head == to:
             _logger.debug("Sanity check ref update of %s to %s: ok", branch, to)
             return
 
-        _logger.warning("Sanity check ref update of %s, expected %s got %s", branch, to, head)
+        _logger.warning(
+            "Sanity check ref update of %s, expected %s got %s (response-id %s)",
+            branch, to, head,
+            r.headers.get('x-github-request-id')
+        )
         return head
 
     def fast_forward(self, branch, sha):
@@ -273,7 +275,7 @@ class GH(object):
         try:
             r = r.json()
         except Exception:
-            raise MergeError("Got non-JSON reponse from github: %s %s (%s)" % (r.status_code, r.reason, r.text))
+            raise MergeError("got non-JSON reponse from github: %s %s (%s)" % (r.status_code, r.reason, r.text))
         _logger.debug(
             "merge(%s, %s (%s), %s) -> %s",
             self._repo, dest, r['parents'][0]['sha'],
@@ -295,10 +297,17 @@ class GH(object):
         logger.debug("rebasing %s, %s on %s (reset=%s, commits=%s)",
                      self._repo, pr, dest, reset, len(commits))
 
-        assert commits, "can't rebase a PR with no commits"
+        if not commits:
+            raise MergeError("PR has no commits")
         prev = original_head
         for original in commits:
-            assert len(original['parents']) == 1, "can't rebase commits with more than one parent"
+            if len(original['parents']) != 1:
+                raise MergeError(
+                    "commits with multiple parents ({sha}) can not be rebased, "
+                    "either fix the branch to remove merges or merge without "
+                    "rebasing".format_map(
+                    original
+                ))
             tmp_msg = 'temp rebasing PR %s (%s)' % (pr, original['sha'])
             merged = self.merge(original['sha'], dest, tmp_msg)
 
@@ -307,9 +316,12 @@ class GH(object):
             # expect (either original_head or the previously merged commit)
             [base_commit] = (parent['sha'] for parent in merged['parents']
                              if parent['sha'] != original['sha'])
-            assert prev == base_commit,\
-                "Inconsistent view of %s between head (%s) and merge (%s)" % (
-                    dest, prev, base_commit,
+            if prev != base_commit:
+                raise MergeError(
+                    f"Inconsistent view of branch {dest} while rebasing "
+                    f"PR {pr} expected commit {prev} but the other parent of "
+                    f"merge commit {merged['sha']} is {base_commit}.\n\n"
+                    f"The branch may be getting concurrently modified."
                 )
             prev = merged['sha']
             original['new_tree'] = merged['tree']['sha']

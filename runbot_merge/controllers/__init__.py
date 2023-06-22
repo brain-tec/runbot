@@ -3,6 +3,7 @@ import hmac
 import logging
 import json
 
+import sentry_sdk
 import werkzeug.exceptions
 
 from odoo.http import Controller, request, route
@@ -18,6 +19,13 @@ class MergebotController(Controller):
     def index(self):
         req = request.httprequest
         event = req.headers['X-Github-Event']
+        with sentry_sdk.configure_scope() as scope:
+            if scope.transaction:
+                # only in 1.8.0 (or at least 1.7.2
+                if hasattr(scope, 'set_transaction_name'):
+                    scope.set_transaction_name(f"webhook {event}")
+                else: # but our servers use 1.4.3
+                    scope.transaction = f"webhook {event}"
 
         github._gh.info(self._format(req))
 
@@ -39,6 +47,7 @@ class MergebotController(Controller):
                              req.headers.get('X-Hub-Signature'))
                 return werkzeug.exceptions.Forbidden()
 
+        sentry_sdk.set_context('webhook', request.jsonrequest)
         return c(env, request.jsonrequest)
 
     def _format(self, request):
@@ -143,18 +152,26 @@ def handle_pr(env, event):
 
     message = None
     if not branch:
-        message = f"This PR targets the un-managed branch {r}:{b}, it needs to be retargeted before it can be merged."
+        message = env.ref('runbot_merge.handle.branch.unmanaged')._format(
+            repository=r,
+            branch=b,
+            event=event,
+        )
         _logger.info("Ignoring event %s on PR %s#%d for un-managed branch %s",
                      event['action'], r, pr['number'], b)
     elif not branch.active:
-        message = f"This PR targets the disabled branch {r}:{b}, it needs to be retargeted before it can be merged."
+        message = env.ref('runbot_merge.handle.branch.inactive')._format(
+            repository=r,
+            branch=b,
+            event=event,
+        )
     if message and event['action'] not in ('synchronize', 'closed'):
         feedback(message=message)
 
     if not branch:
         return "Not set up to care about {}:{}".format(r, b)
 
-    headers = request.httprequest.headers if request.httprequest else {}
+    headers = request.httprequest.headers if request else {}
     _logger.info(
         "%s: %s#%s (%s) (by %s, delivery %s by %s)",
         event['action'],
@@ -227,20 +244,20 @@ def handle_pr(env, event):
                 oldstate,
             )
             return 'Closed {}'.format(pr_obj.display_name)
-        else:
-            _logger.warning(
-                '%s tried to close %s (state=%s)',
-                event['sender']['login'],
-                pr_obj.display_name,
-                oldstate,
-            )
-            return 'Ignored: could not lock rows (probably being merged)'
+
+        _logger.info(
+            '%s tried to close %s (state=%s) but locking failed',
+            event['sender']['login'],
+            pr_obj.display_name,
+            oldstate,
+        )
+        return 'Ignored: could not lock rows (probably being merged)'
 
     if event['action'] == 'reopened' :
         if pr_obj.state == 'merged':
             feedback(
                 close=True,
-                message="@%s ya silly goose you can't reopen a merged PR." % event['sender']['login']
+                message=env.ref('runbot_merge.handle.pr.merged')._format(event=event),
             )
 
         if pr_obj.state == 'closed':

@@ -1,6 +1,8 @@
 import logging
 import re
 
+import sentry_sdk
+
 from odoo import models, fields
 
 _logger = logging.getLogger(__name__)
@@ -46,10 +48,11 @@ class Project(models.Model):
     freeze_reminder = fields.Text()
 
     def _check_stagings(self, commit=False):
-        for branch in self.search([]).mapped('branch_ids').filtered('active'):
+        # check branches with an active staging
+        for branch in self.env['runbot_merge.branch']\
+                .with_context(active_test=False)\
+                .search([('active_staging_id', '!=', False)]):
             staging = branch.active_staging_id
-            if not staging:
-                continue
             try:
                 with self.env.cr.savepoint():
                     staging.check_status()
@@ -61,16 +64,22 @@ class Project(models.Model):
                     self.env.cr.commit()
 
     def _create_stagings(self, commit=False):
-        for branch in self.search([]).mapped('branch_ids').filtered('active'):
-            if not branch.active_staging_id:
-                try:
-                    with self.env.cr.savepoint():
-                        branch.try_staging()
-                except Exception:
-                    _logger.exception("Failed to create staging for branch %r", branch.name)
-                else:
-                    if commit:
-                        self.env.cr.commit()
+        # look up branches which can be staged on and have no active staging
+        for branch in self.env['runbot_merge.branch'].search([
+            ('active_staging_id', '=', False),
+            ('active', '=', True),
+            ('staging_enabled', '=', True),
+        ]):
+            try:
+                with self.env.cr.savepoint(), \
+                    sentry_sdk.start_span(description=f'create staging {branch.name}') as span:
+                    span.set_tag('branch', branch.name)
+                    branch.try_staging()
+            except Exception:
+                _logger.exception("Failed to create staging for branch %r", branch.name)
+            else:
+                if commit:
+                    self.env.cr.commit()
 
     def _find_commands(self, comment):
         return re.findall(

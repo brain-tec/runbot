@@ -16,7 +16,7 @@ def test_conflict(env, config, make_repo, users):
     project = env['runbot_merge.project'].search([])
     project.write({
         'branch_ids': [
-            (0, 0, {'name': 'd', 'sequence': 40, 'fp_target': True})
+            (0, 0, {'name': 'd', 'sequence': 40})
         ]
     })
 
@@ -316,11 +316,11 @@ def test_multiple_commits_different_authorship(env, config, make_repo, users, ro
     c = prod.commit(pr2_id.head)
     assert len(c.parents) == 1
     get = itemgetter('name', 'email')
-    rm = rolemap['user']
-    assert get(c.author) == (rm['login'], ''), \
+    bot = pr_id.repository.project_id.fp_github_name
+    assert get(c.author) == (bot, ''), \
         "In a multi-author PR, the squashed conflict commit should have the " \
         "author set to the bot but an empty email"
-    assert get(c.committer) == (rm['login'], '')
+    assert get(c.committer) == (bot, '')
 
     assert re.match(r'''<<<\x3c<<< HEAD
 b

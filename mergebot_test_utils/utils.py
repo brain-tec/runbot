@@ -73,10 +73,12 @@ def make_basic(env, config, make_repo, *, reponame='proj', project_name='myproje
             'github_token': config['github']['token'],
             'github_prefix': 'hansen',
             'fp_github_token': config['github']['token'],
+            'fp_github_name': 'herbert',
+            'fp_github_email': 'hb@example.com',
             'branch_ids': [
-                (0, 0, {'name': 'a', 'sequence': 100, 'fp_target': True}),
-                (0, 0, {'name': 'b', 'sequence': 80, 'fp_target': True}),
-                (0, 0, {'name': 'c', 'sequence': 60, 'fp_target': True}),
+                (0, 0, {'name': 'a', 'sequence': 100}),
+                (0, 0, {'name': 'b', 'sequence': 80}),
+                (0, 0, {'name': 'c', 'sequence': 60}),
             ],
         })
 
