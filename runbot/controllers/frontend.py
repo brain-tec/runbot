@@ -596,3 +596,18 @@ class Runbot(Controller):
         }
 
         return request.render("runbot.load_info", context)
+
+    @route([
+        '/runbot/run/<build_id>',
+        '/runbot/run/<build_id>/<db_suffix>',
+    ], type='http', auth="public", website=True, sitemap=False)
+    def access_running(self, build_id, db_suffix=None, **kwargs):
+        build = request.env['runbot.build'].browse(int(build_id)).exists()
+        if db_suffix is None:
+            db_suffix = build.mapped('database_ids')[0].db_suffix
+        if request.env.user._is_internal():
+            token, token_info = build._get_run_token()
+            db_suffix = f'{db_suffix}-{token}-{token_info}'
+        redirect = f'http://{build.dest}-{db_suffix}.{build.host}'
+        _logger.info('Redirecting to %s', redirect)
+        return werkzeug.utils.redirect(redirect)
