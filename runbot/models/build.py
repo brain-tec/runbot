@@ -517,7 +517,6 @@ class BuildResult(models.Model):
         ignored = set()
         icp = self.env['ir.config_parameter']
         hide_in_logs = icp.get_param('runbot.runbot_db_template', default='template0')
-        full_gc_days = int(icp.get_param('runbot.full_gc_days', default=365))
 
         for dest in dest_list:
             build = self._build_from_dest(dest)
@@ -536,9 +535,8 @@ class BuildResult(models.Model):
         for build in existing:
             if build.gc_date < fields.datetime.now():
                 if build.local_state == 'done':
-                    full = build.gc_date + datetime.timedelta(days=(full_gc_days)) < fields.datetime.now()
                     for db in dest_by_builds_ids[build.id]:
-                        yield (db, full)
+                        yield db
                 elif build.local_state != 'running':
                     _logger.warning('db (%s) not deleted because state is not done', " ".join(dest_by_builds_ids[build.id]))
 
@@ -556,7 +554,7 @@ class BuildResult(models.Model):
                 for dest in dest_list:
                     build = self._build_from_dest(dest)
                     if build and build in self:
-                        yield (dest, full)
+                        yield dest
                     elif not build:
                         _logger.info('%s (%s) skipped because not dest format', label, dest)
             _filter = filter_ids
@@ -566,36 +564,45 @@ class BuildResult(models.Model):
         log_db = self.env['ir.config_parameter'].get_param('runbot.logdb_name')
         existing_db = [db for db in list_local_dbs(additionnal_conditions=additionnal_conditions) if db != log_db]
 
-        for db, _ in _filter(dest_list=existing_db, label='db'):
+        for db in _filter(dest_list=existing_db, label='db'):
             self._logger('Removing database')
             self._local_pg_dropdb(db)
 
         builds_dir = Path(self.env['runbot.runbot']._root()) / 'build'
-
-        if force is True:
-            dests = [(build.dest, full) for build in self]
+        if force:
+            dest_list = [build.dest for build in self]
         else:
-            dests = _filter(dest_list=(p.name for p in builds_dir.iterdir()), label='workspace')
+            dest_list = (p.name for p in builds_dir.iterdir())
 
-        for dest, full in dests:
+        icp = self.env['ir.config_parameter']
+        full_gc_days = int(icp.get_param('runbot.full_gc_days', default=365))
+        full_gc_secondes = full_gc_days * 24 * 60 * 60
+        now = time.time()
+
+        candidate_for_partial_gc = []
+        for dest in dest_list:
             build_dir = Path(builds_dir) / dest
-            if full:
-                _logger.info('Removing build dir "%s"', dest)
-                shutil.rmtree(build_dir, ignore_errors=True)
-                continue
             gcstamp = build_dir / '.gcstamp'
-            if gcstamp.exists():
-                continue
-            for bdir_file in build_dir.iterdir():
-                if bdir_file.is_dir() and bdir_file.name not in ('logs', 'tests'):
-                    shutil.rmtree(bdir_file)
-                elif bdir_file.name == 'logs':
-                    for log_file_path in bdir_file.iterdir():
-                        if log_file_path.is_dir():
-                            shutil.rmtree(log_file_path)
-                        elif log_file_path.name in ('run.txt', 'wake_up.txt') or not log_file_path.name.endswith('.txt'):
-                            log_file_path.unlink()
-                gcstamp.write_text(f'gc date: {datetime.datetime.now()}')
+            try:
+                if (force and full) or gcstamp.stat().st_ctime + full_gc_secondes < now:
+                    _logger.info('Removing build dir "%s"', dest)
+                    shutil.rmtree(build_dir, ignore_errors=True)
+                    continue
+            except(FileNotFoundError):
+                candidate_for_partial_gc.append(dest)
+        if candidate_for_partial_gc:
+            for dest in _filter(candidate_for_partial_gc, label='workspace'):
+                build_dir = Path(builds_dir) / dest
+                for bdir_file in build_dir.iterdir():
+                    if bdir_file.is_dir() and bdir_file.name not in ('logs', 'tests'):
+                        shutil.rmtree(bdir_file)
+                    elif bdir_file.name == 'logs':
+                        for log_file_path in bdir_file.iterdir():
+                            if log_file_path.is_dir():
+                                shutil.rmtree(log_file_path)
+                            elif log_file_path.name in ('run.txt', 'wake_up.txt') or not log_file_path.name.endswith('.txt'):
+                                log_file_path.unlink()
+                    gcstamp.write_text(f'gc date: {datetime.datetime.now()}')
 
     def _find_port(self):
         # currently used port
@@ -918,23 +925,12 @@ class BuildResult(models.Model):
         msg = ''
         try:
             with local_pgadmin_cursor() as local_cr:
-                pid_col = 'pid' if local_cr.connection.server_version >= 90200 else 'procpid'
-                query = 'SELECT pg_terminate_backend({}) FROM pg_stat_activity WHERE datname=%s'.format(pid_col)
+                query = 'SELECT pg_terminate_backend({}) FROM pg_stat_activity WHERE datname=pid'
                 local_cr.execute(query, [dbname])
                 local_cr.execute('DROP DATABASE IF EXISTS "%s"' % dbname)
-            # cleanup filestore
-            datadir = appdirs.user_data_dir()
-            paths = [os.path.join(datadir, pn, 'filestore', dbname) for pn in 'OpenERP Odoo'.split()]
-            cmd = ['rm', '-rf'] + paths
-            _logger.info(' '.join(cmd))
-            subprocess.call(cmd)
-        except psycopg2.errors.InsufficientPrivilege:
-            msg = f"Insuficient priveleges to drop local database '{dbname}'"
-            _logger.warning(msg)
         except Exception as e:
             msg = f"Failed to drop local logs database : {dbname} with exception: {e}"
             _logger.exception(msg)
-        if msg:
             host_name = self.env['runbot.host']._get_current_name()
             self.env['runbot.runbot'].warning(f'Host {host_name}: {msg}')
 
