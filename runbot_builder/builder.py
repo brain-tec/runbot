@@ -23,6 +23,7 @@ class BuilderClient(RunbotClient):
         self.last_docker_update = None
 
     def loop_turn(self):
+        self.env['runbot.runbot']._start_docker_registry(self.host)
         last_docker_update = max(self.env['runbot.dockerfile'].search([('to_build', '=', True)]).mapped('write_date'))
         if self.count == 1 or self.last_docker_update != last_docker_update:
             self.host._docker_build()
