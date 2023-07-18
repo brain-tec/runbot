@@ -72,7 +72,7 @@
         <t t-call="website.layout">
             <div id="wrap"><div class="container-fluid">
                 <t t-call="runbot_merge.alerts"/>
-                <section t-foreach="projects.with_context(active_test=False)" t-as="project" class="row">
+                <section t-foreach="projects" t-as="project" class="row">
                     <h1 class="col-md-12"><t t-esc="project.name"/></h1>
                     <div class="col-md-12">
                         key:
@@ -154,7 +154,7 @@
     <template id="stagings" name="mergebot branch stagings">
         <t t-set="repo_statuses" t-value="branch.project_id.repo_ids.having_branch(branch).status_ids"/>
         <ul class="list-unstyled stagings">
-            <t t-foreach="branch.env['runbot_merge.stagings'].search([('target', '=', branch.id)], order='staged_at desc', limit=6)" t-as="staging">
+            <t t-foreach="stagings_map[branch]" t-as="staging">
                 <t t-set="success" t-value="staging.state == 'success'"/>
                 <t t-set="failure" t-value="staging.state == 'failure'"/>
                 <t t-set="pending" t-value="staging.active and (not staging.state or staging.state == 'pending')"/>
@@ -199,6 +199,18 @@
                 <section class="row">
                     <h1 class="col-md-12"><t t-esc="branch.project_id.name"/>: <t t-esc="branch.name"/></h1>
                 </section>
+                <form method="get">
+                    <label for="until">Staged before:</label>
+                    <input type="datetime-local" name="until" t-att-value="until"/>
+                    (UTC)
+                    <label for="state">State:</label>
+                    <select name="state">
+                        <option t-att-selected="'selected' if not state else None"/>
+                        <option t-att-selected="'selected' if state == 'success' else None" value="success">Success</option>
+                        <option t-att-selected="'selected' if state == 'failure' else None" value="failure">Failure</option>
+                    </select>
+                    <button type="submit">Apply</button>
+                </form>
                 <table>
                     <t t-foreach="stagings" t-as="staging">
                         <t t-set="success"
@@ -270,7 +282,7 @@
                     </t>
                 </table>
                 <t t-if="next">
-                    <a t-attf-href="/runbot_merge/{{branch.id}}?until={{next}}">
+                    <a t-attf-href="/runbot_merge/{{branch.id}}?until={{next}}&amp;state={{state}}">
                         Next >
                     </a>
                 </t>

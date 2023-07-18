@@ -527,7 +527,7 @@ class PullRequests(models.Model):
     ], default='opened', index=True)
 
     number = fields.Integer(required=True, index=True, group_operator=None)
-    author = fields.Many2one('res.partner')
+    author = fields.Many2one('res.partner', index=True)
     head = fields.Char(required=True)
     label = fields.Char(
         required=True, index=True,
@@ -545,7 +545,7 @@ class PullRequests(models.Model):
     ], default=False)
     method_warned = fields.Boolean(default=False)
 
-    reviewed_by = fields.Many2one('res.partner')
+    reviewed_by = fields.Many2one('res.partner', index=True)
     delegates = fields.Many2many('res.partner', help="Delegate reviewers, not intrinsically reviewers but can review this PR")
     priority = fields.Integer(default=2, index=True, group_operator=None)
 
@@ -1758,13 +1758,14 @@ class Stagings(models.Model):
         'runbot_merge.batch', 'staging_id',
         context={'active_test': False},
     )
+    pr_ids = fields.One2many('runbot_merge.pull_requests', compute='_compute_prs')
     state = fields.Selection([
         ('success', 'Success'),
         ('failure', 'Failure'),
         ('pending', 'Pending'),
         ('cancelled', "Cancelled"),
         ('ff_failed', "Fast forward failed")
-    ], default='pending')
+    ], default='pending', index=True)
     active = fields.Boolean(default=True)
 
     staged_at = fields.Datetime(default=fields.Datetime.now, index=True)
@@ -1813,12 +1814,25 @@ class Stagings(models.Model):
         (repo, context, state, url)
         """
         Commits = self.env['runbot_merge.commit']
+        heads = {
+            head: repo
+            for st in self
+            for repo, head in json.loads(st.heads).items()
+            if not repo.endswith('^')
+        }
+        all_heads = Commits.search([('sha', 'in', list(heads))])
+        commits_map = {commit.sha: commit.id for commit in all_heads}
+
         for st in self:
-            heads = {
-                head: repo for repo, head in json.loads(st.heads).items()
-                if not repo.endswith('^')
-            }
-            commits = st.head_ids = Commits.search([('sha', 'in', list(heads.keys()))])
+            commits = st.head_ids = Commits._browse(
+                self.env,
+                tuple(
+                    commits_map[h]
+                    for repo, h in json.loads(st.heads).items()
+                    if not repo.endswith('^')
+                ),
+                all_heads._prefetch_ids
+            )
             if st.statuses_cache:
                 st.statuses = json.loads(st.statuses_cache)
                 continue
@@ -1845,6 +1859,11 @@ class Stagings(models.Model):
                   fields.Datetime.from_string(st.staged_at)
                 + datetime.timedelta(minutes=st.target.project_id.ci_timeout)
             )
+
+    @api.depends('batch_ids.prs')
+    def _compute_prs(self):
+        for staging in self:
+            staging.pr_ids = staging.batch_ids.prs
 
     def _validate(self):
         Commits = self.env['runbot_merge.commit']
