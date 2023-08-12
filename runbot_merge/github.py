@@ -6,6 +6,7 @@ import logging.handlers
 import os
 import pathlib
 import pprint
+import time
 import unicodedata
 
 import requests
@@ -46,7 +47,7 @@ def _init_gh_logger():
 if odoo.netsvc._logger_init:
     _init_gh_logger()
 
-GH_LOG_PATTERN = """=> {method} /{path}{qs}{body}
+GH_LOG_PATTERN = """=> {method} {path}{qs}{body}
 
 <= {r.status_code} {r.reason}
 {headers}
@@ -57,6 +58,7 @@ class GH(object):
     def __init__(self, token, repo):
         self._url = 'https://api.github.com'
         self._repo = repo
+        self._last_update = 0
         session = self._session = requests.Session()
         session.headers['Authorization'] = 'token {}'.format(token)
         session.headers['Accept'] = 'application/vnd.github.symmetra-preview+json'
@@ -71,7 +73,7 @@ class GH(object):
         """
         req = response.request
         url = werkzeug.urls.url_parse(req.url)
-        if url.netloc is not 'api.github.com':
+        if url.netloc != 'api.github.com':
             return
 
         body = '' if not req.body else ('\n' + pprint.pformat(json.loads(req.body.decode()), indent=4))
@@ -103,8 +105,16 @@ class GH(object):
         """
         :type check: bool | dict[int:Exception]
         """
+        if method.casefold() != 'get':
+            to_sleep = 1. - (time.time() - self._last_update)
+            if to_sleep > 0:
+                time.sleep(to_sleep)
+
         path = f'/repos/{self._repo}/{path}'
         r = self._session.request(method, self._url + path, params=params, json=json)
+        if method.casefold() != 'get':
+            self._last_update = time.time() + int(r.headers.get('Retry-After', 0))
+
         self._log_gh(_gh, r)
         if check:
             try:
@@ -222,7 +232,7 @@ class GH(object):
 
         status0 = r.status_code
         _logger.debug(
-            'ref_set(%s, %s, %s -> %s (%s)',
+            'set_ref(%s, %s, %s -> %s (%s)',
             self._repo, branch, sha, status0,
             'OK' if status0 == 200 else r.text or r.reason
         )

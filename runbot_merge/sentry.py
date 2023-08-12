@@ -9,7 +9,7 @@ from odoo import http
 from odoo.addons.base.models.ir_cron import ir_cron
 from odoo.http import WebRequest
 
-from .exceptions import FastForwardError, Mismatch, MergeError, Unmergeable
+from .exceptions import FastForwardError, MergeError, Unmergeable
 
 
 def delegate(self, attr):
@@ -35,7 +35,8 @@ def enable_sentry():
 def setup_sentry(dsn):
     sentry_sdk.init(
         dsn,
-        traces_sample_rate=1.0,
+        auto_session_tracking=False,
+        # traces_sample_rate=1.0,
         integrations=[
             # note: if the colorformatter is enabled, sentry gets lost
             # and classifies everything as errors because it fails to
