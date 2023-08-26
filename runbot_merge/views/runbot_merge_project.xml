@@ -25,6 +25,10 @@
                     <group>
                         <group>
                             <field name="github_token"/>
+                            <field name="github_name" readonly="0"
+                                   help="Identity when creating new commits, defaults to github name, falls back to login."/>
+                            <field name="github_email" readonly="0"
+                                   help="Identity when creating new commits, defaults to public email, falls back to primary email."/>
                             <field name="secret"/>
                         </group>
                         <group>
@@ -46,6 +50,7 @@
                     <field name="repo_ids">
                         <tree>
                             <field name="sequence" widget="handle"/>
+                            <button type="object" name="get_formview_action" icon="fa-external-link"/>
                             <field name="name"/>
                             <field name="branch_filter"/>
                             <field name="status_ids" widget="many2many_tags"/>
@@ -55,6 +60,7 @@
                     <field name="branch_ids">
                         <tree editable="bottom" decoration-muted="not active">
                             <field name="sequence" widget="handle" />
+                            <button type="object" name="get_formview_action" icon="fa-external-link"/>
                             <field name="name"/>
                             <field name="active" widget="boolean_toggle"/>
                             <field name="staging_enabled" widget="boolean_toggle"/>
