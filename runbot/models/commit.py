@@ -178,6 +178,20 @@ class CommitLink(models.Model):
     diff_add = fields.Integer('# line added')
     diff_remove = fields.Integer('# line removed')
 
+    all_hashes = fields.Char('All Hashes', compute='_compute_all_hashes', search='_search_all_hashes')
+
+    @api.depends('commit_id', 'base_commit_id', 'merge_base_commit_id')
+    def _compute_all_hashes(self):
+        for rec in self:
+            rec.all_hashes = '/'.join([h for h in [rec.commit_id.name, rec.base_commit_id.name, rec.merge_base_commit_id.name] if h])
+
+    def _search_all_hashes(self, operator, value):
+        return [
+                    '|', '|',
+                    ('commit_id.name', operator, value),
+                    ('base_commit_id.name', operator, value),
+                    ('merge_base_commit_id.name', operator, value),
+                ]
 
 class CommitStatus(models.Model):
     _name = 'runbot.commit.status'
