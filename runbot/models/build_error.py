@@ -13,6 +13,19 @@ from odoo.exceptions import ValidationError, UserError
 _logger = logging.getLogger(__name__)
 
 
+class BuildErrorLink(models.Model):
+    _name = 'runbot.build.error.link'
+    _table = 'runbot_build_error_ids_runbot_build_rel'
+    _description = 'Build Build Error Extended Relation'
+
+    runbot_build_id = fields.Many2one('runbot.build', required=True, index=True)
+    runbot_build_error_id =fields.Many2one('runbot.build.error', required=True, index=True)
+    log_date = fields.Datetime(string='Log date')
+
+    _sql_constraints = [
+        ('error_build_rel_unique', 'UNIQUE (runbot_build_id, runbot_build_error_id)', 'A link between a build and an error must be unique'),
+    ]
+
 class BuildError(models.Model):
 
     _name = "runbot.build.error"
@@ -35,7 +48,8 @@ class BuildError(models.Model):
     fixing_pr_id = fields.Many2one('runbot.branch', 'Fixing PR', tracking=True, domain=[('is_pr', '=', True)])
     fixing_pr_alive = fields.Boolean('Fixing PR alive', related='fixing_pr_id.alive')
     fixing_pr_url = fields.Char('Fixing PR url', related='fixing_pr_id.branch_url')
-    build_ids = fields.Many2many('runbot.build', 'runbot_build_error_ids_runbot_build_rel', string='Affected builds')
+    build_error_link_ids = fields.Many2many('runbot.build.error.link')
+    build_ids = fields.Many2many('runbot.build', relation='runbot_build_error_ids_runbot_build_rel', column1='runbot_build_error_id', column2='runbot_build_id')
     bundle_ids = fields.One2many('runbot.bundle', compute='_compute_bundle_ids')
     version_ids = fields.One2many('runbot.version', compute='_compute_version_ids', string='Versions', search='_search_version')
     trigger_ids = fields.Many2many('runbot.trigger', compute='_compute_trigger_ids', string='Triggers', search='_search_trigger_ids')

@@ -225,7 +225,7 @@ class BuildResult(models.Model):
     orphan_result = fields.Boolean('No effect on the parent result', default=False)
 
     build_url = fields.Char('Build url', compute='_compute_build_url', store=False)
-    build_error_ids = fields.Many2many('runbot.build.error', 'runbot_build_error_ids_runbot_build_rel', string='Errors')
+    build_error_ids = fields.Many2many('runbot.build.error', string='Errors')
     keep_running = fields.Boolean('Keep running', help='Keep running', index=True)
     log_counter = fields.Integer('Log Lines counter', default=100)
 
