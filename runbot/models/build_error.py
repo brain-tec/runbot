@@ -307,6 +307,24 @@ class BuildError(models.Model):
     def _search_trigger_ids(self, operator, value):
         return [('build_ids.trigger_id', operator, value)]
 
+    def action_search_ir_logs(self):
+        self.ensure_one()
+        context = {
+            'search_default_filter_warning_or_error': True,
+            'search_default_type': 'server',
+            'search_default_message': self.cleaned_content,
+            'search_default_filter_create_date': True,
+        }
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Search Error In Ir Logging',
+            'view_mode': 'tree',
+            'res_model': 'ir.logging',
+            'target': 'fullscreen',
+            'context': context,
+        }
+
+
 class BuildErrorTag(models.Model):
 
     _name = "runbot.build.error.tag"
