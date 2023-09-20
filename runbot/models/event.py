@@ -197,5 +197,5 @@ class RunbotErrorLog(models.Model):
             JOIN
                 runbot_build bu ON l.build_id = bu.id
             WHERE
-                l.level = 'ERROR'
+                l.level in ('ERROR', 'WARNING')
         )""")

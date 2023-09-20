@@ -310,16 +310,17 @@ class BuildError(models.Model):
     def action_search_ir_logs(self):
         self.ensure_one()
         context = {
-            'search_default_filter_warning_or_error': True,
             'search_default_type': 'server',
             'search_default_message': self.cleaned_content,
             'search_default_filter_create_date': True,
+            'search_default_filter_sticky_bundles': True,
+            'search_default_filter_failed_builds': True
         }
         return {
             'type': 'ir.actions.act_window',
-            'name': 'Search Error In Ir Logging',
+            'name': 'Search Error In Build Error Views',
             'view_mode': 'tree',
-            'res_model': 'ir.logging',
+            'res_model': 'runbot.error.log',
             'target': 'fullscreen',
             'context': context,
         }
