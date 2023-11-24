@@ -114,15 +114,15 @@ class BuildError(models.Model):
             top_parent_builds = build_error.build_ids.mapped(lambda rec: rec and rec.top_parent)
             build_error.bundle_ids = top_parent_builds.mapped('slot_ids').mapped('batch_id.bundle_id')
 
-    @api.depends('build_ids', 'child_ids.build_ids')
+    @api.depends('children_build_ids')
     def _compute_version_ids(self):
         for build_error in self:
-            build_error.version_ids = build_error.build_ids.version_id
+            build_error.version_ids = build_error.children_build_ids.version_id 
 
-    @api.depends('build_ids')
+    @api.depends('children_build_ids')
     def _compute_trigger_ids(self):
         for build_error in self:
-            build_error.trigger_ids = build_error.build_ids.trigger_id
+            build_error.trigger_ids = build_error.children_build_ids.trigger_id
 
     @api.depends('content')
     def _compute_summary(self):
@@ -191,7 +191,7 @@ class BuildError(models.Model):
         for fingerprint, logs in hash_dict.items():
             build_errors |= self.env['runbot.build.error'].create({
                 'content': logs[0].message,
-                'module_name': logs[0].name,
+                'module_name': logs[0].name.removeprefix('odoo.').removeprefix('addons.'),
                 'file_path': logs[0].path,
                 'function': logs[0].func,
                 'build_ids': [(6, False, [r.build_id.id for r in logs])],
