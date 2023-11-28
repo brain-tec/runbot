@@ -200,14 +200,14 @@ class Bundle(models.Model):
         res = super().create(values_list)
         if res.is_base:
             model = self.browse()
-            model._get_base_ids.clear_cache(model)
+            model.env.registry.clear_cache()
         return res
 
     def write(self, values):
         res = super().write(values)
         if 'is_base' in values:
             model = self.browse()
-            model._get_base_ids.clear_cache(model)
+            model.env.registry.clear_cache()
         return res
 
     def _force(self, category_id=None):
