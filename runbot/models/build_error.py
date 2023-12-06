@@ -6,7 +6,7 @@ import re
 
 from collections import defaultdict
 from dateutil.relativedelta import relativedelta
-from fnmatch import fnmatch
+from werkzeug.urls import url_join
 from odoo import models, fields, api
 from odoo.exceptions import ValidationError, UserError
 
@@ -81,6 +81,8 @@ class BuildError(models.Model):
                         raise UserError("This error as a test-tag and can only be (de)activated by admin")
                     if not vals['active'] and build_error.last_seen_date + relativedelta(days=1) > fields.Datetime.now():
                         raise UserError("This error broke less than one day ago can only be deactivated by admin")
+        if 'cleaned_content' in vals:
+            vals.update({'fingerprint': self._digest(vals['cleaned_content'])})
         result = super(BuildError, self).write(vals)
         if vals.get('parent_id'):
             for build_error in self:
@@ -224,7 +226,42 @@ class BuildError(models.Model):
 
     def _search_trigger_ids(self, operator, value):
         return [('build_ids.trigger_id', operator, value)]
-    
+
+    def _get_form_url(self):
+        self.ensure_one()
+        return url_join(self.get_base_url(), f'/web#id={self.id}&model=runbot.build.error&view_type=form')
+
+    def _get_form_link(self):
+        self.ensure_one()
+        return f'<a href="{self._get_form_url()}">{self.id}</a>'
+
+    def _merge(self):
+        if len(self) < 2:
+            return
+        _logger.debug('Merging errors %s', self)
+        base_error = self[0]
+        base_linked = self[0].parent_id or self[0]
+        for error in self[1:]:
+            assert base_error.fingerprint == error.fingerprint, f'Errors {base_error.id} and {error.id} have a different fingerprint'         
+            base_error.build_ids += error.build_ids
+            error.build_ids = False
+            if error.responsible and not base_linked.responsible:
+                base_error.responsible = error.responsible
+            elif base_linked.responsible and error.responsible and base_linked.responsible != error.responsible:
+                base_linked.message_post(body=f'⚠ responsible in merged error {error._get_form_link()} was "{error.responsible.name}" and different from this one')
+            if error.team_id and not base_error.team_id:
+                base_error.team_id = error.team_id
+            if error.test_tags and not base_linked.test_tags:
+                base_linked.test_tags = error.test_tags
+                base_error.message_post(body=f'⚠ test-tags inherited from error {error._get_form_link()}')
+            elif base_linked.test_tags and error.test_tags and base_linked.test_tags != error.test_tags:
+                base_error.message_post(body=f'⚠ test-tags in merged error {error._get_form_link()} was "{error.test_tags}" and different from this one')
+
+            base_error.message_post(body=f'Error {error._get_form_link()} was merged into this one')
+            error.message_post(body=f'Error was merged into {base_linked._get_form_link()}')
+            error.active=False
+        return base_error.id
+
     ####################
     #   Actions
     ####################
@@ -240,9 +277,31 @@ class BuildError(models.Model):
         build_errors[1:].write({'parent_id': build_errors[0].id})
 
     def action_clean_content(self):
+        _logger.info('Cleaning %s build errors', len(self))
         cleaning_regs = self.env['runbot.error.regex'].search([('re_type', '=', 'cleaning')])
+
+        changed_fingerprints = set()
         for build_error in self:
+            fingerprint_before = build_error.fingerprint
             build_error.cleaned_content = cleaning_regs._r_sub('%', build_error.content)
+            if fingerprint_before != build_error.fingerprint:
+                changed_fingerprints.add(build_error.fingerprint)
+
+        # merge identical errors
+        errors_by_fingerprint = self.env['runbot.build.error'].search([('fingerprint', 'in', list(changed_fingerprints))])
+        merged_error_ids = []
+        for fingerprint in changed_fingerprints:
+            errors_to_merge = errors_by_fingerprint.filtered(lambda r: r.fingerprint == fingerprint)
+            rec_id = errors_to_merge._merge()
+            if rec_id:
+                merged_error_ids.append(rec_id)
+        return {
+                'name': 'Build Error Merge Result',
+                'type': 'ir.actions.act_window',
+                'res_model': 'runbot.build.error',
+                'view_mode': 'tree',
+                'domain': [('id', 'in', merged_error_ids)]
+            }
 
     def action_assign(self):
         if not any((not record.responsible and not record.team_id and record.file_path and not record.parent_id) for record in self):
