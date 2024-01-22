@@ -90,23 +90,11 @@ def try_staging(branch: Branch) -> Optional[Stagings]:
     heads = []
     commits = []
     for repo, it in staging_state.items():
-        if it.head != original_heads[repo]:
-            # if we staged something for that repo, just create a record for
-            # that commit, or flag existing one as to-recheck in case there are
-            # already statuses we want to propagate to the staging or something
-            env.cr.execute(
-                "INSERT INTO runbot_merge_commit (sha, to_check, statuses) "
-                "VALUES (%s, true, '{}') "
-                "ON CONFLICT (sha) DO UPDATE SET to_check=true "
-                "RETURNING id",
-                [it.head]
-            )
-            [commit] = [head] = env.cr.fetchone()
-        else:
-            # if we didn't stage anything for that repo, create a dummy commit
-            # (with a uniquifier to ensure we don't hit a previous version of
-            # the same) to ensure the staging head is new and we're building
-            # everything
+        if it.head == original_heads[repo] and branch.project_id.uniquifier:
+            # if we didn't stage anything for that repo and uniquification is
+            # enabled, create a dummy commit with a uniquifier to ensure we
+            # don't hit a previous version of the same to ensure the staging
+            # head is new and we're building everything
             project = branch.project_id
             uniquifier = base64.b64encode(os.urandom(12)).decode('ascii')
             dummy_head = it.repo.with_config(check=True).commit_tree(
@@ -135,6 +123,18 @@ For-Commit-Id: {it.head}
             )
             ([commit], [head]) = env.cr.fetchall()
             it.head = dummy_head
+        else:
+            # otherwise just create a record for that commit, or flag existing
+            # one as to-recheck in case there are already statuses we want to
+            # propagate to the staging or something
+            env.cr.execute(
+                "INSERT INTO runbot_merge_commit (sha, to_check, statuses) "
+                "VALUES (%s, true, '{}') "
+                "ON CONFLICT (sha) DO UPDATE SET to_check=true "
+                "RETURNING id",
+                [it.head]
+            )
+            [commit] = [head] = env.cr.fetchone()
 
         heads.append(fields.Command.create({
             'repository_id': repo.id,
@@ -426,7 +426,18 @@ def stage(pr: PullRequests, info: StagingSlice, related_prs: PullRequests) -> Tu
             fn = stage_rebase_ff
         case 'squash':
             fn = stage_squash
-    return method, fn(pr, info, pr_commits, related_prs=related_prs)
+
+    pr_base_tree = info.repo.get_tree(pr_commits[0]['parents'][0]['sha'])
+    pr_head_tree = pr_commits[-1]['commit']['tree']['sha']
+
+    merge_base_tree = info.repo.get_tree(info.head)
+    new_head = fn(pr, info, pr_commits, related_prs=related_prs)
+    merge_head_tree = info.repo.get_tree(new_head)
+
+    if pr_head_tree != pr_base_tree and merge_head_tree == merge_base_tree:
+        raise exceptions.MergeError(pr, f'results in an empty tree when merged, might be the duplicate of a merged PR.')
+
+    return method, new_head
 
 def stage_squash(pr: PullRequests, info: StagingSlice, commits: List[github.PrCommit], related_prs: PullRequests) -> str:
     msg = pr._build_merge_message(pr, related_prs=related_prs)
@@ -479,12 +490,17 @@ def stage_rebase_ff(pr: PullRequests, info: StagingSlice, commits: List[github.P
     msg = pr._build_merge_message(commits[-1]['commit']['message'], related_prs=related_prs)
     commits[-1]['commit']['message'] = str(msg)
     add_self_references(pr, commits[:-1])
+
+    _logger.debug("rebasing %s on %s (commits=%s)",
+                  pr.display_name, info.head, len(commits))
     head, mapping = info.repo.rebase(info.head, commits=commits)
     pr.commits_map = json.dumps({**mapping, '': head})
     return head
 
 def stage_rebase_merge(pr: PullRequests, info: StagingSlice, commits: List[github.PrCommit], related_prs: PullRequests) -> str :
     add_self_references(pr, commits)
+    _logger.debug("rebasing %s on %s (commits=%s)",
+                  pr.display_name, info.head, len(commits))
     h, mapping = info.repo.rebase(info.head, commits=commits)
     msg = pr._build_merge_message(pr, related_prs=related_prs)
 

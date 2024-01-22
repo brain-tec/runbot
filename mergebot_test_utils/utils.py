@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import itertools
 import re
+import time
 
 from lxml import html
 
@@ -8,8 +9,7 @@ MESSAGE_TEMPLATE = """{message}
 
 closes {repo}#{number}
 
-{headers}Signed-off-by: {name} <{email}>
-"""
+{headers}Signed-off-by: {name} <{email}>"""
 # target branch '-' source branch '-' base64 unique '-fw'
 REF_PATTERN = r'{target}-{source}-[a-zA-Z0-9_-]{{4}}-fw'
 
@@ -129,12 +129,19 @@ def pr_page(page, pr):
     return html.fromstring(page(f'/{pr.repo.name}/pull/{pr.number}'))
 
 def to_pr(env, pr):
-    pr = env['runbot_merge.pull_requests'].search([
-        ('repository.name', '=', pr.repo.name),
-        ('number', '=', pr.number),
-    ])
-    assert len(pr) == 1, f"Expected to find {pr.repo.name}#{pr.number}, got {pr}."
-    return pr
+    for _ in range(5):
+        pr_id = env['runbot_merge.pull_requests'].search([
+            ('repository.name', '=', pr.repo.name),
+            ('number', '=', pr.number),
+        ])
+        if pr_id:
+            assert len(pr_id) == 1, f"Expected to find {pr.repo.name}#{pr.number}, got {pr_id}."
+            return pr_id
+        time.sleep(1)
+
+    raise TimeoutError(f"Unable to find {pr.repo.name}#{pr.number}")
 
 def part_of(label, pr_id, *, separator='\n\n'):
-    return f'{label}{separator}Part-of: {pr_id.display_name}\n'
+    """ Adds the "part-of" pseudo-header in the footer.
+    """
+    return f'{label}{separator}Part-of: {pr_id.display_name}'

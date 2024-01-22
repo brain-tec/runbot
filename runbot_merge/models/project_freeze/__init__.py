@@ -196,7 +196,7 @@ class FreezeWizard(models.Model):
         if self.bump_pr_ids and master.active_staging_id:
             self.env.cr.execute(
                 'SELECT * FROM runbot_merge_stagings WHERE id = %s FOR UPDATE NOWAIT',
-                [master.active_staging_id]
+                [master.active_staging_id.id]
             )
 
         seq = itertools.count(start=1) # start reseq at 1
@@ -218,6 +218,11 @@ class FreezeWizard(models.Model):
         }
         for repo, copy in repos.items():
             copy.fetch(git.source_url(repo, 'github'), '+refs/heads/*:refs/heads/*')
+        for pr in self.release_pr_ids.pr_id | self.bump_pr_ids.pr_id:
+            repos[pr.repository].fetch(
+                git.source_url(pr.repository, 'github'),
+                pr.head,
+            )
 
         # prep new branch (via tmp refs) on every repo
         rel_heads: Dict[Repository, str] = {}
@@ -237,6 +242,8 @@ class FreezeWizard(models.Model):
             except Exception as e:
                 raise UserError(f"Unable to fetch commits of release PR {rel.pr_id.display_name}.") from e
 
+            _logger.debug("rebasing %s on %s (commits=%s)",
+                          rel.pr_id.display_name, prev, len(commits))
             rel_heads[repo_id] = repos[repo_id].rebase(prev, commits)[0]
 
         # prep bump
@@ -255,6 +262,8 @@ class FreezeWizard(models.Model):
             except Exception as e:
                 raise UserError(f"Unable to fetch commits of bump PR {bump.pr_id.display_name}.") from e
 
+            _logger.debug("rebasing %s on %s (commits=%s)",
+                          bump.pr_id.display_name, prev, len(commits))
             bump_heads[repo_id] = repos[repo_id].rebase(prev, commits)[0]
 
         deployed = {}
