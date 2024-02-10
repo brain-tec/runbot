@@ -83,6 +83,7 @@ class Runbot(Controller):
         '/runbot/submit'
     ], type='http', auth="public", methods=['GET', 'POST'], csrf=False)
     def submit(self, more=False, redirect='/', keep_search=False, category=False, filter_mode=False, update_triggers=False, **kwargs):
+        assert redirect.startswith('/runbot/')
         response = werkzeug.utils.redirect(redirect)
         response.set_cookie('more', '1' if more else '0')
         response.set_cookie('keep_search', '1' if keep_search else '0')
@@ -471,7 +472,6 @@ class Runbot(Controller):
 
         # Sort & Filter
         sortby = kwargs.get('sortby', 'count')
-        filterby = kwargs.get('filterby', 'not_one')
         searchbar_sortings = {
             'date': {'label': 'Recently Seen', 'order': 'last_seen_date desc'},
             'count': {'label': 'Nb Seen', 'order': 'build_count desc'},
@@ -482,6 +482,16 @@ class Runbot(Controller):
             'unassigned': {'label': 'Unassigned', 'domain': [('responsible', '=', False)]},
             'not_one': {'label': 'Seen more than once', 'domain': [('build_count', '>', 1)]},
         }
+
+        for trigger in team.build_error_ids.trigger_ids if team else []:
+            k = f'trigger_{trigger.name.lower().replace(" ", "_")}'
+            searchbar_filters.update(
+                {k: {'label': f'Trigger {trigger.name}', 'domain': [('trigger_ids', '=', trigger.id)]}}
+            )
+
+        filterby = kwargs.get('filterby', 'not_one')
+        if filterby not in searchbar_filters:
+            filterby = 'not_one'
         domain = expression.AND([domain, searchbar_filters[filterby]['domain']])
 
         qctx = {
@@ -614,3 +624,8 @@ class Runbot(Controller):
         run_url = build._get_run_url(db_suffix)
         _logger.info('Redirecting to %s', run_url)
         return werkzeug.utils.redirect(run_url)
+
+    @route(['/runbot/parse_log/<model("ir.logging"):ir_log>'], type='http', auth='user', sitemap=False)
+    def parse_log(self, ir_log, **kwargs):
+        request.env['runbot.build.error']._parse_logs(ir_log)
+        return werkzeug.utils.redirect('/runbot/build/%s' % ir_log.build_id.id)

@@ -6,7 +6,8 @@
         <field name="arch" type="xml">
           <form>
             <sheet>
-              <widget name="web_ribbon" title="Test-tags" bg_color="bg-warning" attrs="{'invisible': [('test_tags', '=', False)]}"/>
+              <widget name="web_ribbon" title="Test-tags" bg_color="bg-danger" invisible="not test_tags"/>
+              <widget name="web_ribbon" title="Linked to another error" bg_color="bg-warning" invisible="not parent_id"/>
               <header>
               </header>
                 <group name="build_error_group" string="Base info" col="2">
@@ -17,13 +18,13 @@
                 </group>
                 <group name="fixer_info" string="Fixing" col="2">
                   <group>
-                    <field name="responsible" attrs="{'readonly': [('parent_id','!=', False), ('responsible','=', False)]}"/>
-                    <field name="team_id" attrs="{'readonly': [('parent_id','!=', False), ('team_id','=', False)]}"/>
+                    <field name="responsible" readonly="parent_id and not responsible"/>
+                    <field name="team_id" readonly="parent_id and not team_id"/>
                     <field name="fixing_pr_id"/>
                     <field name="fixing_pr_url" widget="url"/>
                     <field name="active"/>
-                    <field name="test_tags" readonly="1" groups="!runbot.group_runbot_admin"/>
-                    <field name="test_tags" groups="runbot.group_runbot_admin" attrs="{'readonly': [('parent_id','!=', False), ('test_tags','=', False)]}"/>
+                    <field name="test_tags" decoration-danger="True" readonly="1" groups="!runbot.group_runbot_admin"/>
+                    <field name="test_tags" decoration-danger="True" groups="runbot.group_runbot_admin" readonly="parent_id and not test_tags"/>
                   </group>
                   <group>
                     <field name="version_ids" widget="many2many_tags"/>
@@ -38,26 +39,27 @@
                     <field name="first_seen_build_id" widget="frontend_url"/>
                   </group>
                   <group>
-                    <field name="parent_id"/>
+                    <field name="parent_id" decoration-warning="parent_id != False"/>
                     <field name="last_seen_date"/>
                     <field name="last_seen_build_id" widget="frontend_url"/>
                   </group>
                 </group>
                 <notebook>
                   <page string="Builds">
-                    <field name="children_build_ids" widget="many2many" options="{'not_delete': True, 'no_create': True}" readonly="1">
+                    <field name="children_build_error_link_ids" widget="one2many" options="{'not_delete': True, 'no_create': True}" readonly="1">
                       <tree>
-                        <field name="create_date"/>
+                        <field name="log_date"/>
                         <field name="host" groups="base.group_no_one"/>
                         <field name="dest"/>
                         <field name="version_id"/>
                         <field name="trigger_id"/>
                         <field name="description"/>
+                        <field name="build_error_id" widget="many2one" string="Linked Error"/>
                         <field name="build_url" widget="url" readonly="1" text="View build"/>
                       </tree>
                     </field>
                   </page>
-                  <page string="Linked Errors" attrs="{'invisible': [('child_ids', '=', [])]}">
+                  <page string="Linked Errors" invisible="child_ids == []">
                     <field name="child_ids" widget="many2many" options="{'not_delete': True, 'no_create': True}" readonly="1">
                       <tree>
                         <field name="create_date"/>
@@ -68,7 +70,7 @@
                       </tree>
                     </field>
                   </page>
-                  <page string="Error history" attrs="{'invisible': [('error_history_ids', '=', [])]}">
+                  <page string="Error history" invisible="error_history_ids == []">
                     <field name="error_history_ids" widget="one2many" options="{'not_delete': True, 'no_create': True}" readonly="1">
                       <tree>
                         <field name="create_date"/>
@@ -150,7 +152,7 @@
                   decoration-success="fixing_pr_id and not test_tags and not fixing_pr_alive"
                   decoration-warning="test_tags and fixing_pr_id and not fixing_pr_alive"
                   multi_edit="1"
-                  create="False"
+                  create="false"
                   >
                 <header>
                   <button name="%(runbot.runbot_open_bulk_wizard)d" string="Bulk Update" type="action" groups="runbot.group_runbot_admin,runbot.group_runbot_error_manager"/>
@@ -165,7 +167,8 @@
                 <field name="test_tags"/>
                 <field name="fixing_pr_id"/>
                 <field name="fixing_pr_alive" invisible="1"/>
-                <field name="fixing_pr_url" widget="url" text="view PR" readonly="1" attrs="{'invisible': [('fixing_pr_url', '=', False)]}"/>
+                <field name="fixing_pr_url" widget="url" text="view PR" readonly="1" invisible="not fixing_pr_url"/>
+                <field name="fingerprint" optional="hide"/>
             </tree>
         </field>
     </record>
@@ -194,6 +197,7 @@
           <separator/>
           <filter string="Not Assigned" name="not_assigned_errors" domain="[('responsible', '=', False)]"/>
           <filter string="Assigned" name="assigned_errors" domain="[('responsible', '!=', False)]"/>
+          <separator/>
           <filter string="Having a PR" name="pr_set_errors" domain="[('fixing_pr_id', '!=', False)]"/>
           <filter string="Fixing PR is closed" name="pr_closed_errors" domain="[('fixing_pr_id', '!=', False), ('fixing_pr_id.alive', '=', False)]"/>
           <filter string="Fixing PR is open" name="pr_open_errors" domain="[('fixing_pr_id', '!=', False), ('fixing_pr_id.alive', '=', True)]"/>
@@ -221,6 +225,7 @@
               <group name="build_regex_group">
                 <field name="regex"/>
                 <field name="re_type"/>
+                <field name="replacement" invisible="re_type != 'cleaning'"/>
               </group>
             </sheet>
             <div class="oe_chatter">
@@ -239,6 +244,7 @@
                 <field name="sequence" widget="handle"/>
                 <field name="regex"/>
                 <field name="re_type"/>
+                <field name="replacement"/>
             </tree>
         </field>
     </record>

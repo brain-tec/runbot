@@ -1,4 +1,6 @@
-# -*- coding: utf-8 -*-
+import hashlib
+
+from odoo import fields
 from odoo.exceptions import ValidationError
 from .common import RunbotCase
 
@@ -26,26 +28,8 @@ class TestBuildError(RunbotCase):
         create_vals.update(vals)
         return self.Build.create(create_vals)
 
-    def setUp(self):
-        super(TestBuildError, self).setUp()
-        self.BuildError = self.env['runbot.build.error']
-        self.BuildErrorTeam = self.env['runbot.team']
-
-    def test_build_scan(self):
-        IrLog = self.env['ir.logging']
-        ko_build = self.create_test_build({'local_result': 'ok', 'local_state': 'testing'})
-        ok_build = self.create_test_build({'local_result': 'ok', 'local_state': 'running'})
-
-
-
-        error_team = self.BuildErrorTeam.create({
-            'name': 'test-error-team',
-            'path_glob': '*/test_ui.py'
-        })
-
-        log = {
-            'message': RTE_ERROR,
-            'build_id': ko_build.id,
+    def create_log(self, vals):
+        log_vals = {
             'level': 'ERROR',
             'type': 'server',
             'name': 'test-build-error-name',
@@ -53,35 +37,165 @@ class TestBuildError(RunbotCase):
             'func': 'test-build-error-func',
             'line': 1,
         }
+        log_vals.update(vals)
+        return self.IrLog.create(log_vals)
+
+
+    def setUp(self):
+        super(TestBuildError, self).setUp()
+        self.BuildError = self.env['runbot.build.error']
+        self.BuildErrorLink = self.env['runbot.build.error.link']
+        self.BuildErrorTeam = self.env['runbot.team']
+        self.ErrorRegex = self.env['runbot.error.regex']
+        self.IrLog = self.env['ir.logging']
+
+    def test_create_write_clean(self):
+
+        self.ErrorRegex.create({
+            'regex': '\d+',
+            're_type': 'cleaning',
+        })
+
+        error_x = self.BuildError.create({
+            'content': 'foo bar 242',
+        })
+
+        expected = 'foo bar %'
+        expected_hash = hashlib.sha256(expected.encode()).hexdigest()
+        self.assertEqual(error_x.cleaned_content, expected)
+        self.assertEqual(error_x.fingerprint, expected_hash)
+
+        # Let's ensure that the fingerprint changes if we clean with an additional regex
+        self.ErrorRegex.create({
+            'regex': 'bar',
+            're_type': 'cleaning',
+        })
+        error_x.action_clean_content()
+        expected = 'foo % %'
+        expected_hash = hashlib.sha256(expected.encode()).hexdigest()
+        self.assertEqual(error_x.cleaned_content, expected)
+        self.assertEqual(error_x.fingerprint, expected_hash)
+
+    def test_merge(self):
+        build_a = self.create_test_build({'local_result': 'ko', 'local_state': 'done'})
+        error_a = self.BuildError.create({'content': 'foo bar'})
+        self.BuildErrorLink.create({'build_id': build_a.id, 'build_error_id': error_a.id})
+
+        build_b = self.create_test_build({'local_result': 'ko', 'local_state': 'done'})
+        error_b = self.BuildError.create({'content': 'foo bar'})
+        self.BuildErrorLink.create({'build_id': build_b.id, 'build_error_id': error_b.id})
+
+        (error_a | error_b)._merge()
+        self.assertEqual(len(self.BuildError.search([('fingerprint', '=', error_a.fingerprint)])), 1)
+        self.assertTrue(error_a.active, 'The first merged error should stay active')
+        self.assertFalse(error_b.active, 'The second merged error should have stay deactivated')
+        self.assertIn(build_a, error_a.build_error_link_ids.build_id)
+        self.assertIn(build_a, error_a.build_ids)
+        self.assertIn(build_b, error_a.build_error_link_ids.build_id)
+        self.assertIn(build_b, error_a.build_ids)
+        self.assertFalse(error_b.build_error_link_ids)
+        self.assertFalse(error_b.build_ids)
+
+        error_c = self.BuildError.create({'content': 'foo foo'})
+
+        # let's ensure we cannot merge errors with different fingerprints
+        with self.assertRaises(AssertionError):
+            (error_a | error_c)._merge()
+
+        # merge two build errors while the build <--> build_error relation already exists
+        error_d = self.BuildError.create({'content': 'foo bar'})
+        self.BuildErrorLink.create({'build_id': build_a.id, 'build_error_id': error_d.id})
+        (error_a | error_d)._merge()
+        self.assertIn(build_a, error_a.build_error_link_ids.build_id)
+        self.assertIn(build_a, error_a.build_ids)
+        self.assertFalse(error_d.build_error_link_ids)
+        self.assertFalse(error_d.build_ids)
+
+    def test_merge_linked(self):
+        top_error = self.BuildError.create({'content': 'foo foo', 'active': False})
+
+        build_a = self.create_test_build({'local_result': 'ko', 'local_state': 'done'})
+        error_a = self.BuildError.create({'content': 'foo bar', 'parent_id': top_error.id })
+        self.BuildErrorLink.create({'build_id': build_a.id, 'build_error_id': error_a.id})
+
+        build_b = self.create_test_build({'local_result': 'ko', 'local_state': 'done'})
+        error_b = self.BuildError.create({'content': 'foo bar', 'test_tags': 'footag'})
+        self.BuildErrorLink.create({'build_id': build_b.id, 'build_error_id': error_b.id})
+
+        linked_error = self.BuildError.create({'content': 'foo foo bar', 'parent_id': error_b.id})
+
+        (error_a | error_b)._merge()
+        self.assertEqual(len(self.BuildError.search([('fingerprint', '=', error_a.fingerprint)])), 1)
+        self.assertTrue(error_a.active, 'The first merged error should stay active')
+        self.assertFalse(error_b.active, 'The second merged error should have stay deactivated')
+        self.assertIn(build_a, error_a.build_ids)
+        self.assertIn(build_b, error_a.build_ids)
+        self.assertFalse(error_b.build_ids)
+        self.assertEqual(top_error.test_tags, 'footag')
+        self.assertEqual(top_error.active, True)
+        self.assertEqual(linked_error.parent_id, error_a, 'Linked errors to a merged one should be now linked to the new one')
+
+        tagged_error = self.BuildError.create({'content': 'foo foo', 'test_tags': 'bartag'})
+        (top_error | tagged_error)._merge()
+        self.assertTrue(top_error.active)
+        self.assertTrue(tagged_error.active, 'A differently tagged error cannot be deactivated by the merge')
+
+
+    def test_build_scan(self):
+        ko_build = self.create_test_build({'local_result': 'ok', 'local_state': 'testing'})
+        ko_build_b = self.create_test_build({'local_result': 'ok', 'local_state': 'testing'})
+        ok_build = self.create_test_build({'local_result': 'ok', 'local_state': 'running'})
+
+        self.env['runbot.error.regex'].create({
+            'regex': '^FAIL: ',
+            're_type': 'cleaning',
+        })
+
+        error_team = self.BuildErrorTeam.create({
+            'name': 'test-error-team',
+            'path_glob': '*/test_ui.py'
+        })
 
         # Test the build parse and ensure that an 'ok' build is not parsed
-        IrLog.create(log)
-        log.update({'build_id': ok_build.id})
-        IrLog.create(log)
+        self.create_log({'create_date': fields.Datetime.from_string('2023-08-29 00:46:21'), 'message': RTE_ERROR, 'build_id': ko_build.id})
+        # As it happens that a same error could appear again in the same build, ensure that the parsing adds only one link
+        self.create_log({'create_date': fields.Datetime.from_string('2023-08-29 00:48:21'), 'message': RTE_ERROR, 'build_id': ko_build.id})
+
+        # now simulate another build with the same errors
+        self.create_log({'create_date': fields.Datetime.from_string('2023-08-29 01:46:21'), 'message': RTE_ERROR, 'build_id': ko_build_b.id})
+        self.create_log({'create_date': fields.Datetime.from_string('2023-08-29 01:46:21'), 'message': RTE_ERROR, 'build_id': ko_build_b.id})
+
+        # The error also appears in a running build
+        self.create_log({'create_date': fields.Datetime.from_string('2023-08-29 01:46:21'), 'message': RTE_ERROR, 'build_id': ok_build.id})
 
         self.assertEqual(ko_build.local_result, 'ko', 'Testing build should have gone ko after error log')
         self.assertEqual(ok_build.local_result, 'ok', 'Running build should not have gone ko after error log')
 
         ko_build._parse_logs()
+        ko_build_b._parse_logs()
         ok_build._parse_logs()
-        build_error = self.BuildError.search([('build_ids', 'in', [ko_build.id])])
+        build_error = ko_build.build_error_ids
         self.assertTrue(build_error)
+        self.assertTrue(build_error.fingerprint.startswith('af0e88f3'))
+        self.assertTrue(build_error.cleaned_content.startswith('%'), 'The cleaner should have replace "FAIL: " with a "%" sign by default')
+        error_link = self.env['runbot.build.error.link'].search([('build_id', '=', ko_build.id), ('build_error_id', '=', build_error.id)])
+        self.assertTrue(error_link, 'An error link should exists')
+        self.assertIn(ko_build, build_error.build_error_link_ids.mapped('build_id'), 'Ko build should be in build_error_link_ids')
+        self.assertEqual(error_link.log_date, fields.Datetime.from_string('2023-08-29 00:46:21'))
         self.assertIn(ko_build, build_error.build_ids, 'The parsed build should be added to the runbot.build.error')
-        self.assertFalse(self.BuildError.search([('build_ids', 'in', [ok_build.id])]), 'A successful build should not associated to a runbot.build.error')
+        self.assertFalse(self.BuildErrorLink.search([('build_id', '=', ok_build.id)]), 'A successful build should not be associated to a runbot.build.error')
         self.assertEqual(error_team, build_error.team_id)
 
         # Test that build with same error is added to the errors
         ko_build_same_error = self.create_test_build({'local_result': 'ko'})
-        log.update({'build_id': ko_build_same_error.id})
-        IrLog.create(log)
+        self.create_log({'create_date': fields.Datetime.from_string('2023-08-29 01:46:21'), 'message': RTE_ERROR, 'build_id': ko_build_same_error.id})
         ko_build_same_error._parse_logs()
         self.assertIn(ko_build_same_error, build_error.build_ids, 'The parsed build should be added to the existing runbot.build.error')
 
         # Test that line numbers does not interfere with error recognition
         ko_build_diff_number = self.create_test_build({'local_result': 'ko'})
         rte_diff_numbers = RTE_ERROR.replace('89', '100').replace('1062', '1000').replace('1046', '4610')
-        log.update({'build_id': ko_build_diff_number.id, 'message': rte_diff_numbers})
-        IrLog.create(log)
+        self.create_log({'create_date': fields.Datetime.from_string('2023-08-29 01:46:21'), 'message': rte_diff_numbers, 'build_id': ko_build_diff_number.id})
         ko_build_diff_number._parse_logs()
         self.assertIn(ko_build_diff_number, build_error.build_ids, 'The parsed build with different line numbers in error should be added to the runbot.build.error')
 
@@ -89,13 +203,56 @@ class TestBuildError(RunbotCase):
         # a new build error is created, with the old one linked
         build_error.active = False
         ko_build_new = self.create_test_build({'local_result': 'ko'})
-        log.update({'build_id': ko_build_new.id})
-        IrLog.create(log)
+        self.create_log({'create_date': fields.Datetime.from_string('2023-08-29 01:46:21'), 'message': RTE_ERROR, 'build_id': ko_build_new.id})
         ko_build_new._parse_logs()
         self.assertNotIn(ko_build_new, build_error.build_ids, 'The parsed build should not be added to a fixed runbot.build.error')
-        new_build_error = self.BuildError.search([('build_ids', 'in', [ko_build_new.id])])
+        new_build_error = self.BuildErrorLink.search([('build_id', '=', ko_build_new.id)]).mapped('build_error_id')
         self.assertIn(ko_build_new, new_build_error.build_ids, 'The parsed build with a re-apearing error should generate a new runbot.build.error')
         self.assertIn(build_error, new_build_error.error_history_ids, 'The old error should appear in history')
+
+    def test_seen_date(self):
+        # create all the records before the tests to evaluate compute dependencies
+        build_a = self.create_test_build({'local_result': 'ok', 'local_state': 'testing'})
+        first_seen_date = fields.Datetime.from_string('2023-08-29 00:46:21')
+        self.create_log({'create_date': first_seen_date, 'message': RTE_ERROR, 'build_id': build_a.id})
+
+        build_b = self.create_test_build({'local_result': 'ok', 'local_state': 'testing'})
+        new_seen_date = fields.Datetime.from_string('2023-08-29 02:46:21')
+        self.create_log({'create_date': new_seen_date, 'message': RTE_ERROR, 'build_id': build_b.id})
+
+        build_c = self.create_test_build({'local_result': 'ok', 'local_state': 'testing'})
+        child_seen_date = fields.Datetime.from_string('2023-09-01 12:00:00')
+        self.create_log({'create_date': child_seen_date, 'message': 'Fail: foo bar error', 'build_id': build_c.id})
+
+        build_d = self.create_test_build({'local_result': 'ok', 'local_state': 'testing'})
+        new_child_seen_date = fields.Datetime.from_string('2023-09-02 12:00:00')
+        self.create_log({'create_date': new_child_seen_date, 'message': 'Fail: foo bar error', 'build_id': build_d.id})
+
+        build_a._parse_logs()
+        build_error_a = build_a.build_error_ids
+        self.assertEqual(build_error_a.first_seen_date, first_seen_date)
+        self.assertEqual(build_error_a.first_seen_build_id, build_a)
+        self.assertEqual(build_error_a.last_seen_date, first_seen_date)
+        self.assertEqual(build_error_a.last_seen_build_id, build_a)
+
+        # a new build with the same error should be the last seen
+        build_b._parse_logs()
+        self.assertEqual(build_error_a.last_seen_date, new_seen_date)
+        self.assertEqual(build_error_a.last_seen_build_id, build_b)
+
+        # a new build error is linked to the current one
+        build_c._parse_logs()
+        build_error_c = build_c.build_error_ids
+        self.assertNotIn(build_c, build_error_a.children_build_ids)
+        build_error_c.parent_id = build_error_a
+        self.assertIn(build_c, build_error_a.children_build_ids)
+        self.assertEqual(build_error_a.last_seen_date, child_seen_date)
+        self.assertEqual(build_error_a.last_seen_build_id, build_c)
+
+        # a new build appears in the linked error
+        build_d._parse_logs()
+        self.assertEqual(build_error_a.last_seen_date, new_child_seen_date)
+        self.assertEqual(build_error_a.last_seen_build_id, build_d)
 
     def test_build_error_links(self):
         build_a = self.create_test_build({'local_result': 'ko'})
@@ -103,15 +260,17 @@ class TestBuildError(RunbotCase):
 
         error_a = self.env['runbot.build.error'].create({
             'content': 'foo',
-            'build_ids': [(6, 0, [build_a.id])],
             'active': False  # Even a fixed error coul be linked
         })
 
+        self.BuildErrorLink.create({'build_id': build_a.id, 'build_error_id': error_a.id})
+
         error_b = self.env['runbot.build.error'].create({
             'content': 'bar',
-            'build_ids': [(6, 0, [build_b.id])],
             'random': True
         })
+
+        self.BuildErrorLink.create({'build_id': build_b.id, 'build_error_id': error_b.id})
 
         #  test that the random bug is parent when linking errors
         all_errors = error_a | error_b

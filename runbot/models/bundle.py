@@ -7,8 +7,6 @@ from collections import defaultdict
 from odoo import models, fields, api, tools
 from ..common import dt2time, s2human_long
 
-_logger = logging.getLogger(__name__)
-
 
 class Bundle(models.Model):
     _name = 'runbot.bundle'
@@ -23,6 +21,7 @@ class Bundle(models.Model):
     no_build = fields.Boolean('No build')
     no_auto_run = fields.Boolean('No run')
     build_all = fields.Boolean('Force all triggers')
+    always_use_foreign = fields.Boolean('Use foreign bundle', help='By default, check for the same bundle name in another project to fill missing commits.', default=lambda self: self.project_id.always_use_foreign)
     modules = fields.Char("Modules to install", help="Comma-separated list of modules to install and test.")
 
     batch_ids = fields.One2many('runbot.batch', 'bundle_id')
@@ -199,17 +198,26 @@ class Bundle(models.Model):
         return "/runbot/bundle/%s" % self.id
 
     def create(self, values_list):
-        res = super().create(values_list)
-        if res.is_base:
-            model = self.browse()
-            model._get_base_ids.clear_cache(model)
-        return res
+        records = super().create(values_list)
+        for record in records:
+            if records.is_base:
+                model = self.browse()
+                model.env.registry.clear_cache()
+            elif record.project_id.tmp_prefix and record.name.startswith(record.project_id.tmp_prefix):
+                record['no_build'] = True
+            elif record.project_id.staging_prefix and record.name.startswith(record.project_id.staging_prefix):
+                name = record.name.removeprefix(record.project_id.staging_prefix, '')
+                base = record.env['runbot.bundle'].search([('name', '=', name), ('project_id', '=', record.project_id.id), ('is_base', '=', True)], limit=1)
+                record['build_all'] = True
+                if base:
+                    record['defined_base_id'] = base
+        return records
 
     def write(self, values):
         res = super().write(values)
         if 'is_base' in values:
             model = self.browse()
-            model._get_base_ids.clear_cache(model)
+            model.env.registry.clear_cache()
         return res
 
     def _force(self, category_id=None):
