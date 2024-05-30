@@ -1,4 +1,7 @@
-# -*- coding: utf-8 -*-
+from __future__ import annotations
+
+from typing import Optional
+
 """
 Configuration:
 
@@ -582,14 +585,13 @@ class Repo:
         assert self.hook
         r = self._session.get(
             'https://api.github.com/repos/{}/hooks'.format(self.name))
-        response = r.json()
-        assert 200 <= r.status_code < 300, response
-        [hook] = response
+        assert 200 <= r.status_code < 300, r.text
+        [hook] = r.json()
 
         r = self._session.patch('https://api.github.com/repos/{}/hooks/{}'.format(self.name, hook['id']), json={
             'config': {**hook['config'], 'secret': secret},
         })
-        assert 200 <= r.status_code < 300, r.json()
+        assert 200 <= r.status_code < 300, r.text
 
     def get_ref(self, ref):
         # differs from .commit(ref).id for the sake of assertion error messages
@@ -614,7 +616,7 @@ class Repo:
         assert res['object']['type'] == 'commit'
         return res['object']['sha']
 
-    def commit(self, ref):
+    def commit(self, ref: str) -> Commit:
         if not re.match(r'[0-9a-f]{40}', ref):
             if not ref.startswith(('heads/', 'refs/heads/')):
                 ref = 'refs/heads/' + ref
@@ -625,12 +627,11 @@ class Repo:
             ref = 'refs/' + ref
 
         r = self._session.get('https://api.github.com/repos/{}/commits/{}'.format(self.name, ref))
-        response = r.json()
-        assert 200 <= r.status_code < 300, response
+        assert 200 <= r.status_code < 300, r.text
 
-        return self._commit_from_gh(response)
+        return self._commit_from_gh(r.json())
 
-    def _commit_from_gh(self, gh_commit):
+    def _commit_from_gh(self, gh_commit: dict) -> Commit:
         c = gh_commit['commit']
         return Commit(
             id=gh_commit['sha'],
@@ -648,14 +649,14 @@ class Repo:
         :rtype: Dict[str, str]
         """
         r = self._session.get('https://api.github.com/repos/{}/git/trees/{}'.format(self.name, commit.tree))
-        assert 200 <= r.status_code < 300, r.json()
+        assert 200 <= r.status_code < 300, r.text
 
         # read tree's blobs
         tree = {}
         for t in r.json()['tree']:
             assert t['type'] == 'blob', "we're *not* doing recursive trees in test cases"
             r = self._session.get('https://api.github.com/repos/{}/git/blobs/{}'.format(self.name, t['sha']))
-            assert 200 <= r.status_code < 300, r.json()
+            assert 200 <= r.status_code < 300, r.text
             tree[t['path']] = base64.b64decode(r.json()['content']).decode()
 
         return tree
@@ -685,7 +686,7 @@ class Repo:
             'required_pull_request_reviews': None,
             'restrictions': None,
         })
-        assert 200 <= r.status_code < 300, r.json()
+        assert 200 <= r.status_code < 300, r.text
 
     # FIXME: remove this (runbot_merge should use make_commits directly)
     def make_commit(self, ref, message, author, committer=None, tree=None, wait=True):
@@ -788,7 +789,16 @@ class Repo:
         )).raise_for_status()
         return PR(self, number)
 
-    def make_pr(self, *, title=None, body=None, target, head, draft=False, token=None):
+    def make_pr(
+            self,
+            *,
+            title: Optional[str] = None,
+            body: Optional[str] = None,
+            target: str,
+            head: str,
+            draft: bool = False,
+            token: Optional[str] = None
+    ) -> PR:
         assert self.hook
         self.hook = 2
 
@@ -821,10 +831,9 @@ class Repo:
             },
             headers=headers,
         )
-        pr = r.json()
-        assert 200 <= r.status_code < 300, pr
+        assert 200 <= r.status_code < 300, r.text
 
-        return PR(self, pr['number'])
+        return PR(self, r.json()['number'])
 
     def post_status(self, ref, status, context='default', **kw):
         assert self.hook
@@ -835,7 +844,7 @@ class Repo:
             'context': context,
             **kw
         })
-        assert 200 <= r.status_code < 300, r.json()
+        assert 200 <= r.status_code < 300, r.text
 
     def is_ancestor(self, sha, of):
         return any(c['sha'] == sha for c in self.log(of))
@@ -846,7 +855,7 @@ class Repo:
                 'https://api.github.com/repos/{}/commits'.format(self.name),
                 params={'sha': ref_or_sha, 'page': page}
             )
-            assert 200 <= r.status_code < 300, r.json()
+            assert 200 <= r.status_code < 300, r.text
             yield from r.json()
             if not r.links.get('next'):
                 return
@@ -914,7 +923,7 @@ class PR:
             'https://api.github.com/repos/{}/pulls/{}'.format(self.repo.name, self.number),
             headers=caching
         )
-        assert r.ok, r.json()
+        assert r.ok, r.text
         if r.status_code == 304:
             return previous
         contents, caching = self._cache = r.json(), {}
@@ -959,7 +968,7 @@ class PR:
     @property
     def comments(self):
         r = self.repo._session.get('https://api.github.com/repos/{}/issues/{}/comments'.format(self.repo.name, self.number))
-        assert 200 <= r.status_code < 300, r.json()
+        assert 200 <= r.status_code < 300, r.text
         return [Comment(c) for c in r.json()]
 
     @property
@@ -976,7 +985,7 @@ class PR:
             json={'body': body},
             headers=headers,
         )
-        assert 200 <= r.status_code < 300, r.json()
+        assert 200 <= r.status_code < 300, r.text
         return r.json()['id']
 
     def edit_comment(self, cid, body, token=None):
@@ -989,7 +998,7 @@ class PR:
             json={'body': body},
             headers=headers
         )
-        assert 200 <= r.status_code < 300, r.json()
+        assert 200 <= r.status_code < 300, r.text
         wait_for_hook()
 
     def delete_comment(self, cid, token=None):
@@ -1001,7 +1010,7 @@ class PR:
             'https://api.github.com/repos/{}/issues/comments/{}'.format(self.repo.name, cid),
             headers=headers
         )
-        assert r.status_code == 204, r.json()
+        assert r.status_code == 204, r.text
 
     def _set_prop(self, prop, value, token=None):
         assert self.repo.hook
@@ -1025,7 +1034,7 @@ class PR:
             self.repo.name,
             self.number,
         ))
-        assert 200 <= r.status_code < 300, r.json()
+        assert 200 <= r.status_code < 300, r.text
         info = r.json()
 
         repo = self.repo
@@ -1046,7 +1055,7 @@ class PR:
             json={'body': body, 'event': state,},
             headers=headers
         )
-        assert 200 <= r.status_code < 300, r.json()
+        assert 200 <= r.status_code < 300, r.text
 
 PRBranch = collections.namedtuple('PRBranch', 'repo branch')
 class LabelsProxy(collections.abc.MutableSet):
@@ -1057,7 +1066,7 @@ class LabelsProxy(collections.abc.MutableSet):
     def _labels(self):
         pr = self._pr
         r = pr.repo._session.get('https://api.github.com/repos/{}/issues/{}/labels'.format(pr.repo.name, pr.number))
-        assert r.ok, r.json()
+        assert r.ok, r.text
         return {label['name'] for label in r.json()}
 
     def __repr__(self):
@@ -1083,14 +1092,14 @@ class LabelsProxy(collections.abc.MutableSet):
         r = pr.repo._session.post('https://api.github.com/repos/{}/issues/{}/labels'.format(pr.repo.name, pr.number), json={
             'labels': [label]
         })
-        assert r.ok, r.json()
+        assert r.ok, r.text
 
     def discard(self, label):
         pr = self._pr
         assert pr.repo.hook
         r = pr.repo._session.delete('https://api.github.com/repos/{}/issues/{}/labels/{}'.format(pr.repo.name, pr.number, label))
         # discard should do nothing if the item didn't exist in the set
-        assert r.ok or r.status_code == 404, r.json()
+        assert r.ok or r.status_code == 404, r.text
 
     def update(self, *others):
         pr = self._pr
@@ -1099,7 +1108,7 @@ class LabelsProxy(collections.abc.MutableSet):
         r = pr.repo._session.post('https://api.github.com/repos/{}/issues/{}/labels'.format(pr.repo.name, pr.number), json={
             'labels': list(set(itertools.chain.from_iterable(others)))
         })
-        assert r.ok, r.json()
+        assert r.ok, r.text
 
 class Environment:
     def __init__(self, port, db, default_crons=()):
@@ -1165,6 +1174,9 @@ class Model:
 
     def __len__(self):
         return len(self._ids)
+
+    def __hash__(self):
+        return hash((self._model, frozenset(self._ids)))
 
     def __eq__(self, other):
         if not isinstance(other, Model):
