@@ -18,6 +18,7 @@ import sentry_sdk
 import werkzeug
 
 from odoo import api, fields, models, tools, Command
+from odoo.exceptions import AccessError
 from odoo.osv import expression
 from odoo.tools import html_escape, Reverse
 from . import commands
@@ -1339,19 +1340,36 @@ class PullRequests(models.Model):
             if commit:
                 self.env.cr.commit()
 
-    def _build_merge_message(self, message: Union['PullRequests', str], related_prs=()) -> 'Message':
+    def _build_message(self, message: Union['PullRequests', str], related_prs: 'PullRequests' = (), merge: bool = True) -> 'Message':
         # handle co-authored commits (https://help.github.com/articles/creating-a-commit-with-multiple-authors/)
         m = Message.from_message(message)
         if not is_mentioned(message, self):
-            m.body += f'\n\ncloses {self.display_name}'
+            if merge:
+                m.body += f'\n\ncloses {self.display_name}'
+            else:
+                m.headers.pop('Part-Of', None)
+                m.headers.add('Part-Of', self.display_name)
 
         for r in related_prs:
             if not is_mentioned(message, r, full_reference=True):
                 m.headers.add('Related', r.display_name)
 
-        if self.reviewed_by:
-            m.headers.add('signed-off-by', self.reviewed_by.formatted_email)
+        # ensures all reviewers in the review path are on the PR in order:
+        # original reviewer, then last conflict reviewer, then current PR
+        reviewers = (self | self.root_id | self.source_id)\
+            .mapped('reviewed_by.formatted_email')
 
+        sobs = m.headers.getlist('signed-off-by')
+        m.headers.remove('signed-off-by')
+        m.headers.extend(
+            ('signed-off-by', signer)
+            for signer in sobs
+            if signer not in reviewers
+        )
+        m.headers.extend(
+            ('signed-off-by', reviewer)
+            for reviewer in reversed(reviewers)
+        )
         return m
 
     def unstage(self, reason, *args):
@@ -1723,9 +1741,13 @@ class Commit(models.Model):
                         f"statuses changed on {c.sha}"
                     pr._validate(c.statuses)
 
-                stagings = Stagings.search([('head_ids.sha', '=', c.sha), ('state', '=', 'pending')])
+                stagings = Stagings.search([
+                    ('head_ids.sha', '=', c.sha),
+                    ('state', '=', 'pending'),
+                    ('target.project_id.staging_statuses', '=', True),
+                ])
                 if stagings:
-                    stagings._validate()
+                    stagings._notify(c)
             except Exception:
                 _logger.exception("Failed to apply commit %s (%s)", c, c.sha)
                 self.env.cr.rollback()
@@ -1775,10 +1797,12 @@ class Stagings(models.Model):
         ('pending', 'Pending'),
         ('cancelled', "Cancelled"),
         ('ff_failed', "Fast forward failed")
-    ], default='pending', index=True)
+    ], default='pending', index=True, store=True, compute='_compute_state')
     active = fields.Boolean(default=True)
 
     staged_at = fields.Datetime(default=fields.Datetime.now, index=True)
+    staging_end = fields.Datetime(store=True, compute='_compute_state')
+    staging_duration = fields.Float(compute='_compute_duration')
     timeout_limit = fields.Datetime(store=True, compute='_compute_timeout_limit')
     reason = fields.Text("Reason for final state (if any)")
 
@@ -1788,24 +1812,12 @@ class Stagings(models.Model):
     commits = fields.One2many('runbot_merge.stagings.commits', 'staging_id')
 
     statuses = fields.Binary(compute='_compute_statuses')
-    statuses_cache = fields.Text()
+    statuses_cache = fields.Text(default='{}', required=True)
 
-    def write(self, vals):
-        # don't allow updating the statuses_cache
-        vals.pop('statuses_cache', None)
-
-        if 'state' not in vals:
-            return super().write(vals)
-
-        previously_pending = self.filtered(lambda s: s.state == 'pending')
-        super().write(vals)
-        for staging in previously_pending:
-            if staging.state != 'pending':
-                super(Stagings, staging).write({
-                    'statuses_cache': json.dumps(staging.statuses)
-                })
-
-        return True
+    @api.depends('staged_at', 'staging_end')
+    def _compute_duration(self):
+        for s in self:
+            s.staging_duration = ((s.staging_end or fields.Datetime.now()) - s.staged_at).total_seconds()
 
     def name_get(self):
         return [
@@ -1826,7 +1838,7 @@ class Stagings(models.Model):
     def _search_batch_ids(self, operator, value):
         return [('staging_batch_ids.runbot_merge_batch_id', operator, value)]
 
-    @api.depends('heads')
+    @api.depends('heads', 'statuses_cache')
     def _compute_statuses(self):
         """ Fetches statuses associated with the various heads, returned as
         (repo, context, state, url)
@@ -1835,9 +1847,7 @@ class Stagings(models.Model):
         all_heads = self.mapped('head_ids')
 
         for st in self:
-            if st.statuses_cache:
-                st.statuses = json.loads(st.statuses_cache)
-                continue
+            statuses = json.loads(st.statuses_cache)
 
             commits = st.head_ids.with_prefetch(all_heads._prefetch_ids)
             st.statuses = [
@@ -1848,7 +1858,7 @@ class Stagings(models.Model):
                     status.get('target_url') or ''
                 )
                 for commit in commits
-                for context, status in json.loads(commit.statuses).items()
+                for context, status in statuses.get(commit.sha, {}).items()
             ]
 
     # only depend on staged_at as it should not get modified, but we might
@@ -1867,7 +1877,47 @@ class Stagings(models.Model):
         for staging in self:
             staging.pr_ids = staging.batch_ids.prs
 
-    def _validate(self):
+    def _notify(self, c: Commit) -> None:
+        self.env.cr.execute("""
+        UPDATE runbot_merge_stagings
+        SET statuses_cache = CASE
+            WHEN statuses_cache::jsonb->%(sha)s IS NULL
+                THEN jsonb_insert(statuses_cache::jsonb, ARRAY[%(sha)s],  %(statuses)s::jsonb)
+            ELSE statuses_cache::jsonb || jsonb_build_object(%(sha)s, %(statuses)s::jsonb)
+        END::text
+        WHERE id = any(%(ids)s)
+        """, {'sha': c.sha, 'statuses': c.statuses, 'ids': self.ids})
+        self.modified(['statuses_cache'])
+
+    def post_status(self, sha, context, status, *, target_url=None, description=None):
+        if not self.env.user.has_group('runbot_merge.status'):
+            raise AccessError("You are not allowed to post a status.")
+
+        for s in self:
+            if not s.target.project_id.staging_rpc:
+                continue
+
+            if not any(c.commit_id.sha == sha for c in s.commits):
+                raise ValueError(f"Staging {s.id} does not have the commit {sha}")
+
+            st = json.loads(s.statuses_cache)
+            st.setdefault(sha, {})[context] = {
+                'state': status,
+                'target_url': target_url,
+                'description': description,
+            }
+            s.statuses_cache = json.dumps(st)
+
+        return True
+
+    @api.depends(
+        "statuses_cache",
+        "target",
+        "heads.commit_id.sha",
+        "heads.repository_id.status_ids.branch_filter",
+        "heads.repository_id.status_ids.context",
+    )
+    def _compute_state(self):
         for s in self:
             if s.state != 'pending':
                 continue
@@ -1877,8 +1927,7 @@ class Stagings(models.Model):
                 (h.commit_id.sha, h.repository_id.status_ids._for_staging(s).mapped('context'))
                 for h in s.heads
             ]
-            # maps commits to their statuses
-            cmap = {c.sha: json.loads(c.statuses) for c in s.head_ids}
+            cmap = json.loads(s.statuses_cache)
 
             update_timeout_limit = False
             st = 'success'
@@ -1895,11 +1944,12 @@ class Stagings(models.Model):
                     else:
                         assert v == 'success'
 
-            vals = {'state': st}
+            s.state = st
+            if s.state != 'pending':
+                s.staging_end = fields.Datetime.now()
             if update_timeout_limit:
-                vals['timeout_limit'] = fields.Datetime.to_string(datetime.datetime.now() + datetime.timedelta(minutes=s.target.project_id.ci_timeout))
-                _logger.debug("%s got pending status, bumping timeout to %s (%s)", self, vals['timeout_limit'], cmap)
-            s.write(vals)
+                s.timeout_limit = fields.Datetime.to_string(datetime.datetime.now() + datetime.timedelta(minutes=s.target.project_id.ci_timeout))
+                _logger.debug("%s got pending status, bumping timeout to %s (%s)", self, s.timeout_limit, cmap)
 
     def action_cancel(self):
         w = self.env['runbot_merge.stagings.cancel'].create({
@@ -1970,17 +2020,18 @@ class Stagings(models.Model):
             })
             return True
 
-        # single batch => the staging is an unredeemable failure
+        # single batch => the staging is an irredeemable failure
         if self.state != 'failure':
             # timed out, just mark all PRs (wheee)
             self.fail('timed out (>{} minutes)'.format(self.target.project_id.ci_timeout))
             return False
 
+        staging_statuses = json.loads(self.statuses_cache)
         # try inferring which PR failed and only mark that one
         for head in self.heads:
             required_statuses = set(head.repository_id.status_ids._for_staging(self).mapped('context'))
 
-            statuses = json.loads(head.commit_id.statuses or '{}')
+            statuses = staging_statuses.get(head.commit_id.sha, {})
             reason = next((
                 ctx for ctx, result in statuses.items()
                 if ctx in required_statuses
