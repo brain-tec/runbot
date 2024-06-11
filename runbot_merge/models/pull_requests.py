@@ -396,12 +396,12 @@ class PullRequests(models.Model):
     staging_id = fields.Many2one('runbot_merge.stagings', compute='_compute_staging', store=True)
     staging_ids = fields.Many2many('runbot_merge.stagings', string="Stagings", compute='_compute_stagings', context={"active_test": False})
 
-    @api.depends('batch_id.staging_ids.active')
+    @api.depends('batch_id.batch_staging_ids.runbot_merge_stagings_id.active')
     def _compute_staging(self):
         for p in self:
             p.staging_id = p.batch_id.staging_ids.filtered('active')
 
-    @api.depends('batch_id.staging_ids')
+    @api.depends('batch_id.batch_staging_ids.runbot_merge_stagings_id')
     def _compute_stagings(self):
         for p in self:
             p.staging_ids = p.batch_id.staging_ids
@@ -665,7 +665,7 @@ class PullRequests(models.Model):
             match command:
                 case commands.Approve() if self.draft:
                     msg = "draft PRs can not be approved."
-                case commands.Approve() if self.parent_id:
+                case commands.Approve() if self.source_id:
                     # rules are a touch different for forwardport PRs:
                     valid = lambda _: True if command.ids is None else lambda n: n in command.ids
                     _, source_reviewer, source_author = self.source_id._pr_acl(author)
@@ -673,6 +673,10 @@ class PullRequests(models.Model):
                     ancestors = list(self._iter_ancestors())
                     # - reviewers on the original can approve any forward port
                     if source_reviewer:
+                        approveable = ancestors
+                    elif source_author:
+                        # give full review rights on all forwardports (attached
+                        # or not) to original author
                         approveable = ancestors
                     else:
                         # between the first merged ancestor and self
@@ -1430,7 +1434,7 @@ class PullRequests(models.Model):
             template = 'runbot_merge.forwardport.linked'
             format_args = {
                 'pr': self,
-                'siblings': ', '.join(p.display_name for p in (self.batch_id - self)),
+                'siblings': ', '.join(p.display_name for p in (self.batch_id.prs - self)),
                 'footer': FOOTER,
             }
         elif not self._find_next_target():
