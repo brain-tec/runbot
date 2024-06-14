@@ -482,6 +482,8 @@ def test_staging_concurrent(env, repo, config):
     ])
     assert pr2.staging_id
 
+
+@pytest.mark.expect_log_errors(reason="staging merge conflicts are logged")
 def test_staging_conflict_first(env, repo, users, config, page):
     """ If the first batch of a staging triggers a conflict, the PR should be
     marked as in error
@@ -512,6 +514,8 @@ def test_staging_conflict_first(env, repo, users, config, page):
     assert dangerbox
     assert dangerbox[0].text.strip() == 'Unable to stage PR'
 
+
+@pytest.mark.expect_log_errors(reason="merge conflicts are logged as errors")
 def test_staging_conflict_second(env, repo, users, config):
     """ If the non-first batch of a staging triggers a conflict, the PR should
     just be skipped: it might be a conflict with an other PR which could fail
@@ -634,6 +638,8 @@ def test_staging_ci_failure_single(env, repo, users, config, page):
     assert dangerbox
     assert dangerbox[0].text == 'ci/runbot'
 
+
+@pytest.mark.expect_log_errors(reason="failed fast forward of staging is a logged error")
 def test_ff_failure(env, repo, config, page):
     """ target updated while the PR is being staged => redo staging """
     with repo:
@@ -679,6 +685,8 @@ def test_ff_failure(env, repo, config, page):
     assert repo.commit('heads/staging.master').id != staging.id,\
         "PR should be staged to a new commit"
 
+
+@pytest.mark.expect_log_errors(reason="blocking fast-forward of staging which triggers a logged error when trying to patch the GH ref")
 def test_ff_failure_batch(env, repo, users, config):
     with repo:
         m = repo.make_commit(None, 'initial', None, tree={'m': 'm'})
@@ -1042,7 +1050,7 @@ def test_ci_failure_after_review(env, repo, users, config):
     """
     with repo:
         prx = _simple_init(repo)
-        prx.post_comment('hansen r+', config['role_reviewer']['token'])
+        prx.post_comment('hansen r+ rebase-ff', config['role_reviewer']['token'])
     env.run_crons()
 
     for ctx, url in [
@@ -1058,8 +1066,9 @@ def test_ci_failure_after_review(env, repo, users, config):
         env.run_crons()
 
     assert prx.comments == [
-        (users['reviewer'], 'hansen r+'),
+        (users['reviewer'], 'hansen r+ rebase-ff'),
         seen(env, prx, users),
+        (users['user'], "Merge method set to rebase and fast-forward."),
         (users['user'], "@{user} @{reviewer} 'ci/runbot' failed on this reviewed PR.".format_map(users)),
         (users['user'], "@{user} @{reviewer} 'legal/cla' failed on this reviewed PR.".format_map(users)),
         (users['user'], "@{user} @{reviewer} 'legal/cla' failed on this reviewed PR.".format_map(users)),
@@ -1294,14 +1303,15 @@ class TestRetry:
         """
         with repo:
             prx = _simple_init(repo)
-            prx.post_comment('hansen r+', config['role_reviewer']['token'])
+            prx.post_comment('hansen r+ rebase-ff', config['role_reviewer']['token'])
             prx.post_comment('hansen retry', config['role_reviewer']['token'])
         env.run_crons()
 
         assert prx.comments == [
-            (users['reviewer'], 'hansen r+'),
+            (users['reviewer'], 'hansen r+ rebase-ff'),
             (users['reviewer'], 'hansen retry'),
             seen(env, prx, users),
+            (users['user'], "Merge method set to rebase and fast-forward."),
             (users['user'], "@{reviewer} retry makes no sense when the PR is not in error.".format_map(users)),
         ]
 
@@ -2988,7 +2998,7 @@ class TestBatching(object):
             pr01 = self._pr(repo, 'Urgent1', [{'n': 'n'}, {'o': 'o'}], user=config['role_user']['token'], reviewer=None, statuses=[])
             pr01.post_comment('hansen NOW!', config['role_reviewer']['token'])
         p_01 = to_pr(env, pr01)
-        p_01.state = 'error'
+        p_01.error = True
 
         env.run_crons()
         assert not p_01.staging_id, "p_01 should not be picked up as it's failed"
@@ -3619,6 +3629,7 @@ class TestRecognizeCommands:
             prx.post_comment('%shansen r+' % indent, config['role_reviewer']['token'])
         assert pr.state == 'approved'
 
+    @pytest.mark.expect_log_errors(reason="unknown commands are logged")
     def test_unknown_commands(self, repo, env, config, users):
         with repo:
             m = repo.make_commit(None, 'initial', None, tree={'m': 'm'})

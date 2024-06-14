@@ -22,7 +22,7 @@ from odoo.exceptions import AccessError
 from odoo.osv import expression
 from odoo.tools import html_escape, Reverse
 from . import commands
-from .utils import enum
+from .utils import enum, readonly
 
 from .. import github, exceptions, controllers, utils
 
@@ -323,16 +323,18 @@ class PullRequests(models.Model):
     display_name: str
 
     target = fields.Many2one('runbot_merge.branch', required=True, index=True, tracking=True)
+    target_sequence = fields.Integer(related='target.sequence')
     repository = fields.Many2one('runbot_merge.repository', required=True)
+    project = fields.Many2one(related='repository.project_id')
     # NB: check that target & repo have same project & provide project related?
 
     closed = fields.Boolean(default=False, tracking=True)
     error = fields.Boolean(string="in error", default=False, tracking=True)
-    skipchecks = fields.Boolean(related='batch_id.skipchecks')
+    skipchecks = fields.Boolean(related='batch_id.skipchecks', inverse='_inverse_skipchecks')
     cancel_staging = fields.Boolean(related='batch_id.cancel_staging')
     merge_date = fields.Datetime(
         related='batch_id.merge_date',
-        inverse=lambda _: 1/0,
+        inverse=readonly,
         tracking=True,
         store=True,
     )
@@ -347,8 +349,13 @@ class PullRequests(models.Model):
         ('merged', 'Merged'),
         ('error', 'Error'),
     ],
-        compute='_compute_state', store=True, default='opened',
-        index=True, tracking=True, column_type=enum(_name, 'state'),
+        compute='_compute_state',
+        inverse=readonly,
+        readonly=True,
+        store=True,
+        index=True,
+        tracking=True,
+        column_type=enum(_name, 'state'),
     )
 
     number = fields.Integer(required=True, index=True, group_operator=None)
@@ -376,7 +383,7 @@ class PullRequests(models.Model):
 
     reviewed_by = fields.Many2one('res.partner', index=True, tracking=True)
     delegates = fields.Many2many('res.partner', help="Delegate reviewers, not intrinsically reviewers but can review this PR")
-    priority = fields.Selection(related="batch_id.priority", inverse=lambda _: 1 / 0)
+    priority = fields.Selection(related="batch_id.priority", inverse=readonly)
 
     overrides = fields.Char(required=True, default='{}', tracking=True)
     statuses = fields.Text(help="Copy of the statuses from the HEAD commit, as a Python literal", default="{}")
@@ -389,12 +396,12 @@ class PullRequests(models.Model):
         ('pending', 'Pending'),
         ('failure', 'Failure'),
         ('success', 'Success'),
-    ], compute='_compute_statuses', store=True, column_type=enum(_name, 'status'))
+    ], compute='_compute_statuses', store=True, inverse=readonly, column_type=enum(_name, 'status'))
     previous_failure = fields.Char(default='{}')
 
     batch_id = fields.Many2one('runbot_merge.batch', index=True)
-    staging_id = fields.Many2one('runbot_merge.stagings', compute='_compute_staging', store=True)
-    staging_ids = fields.Many2many('runbot_merge.stagings', string="Stagings", compute='_compute_stagings', context={"active_test": False})
+    staging_id = fields.Many2one('runbot_merge.stagings', compute='_compute_staging', inverse=readonly, store=True)
+    staging_ids = fields.Many2many('runbot_merge.stagings', string="Stagings", compute='_compute_stagings', inverse=readonly, context={"active_test": False})
 
     @api.depends('batch_id.batch_staging_ids.runbot_merge_stagings_id.active')
     def _compute_staging(self):
@@ -485,6 +492,12 @@ class PullRequests(models.Model):
     @api.depends('repository.name', 'number', 'message')
     def _compute_display_name(self):
         return super()._compute_display_name()
+
+    def _inverse_skipchecks(self):
+        for p in self:
+            p.batch_id.skipchecks = p.skipchecks
+            if p.skipchecks:
+                p.reviewed_by = self.env.user.partner_id
 
     def name_get(self):
         name_template = '%(repo_name)s#%(number)d'
@@ -632,7 +645,7 @@ class PullRequests(models.Model):
             cmds: List[commands.Command] = [
                 ps
                 for line in commandlines
-                for ps in commands.Parser(line)
+                for ps in commands.Parser(line.rstrip())
             ]
         except Exception as e:
             _logger.info(
@@ -764,6 +777,9 @@ class PullRequests(models.Model):
                 case commands.SkipChecks() if is_admin:
                     self.batch_id.skipchecks = True
                     self.reviewed_by = author
+                    if not (self.squash or self.merge_method):
+                        self.env.ref('runbot_merge.check_linked_prs_status')._trigger()
+
                     for p in self.batch_id.prs - self:
                         if not p.reviewed_by:
                             p.reviewed_by = author
@@ -799,7 +815,24 @@ class PullRequests(models.Model):
                 case commands.Close() if source_author:
                     feedback(close=True)
                 case commands.FW():
-                    if source_reviewer or is_reviewer:
+                    if command == commands.FW.NO:
+                        if is_author:
+                            for p in self.batch_id.prs:
+                                ping, m = p._maybe_update_limit(self.target.name)
+
+                                if ping and p == self:
+                                    msg = m
+                                else:
+                                    if ping:
+                                        m = f"@{login} {m}"
+                                    self.env['runbot_merge.pull_requests.feedback'].create({
+                                        'repository': p.repository.id,
+                                        'pull_request': p.number,
+                                        'message': m,
+                                    })
+                        else:
+                            msg = "you can't set a forward-port limit."
+                    elif source_reviewer or is_reviewer:
                         (self.source_id or self).batch_id.fw_policy = command.name.lower()
                         match command:
                             case commands.FW.DEFAULT:
@@ -812,6 +845,8 @@ class PullRequests(models.Model):
                     else:
                         msg = "you can't configure forward-port CI."
                 case commands.Limit(branch) if is_author:
+                    if branch is None:
+                        feedback(message="'ignore' is deprecated, use 'fw=no' to disable forward porting.")
                     limit = branch or self.target.name
                     for p in self.batch_id.prs:
                         ping, m = p._maybe_update_limit(limit)
@@ -967,13 +1002,12 @@ class PullRequests(models.Model):
     def _approve(self, author, login):
         oldstate = self.state
         newstate = RPLUS.get(self.state)
-        msg = None
         if not author.email:
-            msg = "I must know your email before you can review PRs. Please contact an administrator."
+            return "I must know your email before you can review PRs. Please contact an administrator."
         elif not newstate:
-            msg = "this PR is already reviewed, reviewing it again is useless."
-        else:
-            self.reviewed_by = author
+            return "this PR is already reviewed, reviewing it again is useless."
+
+        self.reviewed_by = author
         _logger.debug(
             "r+ on %s by %s (%s->%s) status=%s message? %s",
             self.display_name, author.github_login,
@@ -988,7 +1022,9 @@ class PullRequests(models.Model):
                 pull_request=self.number,
                 format_args={'user': login, 'pr': self},
             )
-        return msg
+        if not (self.squash or self.merge_method):
+            self.env.ref('runbot_merge.check_linked_prs_status')._trigger()
+        return None
 
     def message_post(self, **kw):
         if author := self.env.cr.precommit.data.get('change-author'):
@@ -1330,7 +1366,8 @@ class PullRequests(models.Model):
             if pair[0] != 'squash'
         )
         for r in self.search([
-            ('state', '=', 'ready'),
+            ('state', 'in', ("approved", "ready")),
+            ('staging_id', '=', False),
             ('squash', '=', False),
             ('merge_method', '=', False),
             ('method_warned', '=', False),
@@ -1778,7 +1815,7 @@ class Commit(models.Model):
     def _compute_prs(self):
         for c in self:
             c.pull_requests = self.env['runbot_merge.pull_requests'].search([
-                ('head', '=', self.sha),
+                ('head', '=', c.sha),
             ])
 
 
