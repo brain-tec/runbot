@@ -65,6 +65,13 @@ def test_trivial_flow(env, repo, page, users, config):
         )
         pr = repo.make_pr(title="gibberish", body="blahblah", target='master', head='other')
 
+        [c2] = repo.make_commits(
+            'other',
+            Commit('forgot a bit', tree={'whee': 'kjfdsh'}),
+            ref='heads/other',
+            make=False,
+        )
+
     pr_id = to_pr(env, pr)
     assert pr_id.state == 'opened'
     env.run_crons()
@@ -79,12 +86,12 @@ def test_trivial_flow(env, repo, page, users, config):
         [e.text_content() for e in pr_dashboard.cssselect('dl.runbot-merge-fields dd')],
     )) == {
         'label': f"{config['github']['owner']}:other",
-        'head': c1,
+        'head': c2,
     }
 
     with repo:
-        repo.post_status(c1, 'success', 'legal/cla')
-        repo.post_status(c1, 'success', 'ci/runbot')
+        repo.post_status(c2, 'success', 'legal/cla')
+        repo.post_status(c2, 'success', 'ci/runbot')
     env.run_crons()
     assert pr_id.state == 'validated'
 
@@ -140,6 +147,7 @@ def test_trivial_flow(env, repo, page, users, config):
     assert repo.read_tree(master) == {
         'a': 'some other content',
         'b': 'a second file',
+        'whee': 'kjfdsh',
     }
     assert master.message == "gibberish\n\nblahblah\n\ncloses {repo.name}#1"\
                              "\n\nSigned-off-by: {reviewer.formatted_email}"\
@@ -156,8 +164,9 @@ def test_trivial_flow(env, repo, page, users, config):
     ])
 
     assert list(messages) == [
-        ('OdooBot', '<p>Pull Request created</p>', []),
-        ('OdooBot', f'<p>statuses changed on {c1}</p>', [('Opened', 'Validated')]),
+        (users['user'], '<p>Pull Request created</p>', []),
+        (users['user'], '', [(c1, c2)]),
+        ('OdooBot', f'<p>statuses changed on {c2}</p>', [('Opened', 'Validated')]),
         # reviewer approved changing the state and setting reviewer as reviewer
         # plus set merge method
         ('Reviewer', '', [
@@ -1041,38 +1050,6 @@ def test_rebase_failure(env, repo, users, config):
         'm': 'm',
         'b': 'b',
     }
-
-def test_ci_failure_after_review(env, repo, users, config):
-    """ If a PR is r+'d but the CI ends up failing afterwards, ping the user
-    so they're aware. This is useful for the more "fire and forget" approach
-    especially small / simple PRs where you assume they're going to pass and
-    just r+ immediately.
-    """
-    with repo:
-        prx = _simple_init(repo)
-        prx.post_comment('hansen r+ rebase-ff', config['role_reviewer']['token'])
-    env.run_crons()
-
-    for ctx, url in [
-        ('ci/runbot', 'https://a'),
-        ('ci/runbot', 'https://a'),
-        ('legal/cla', 'https://b'),
-        ('foo/bar', 'https://c'),
-        ('ci/runbot', 'https://a'),
-        ('legal/cla', 'https://d'), # url changes so different from the previous
-    ]:
-        with repo:
-            repo.post_status(prx.head, 'failure', ctx, target_url=url)
-        env.run_crons()
-
-    assert prx.comments == [
-        (users['reviewer'], 'hansen r+ rebase-ff'),
-        seen(env, prx, users),
-        (users['user'], "Merge method set to rebase and fast-forward."),
-        (users['user'], "@{user} @{reviewer} 'ci/runbot' failed on this reviewed PR.".format_map(users)),
-        (users['user'], "@{user} @{reviewer} 'legal/cla' failed on this reviewed PR.".format_map(users)),
-        (users['user'], "@{user} @{reviewer} 'legal/cla' failed on this reviewed PR.".format_map(users)),
-    ]
 
 def test_reopen_merged_pr(env, repo, config, users):
     """ Reopening a *merged* PR should cause us to immediately close it again,
@@ -3137,7 +3114,7 @@ class TestReviewing:
             (users['user'], "I'm sorry, @{}. I'm afraid I can't do that.".format(users['other'])),
             (users['reviewer'], 'hansen r+'),
             (users['reviewer'], 'hansen r+'),
-            (users['user'], "@{} this PR is already reviewed, reviewing it again is useless.".format(
+            (users['user'], "This PR is already reviewed, reviewing it again is useless.".format(
                  users['reviewer'])),
         ]
 
@@ -3645,8 +3622,8 @@ class TestRecognizeCommands:
             (users['reviewer'], "hansen do the thing"),
             (users['reviewer'], "hansen @bobby-b r+ :+1:"),
             seen(env, pr, users),
-            (users['user'], "@{reviewer} unknown command 'do'".format_map(users)),
-            (users['user'], "@{reviewer} unknown command '@bobby-b'".format_map(users)),
+            (users['user'], "@{reviewer} unknown command 'do'.\n\nFor your own safety I've ignored *everything in your entire comment*.".format_map(users)),
+            (users['user'], "@{reviewer} unknown command '@bobby-b'.\n\nFor your own safety I've ignored *everything in your entire comment*.".format_map(users)),
         ]
 
 class TestRMinus:
@@ -3902,28 +3879,34 @@ class TestFeedback:
     def test_ci_approved(self, repo, env, users, config):
         """CI failing on an r+'d PR sends feedback"""
         with repo:
-            m = repo.make_commit(None, 'initial', None, tree={'m': 'm'})
-            repo.make_ref('heads/master', m)
+            [m] = repo.make_commits(None, Commit('initial', tree={'m': 'm'}), ref="heads/master")
 
-            c1 = repo.make_commit(m, 'first', None, tree={'m': 'c1'})
-            prx = repo.make_pr(title='title', body='body', target='master', head=c1)
-        pr = env['runbot_merge.pull_requests'].search([
-            ('repository.name', '=', repo.name),
-            ('number', '=', prx.number)
-        ])
-
-        with repo:
-            prx.post_comment('hansen r+', config['role_reviewer']['token'])
-        assert pr.state == 'approved'
-
-        with repo:
-            repo.post_status(prx.head, 'failure', 'ci/runbot')
+            [c1] = repo.make_commits(m, Commit('first', tree={'m': 'c1'}))
+            pr = repo.make_pr(title='title', body='body', target='master', head=c1)
+            pr.post_comment('hansen r+', config['role_reviewer']['token'])
         env.run_crons()
 
-        assert prx.comments == [
+        pr_id = to_pr(env, pr)
+        assert pr_id.state == 'approved'
+
+        for ctx, url in [
+            ('ci/runbot', 'https://a'),
+            ('ci/runbot', 'https://a'),
+            ('legal/cla', 'https://b'),
+            ('foo/bar', 'https://c'),
+            ('ci/runbot', 'https://a'),
+            ('legal/cla', 'https://d'),  # url changes so different from the previous
+        ]:
+            with repo:
+                repo.post_status(pr_id.head, 'failure', ctx, target_url=url)
+            env.run_crons()
+
+        assert pr.comments == [
             (users['reviewer'], 'hansen r+'),
-            seen(env, prx, users),
-            (users['user'], "@%(user)s @%(reviewer)s 'ci/runbot' failed on this reviewed PR." % users)
+            seen(env, pr, users),
+            (users['user'], "@{user} @{reviewer} 'ci/runbot' failed on this reviewed PR.".format_map(users)),
+            (users['user'], "@{user} @{reviewer} 'legal/cla' failed on this reviewed PR.".format_map(users)),
+            (users['user'], "@{user} @{reviewer} 'legal/cla' failed on this reviewed PR.".format_map(users)),
         ]
 
     def test_review_failed(self, repo, env, users, config):

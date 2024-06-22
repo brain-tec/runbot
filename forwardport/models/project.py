@@ -262,37 +262,6 @@ class PullRequests(models.Model):
                     )
         return r
 
-    def _try_closing(self, by):
-        r = super()._try_closing(by)
-        if r:
-            self.with_context(forwardport_detach_warn=False).write({
-                'parent_id': False,
-                'detach_reason': f"Closed by {by}",
-            })
-            self.search([('parent_id', '=', self.id)]).write({
-                'parent_id': False,
-                'detach_reason': f"{by} closed parent PR {self.display_name}",
-            })
-        return r
-
-    def _notify_ci_failed(self, ci):
-        # only care about FP PRs which are not staged / merged yet
-        # NB: probably ignore approved PRs as normal message will handle them?
-        if not (self.state == 'opened' and self.parent_id):
-            return
-
-        self.env.ref('runbot_merge.forwardport.ci.failed')._send(
-            repository=self.repository,
-            pull_request=self.number,
-            token_field='fp_github_token',
-            format_args={'pr': self, 'ci': ci},
-        )
-
-    def _validate(self, statuses):
-        failed = super()._validate(statuses)
-        self.batch_id._schedule_fp_followup()
-        return failed
-
     def _commits_lazy(self):
         s = requests.Session()
         s.headers['Authorization'] = 'token %s' % self.repository.project_id.fp_github_token

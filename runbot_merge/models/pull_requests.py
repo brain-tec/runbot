@@ -335,6 +335,7 @@ class PullRequests(models.Model):
     merge_date = fields.Datetime(
         related='batch_id.merge_date',
         inverse=readonly,
+        readonly=True,
         tracking=True,
         store=True,
     )
@@ -383,7 +384,7 @@ class PullRequests(models.Model):
 
     reviewed_by = fields.Many2one('res.partner', index=True, tracking=True)
     delegates = fields.Many2many('res.partner', help="Delegate reviewers, not intrinsically reviewers but can review this PR")
-    priority = fields.Selection(related="batch_id.priority", inverse=readonly)
+    priority = fields.Selection(related="batch_id.priority", inverse=readonly, readonly=True)
 
     overrides = fields.Char(required=True, default='{}', tracking=True)
     statuses = fields.Text(help="Copy of the statuses from the HEAD commit, as a Python literal", default="{}")
@@ -396,12 +397,12 @@ class PullRequests(models.Model):
         ('pending', 'Pending'),
         ('failure', 'Failure'),
         ('success', 'Success'),
-    ], compute='_compute_statuses', store=True, inverse=readonly, column_type=enum(_name, 'status'))
+    ], compute='_compute_statuses', store=True, inverse=readonly, readonly=True, column_type=enum(_name, 'status'))
     previous_failure = fields.Char(default='{}')
 
     batch_id = fields.Many2one('runbot_merge.batch', index=True)
-    staging_id = fields.Many2one('runbot_merge.stagings', compute='_compute_staging', inverse=readonly, store=True)
-    staging_ids = fields.Many2many('runbot_merge.stagings', string="Stagings", compute='_compute_stagings', inverse=readonly, context={"active_test": False})
+    staging_id = fields.Many2one('runbot_merge.stagings', compute='_compute_staging', inverse=readonly, readonly=True, store=True)
+    staging_ids = fields.Many2many('runbot_merge.stagings', string="Stagings", compute='_compute_stagings', inverse=readonly, readonly=True, context={"active_test": False})
 
     @api.depends('batch_id.batch_staging_ids.runbot_merge_stagings_id.active')
     def _compute_staging(self):
@@ -655,7 +656,7 @@ class PullRequests(models.Model):
                 utils.shorten(comment['body'] or '', 50),
                 exc_info=True
             )
-            feedback(message=f"@{login} {e.args[0]}")
+            feedback(message=f"@{login} {e.args[0]}.\n\nFor your own safety I've ignored *everything in your entire comment*.")
             return 'error'
 
         is_admin, is_reviewer, is_author = self._pr_acl(author)
@@ -1001,17 +1002,25 @@ class PullRequests(models.Model):
 
     def _approve(self, author, login):
         oldstate = self.state
-        newstate = RPLUS.get(self.state)
+        newstate = RPLUS.get(oldstate)
         if not author.email:
             return "I must know your email before you can review PRs. Please contact an administrator."
-        elif not newstate:
-            return "this PR is already reviewed, reviewing it again is useless."
+
+        if not newstate:
+            # Don't fail the entire command if someone tries to approve an
+            # already-approved PR.
+            self.env['runbot_merge.pull_requests.feedback'].create({
+                'repository': self.repository.id,
+                'pull_request': self.number,
+                'message': "This PR is already reviewed, reviewing it again is useless.",
+            })
+            return None
 
         self.reviewed_by = author
         _logger.debug(
             "r+ on %s by %s (%s->%s) status=%s message? %s",
             self.display_name, author.github_login,
-            oldstate, newstate or oldstate,
+            oldstate, newstate,
             self.status, self.status == 'failure'
         )
         if self.status == 'failure':
@@ -1040,6 +1049,13 @@ class PullRequests(models.Model):
             kw['body'] = html_escape(message)
         return super()._message_log(**kw)
 
+    def _message_log_batch(self, **kw):
+        if author := self.env.cr.precommit.data.get('change-author'):
+            kw['author_id'] = author
+        if message := self.env.cr.precommit.data.get('change-message'):
+            kw['bodies'] = {p.id: html_escape(message) for p in self}
+        return super()._message_log_batch(**kw)
+
     def _pr_acl(self, user):
         if not self:
             return ACL(False, False, False)
@@ -1058,7 +1074,7 @@ class PullRequests(models.Model):
         # could have two PRs (e.g. one open and one closed) at least
         # temporarily on the same head, or on the same head with different
         # targets
-        updateable = self.filtered(lambda p: p.state != 'merged')
+        updateable = self.filtered(lambda p: not p.merge_date)
         updateable.statuses = statuses
         for pr in updateable:
             if pr.status == "failure":
@@ -1067,6 +1083,7 @@ class PullRequests(models.Model):
                     status = statuses.get(ci) or {'state': 'pending'}
                     if status['state'] in ('error', 'failure'):
                         pr._notify_ci_new_failure(ci, status)
+        self.batch_id._schedule_fp_followup()
 
     def modified(self, fnames, create=False, before=False):
         """ By default, Odoo can't express recursive *dependencies* which is
@@ -1167,6 +1184,14 @@ class PullRequests(models.Model):
                 repository=self.repository,
                 pull_request=self.number,
                 format_args={'pr': self, 'status': ci}
+            )
+        elif self.state == 'opened' and self.parent_id:
+            # only care about FP PRs which are not approved / staged / merged yet
+            self.env.ref('runbot_merge.forwardport.ci.failed')._send(
+                repository=self.repository,
+                pull_request=self.number,
+                token_field='fp_github_token',
+                format_args={'pr': self, 'ci': ci},
             )
 
     def _auto_init(self):
@@ -1435,12 +1460,20 @@ class PullRequests(models.Model):
         WHERE id = %s AND state != 'merged' AND state != 'closed'
         FOR UPDATE SKIP LOCKED;
         ''', [self.id])
-        r = self.env.cr.fetchone()
-        if not r:
+        if not self.env.cr.rowcount:
             return False
 
         self.unstage("closed by %s", by)
-        self.write({'closed': True, 'reviewed_by': False})
+        self.with_context(forwardport_detach_warn=False).write({
+            'closed': True,
+            'reviewed_by': False,
+            'parent_id': False,
+            'detach_reason': f"Closed by {by}",
+        })
+        self.search([('parent_id', '=', self.id)]).write({
+            'parent_id': False,
+            'detach_reason': f"{by} closed parent PR {self.display_name}",
+        })
 
         return True
 
@@ -1759,14 +1792,18 @@ class Commit(models.Model):
     commit_ids = fields.Many2many('runbot_merge.stagings', relation='runbot_merge_stagings_commits', column2='staging_id', column1='commit_id')
     pull_requests = fields.One2many('runbot_merge.pull_requests', compute='_compute_prs')
 
+    @api.model_create_single
     def create(self, values):
         values['to_check'] = True
         r = super(Commit, self).create(values)
+        self.env.ref("runbot_merge.process_updated_commits")._trigger()
         return r
 
     def write(self, values):
         values.setdefault('to_check', True)
         r = super(Commit, self).write(values)
+        if values['to_check']:
+            self.env.ref("runbot_merge.process_updated_commits")._trigger()
         return r
 
     def _notify(self):
