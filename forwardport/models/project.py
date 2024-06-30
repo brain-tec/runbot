@@ -32,10 +32,9 @@ from odoo.osv import expression
 from odoo.tools.misc import topological_sort, groupby
 from odoo.tools.appdirs import user_cache_dir
 from odoo.addons.base.models.res_partner import Partner
-from odoo.addons.runbot_merge import git
+from odoo.addons.runbot_merge import git, utils
 from odoo.addons.runbot_merge.models.pull_requests import Branch
 from odoo.addons.runbot_merge.models.stagings_create import Message
-
 
 DEFAULT_DELTA = dateutil.relativedelta.relativedelta(days=3)
 
@@ -84,12 +83,11 @@ class Project(models.Model):
                     # and has not already been forward ported
                     and Batch.search_count([('parent_id', '=', b.id)]) == 0
                 )
-                ported |= extant.prs.filtered(lambda p: p._find_next_target())
-                # enqueue a forward port as if the now deactivated branch had
-                # been skipped over (which is the normal fw behaviour)
-                for b in extant.with_context(force_fw=True):
-                    # otherwise enqueue a followup
-                    b._schedule_fp_followup()
+
+                # PRs may have different limits in the same batch so only notify
+                # those which actually needed porting
+                ported |= extant._schedule_fp_followup(force_fw=True)\
+                    .prs.filtered(lambda p: p._find_next_target())
 
         if not ported:
             return
@@ -378,7 +376,7 @@ class PullRequests(models.Model):
                 authors.add(to_tuple(c['author']))
                 committers.add(to_tuple(c['committer']))
             fp_authorship = (project_id.fp_github_name, '', '')
-            author = fp_authorship if len(authors) != 1\
+            author = fp_authorship if len(authors) != 1 \
                 else authors.pop() + (head_commit['author']['date'],)
             committer = fp_authorship if len(committers) != 1 \
                 else committers.pop() + (head_commit['committer']['date'],)
@@ -399,31 +397,33 @@ class PullRequests(models.Model):
                 'merge.renamelimit=0',
                 'merge.renames=copies',
                 'merge.conflictstyle=zdiff3'
-            )\
-                .with_config(check=False)\
+            ) \
+                .with_config(check=False) \
                 .cherry_pick(squashed, no_commit=True, strategy="ort")
             status = conf.stdout().status(short=True, untracked_files='no').stdout.decode()
             if err.strip():
                 err = err.rstrip() + '\n----------\nstatus:\n' + status
             else:
                 err = 'status:\n' + status
+
             # if there was a single commit, reuse its message when committing
             # the conflict
-            # TODO: still add conflict information to this?
             if len(commits) == 1:
                 msg = root._make_fp_message(commits[0])
-                conf.with_config(input=str(msg).encode()) \
-                    .commit(all=True, allow_empty=True, file='-')
             else:
-                conf.commit(
-                    all=True, allow_empty=True,
-                    message="""Cherry pick of %s failed
+                out = utils.shorten(out, 8*1024, '[...]')
+                err = utils.shorten(err, 8*1024, '[...]')
+                msg = f"""Cherry pick of {h} failed
 
 stdout:
-%s
+{out}
 stderr:
-%s
-""" % (h, out, err))
+{err}
+"""
+
+            conf.with_config(input=str(msg).encode()) \
+                .commit(all=True, allow_empty=True, file='-')
+
             return (h, out, err, [c['sha'] for c in commits]), working_copy
 
     def _cherry_pick(self, working_copy):
@@ -550,6 +550,9 @@ class Stagings(models.Model):
         if vals.get('active') is False and self.state == 'success':
             # check all batches to see if they should be forward ported
             for b in self.with_context(active_test=False).batch_ids:
+                if b.fw_policy == 'no':
+                    continue
+
                 # if all PRs of a batch have parents they're part of an FP
                 # sequence and thus handled separately, otherwise they're
                 # considered regular merges

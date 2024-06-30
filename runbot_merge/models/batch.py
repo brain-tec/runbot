@@ -68,9 +68,10 @@ class Batch(models.Model):
     active = fields.Boolean(compute='_compute_active', store=True, help="closed batches (batches containing only closed PRs)")
 
     fw_policy = fields.Selection([
+        ('no', "Do not port forward"),
         ('default', "Default"),
         ('skipci', "Skip CI"),
-    ], required=True, default="default", string="Forward Port Policy")
+    ], required=True, default="default", string="Forward Port Policy", tracking=True)
 
     merge_date = fields.Datetime(tracking=True)
     # having skipchecks skip both validation *and approval* makes sense because
@@ -89,7 +90,7 @@ class Batch(models.Model):
         ('default', "Default"),
         ('priority', "Priority"),
         ('alone', "Alone"),
-    ], default='default', group_operator=None, required=True,
+    ], default='default', group_operator=None, required=True, tracking=True,
         column_type=enum(_name, 'priority'),
     )
 
@@ -227,10 +228,10 @@ class Batch(models.Model):
                 batch.blocked = f"Multiple target branches: {', '.join(targets.mapped('name'))!r}"
             else:
                 if batch.blocked and batch.cancel_staging:
+                    if splits := batch.target.split_ids:
+                        splits.unlink()
                     batch.target.active_staging_id.cancel(
-                        'unstaged by %s on %s (%s)',
-                        self.env.user.login,
-                        batch,
+                        'unstaged by %s becoming ready',
                         ', '.join(batch.prs.mapped('display_name')),
                     )
                 batch.blocked = False
@@ -415,7 +416,7 @@ class Batch(models.Model):
         new_batch._schedule_fp_followup()
         return new_batch
 
-    def _schedule_fp_followup(self):
+    def _schedule_fp_followup(self, *, force_fw=False):
         _logger = logging.getLogger(__name__).getChild('forwardport.next')
         # if the PR has a parent and is CI-validated, enqueue the next PR
         scheduled = self.browse(())
@@ -424,10 +425,16 @@ class Batch(models.Model):
             _logger.info('Checking if forward-port %s (%s)', batch, prs)
             # in cas of conflict or update individual PRs will "lose" their
             # parent, which should prevent forward porting
-            if not (batch.parent_id and all(p.parent_id for p in batch.prs)):
+            #
+            # even if we force_fw, a *followup* should still only be for forward
+            # ports so check that the batch has a parent (which should be the
+            # same thing as all the PRs having a source, kinda, but cheaper,
+            # it's not entirely true as technically the user could have added a
+            # PR to the forward ported batch
+            if not (batch.parent_id and force_fw or all(p.parent_id for p in batch.prs)):
                 _logger.info('-> no parent %s (%s)', batch, prs)
                 continue
-            if not self.env.context.get('force_fw') and batch.source.fw_policy != 'skipci' \
+            if not force_fw and batch.source.fw_policy != 'skipci' \
                     and (invalid := batch.prs.filtered(lambda p: p.state not in ['validated', 'ready'])):
                 _logger.info(
                     '-> wrong state %s (%s)',
