@@ -16,13 +16,14 @@ from typing import Optional, Union, List, Iterator, Tuple
 import psycopg2
 import sentry_sdk
 import werkzeug
+from markupsafe import Markup
 
 from odoo import api, fields, models, tools, Command
-from odoo.exceptions import AccessError
+from odoo.exceptions import AccessError, UserError
 from odoo.osv import expression
 from odoo.tools import html_escape, Reverse
 from . import commands
-from .utils import enum, readonly
+from .utils import enum, readonly, dfm
 
 from .. import github, exceptions, controllers, utils
 
@@ -283,7 +284,13 @@ class Branch(models.Model):
             self._table, ['name', 'project_id'])
         return res
 
-    @api.depends('active')
+    def name_get(self):
+        return [
+            (id, f"{b.project_id.name}:{name}")
+            for b, (id, name) in zip(self, super().name_get())
+        ]
+
+    @api.depends('active', 'project_id.name')
     def _compute_display_name(self):
         super()._compute_display_name()
         for b in self.filtered(lambda b: not b.active):
@@ -309,6 +316,19 @@ class Branch(models.Model):
     def _compute_active_staging(self):
         for b in self:
             b.active_staging_id = b.with_context(active_test=True).staging_ids
+
+
+class SplitOffWizard(models.TransientModel):
+    _name = "runbot_merge.pull_requests.split_off"
+    _description = "wizard to split a PR off of its current batch and into a different one"
+
+    pr_id = fields.Many2one("runbot_merge.pull_requests", required=True)
+    new_label = fields.Char(string="New Label")
+
+    def button_apply(self):
+        self.pr_id._split_off(self.new_label)
+        self.unlink()
+        return {'type': 'ir.actions.act_window_close'}
 
 
 ACL = collections.namedtuple('ACL', 'is_admin is_reviewer is_author')
@@ -363,12 +383,13 @@ class PullRequests(models.Model):
     author = fields.Many2one('res.partner', index=True)
     head = fields.Char(required=True, tracking=True)
     label = fields.Char(
-        required=True, index=True,
+        required=True, index=True, tracking=True,
         help="Label of the source branch (owner:branchname), used for "
              "cross-repository branch-matching"
     )
     refname = fields.Char(compute='_compute_refname')
     message = fields.Text(required=True)
+    message_html = fields.Html(compute='_compute_message_html', sanitize=False)
     draft = fields.Boolean(
         default=False, required=True, tracking=True,
         help="A draft PR can not be merged",
@@ -489,6 +510,20 @@ class PullRequests(models.Model):
     def _compute_message_title(self):
         for pr in self:
             pr.message_title = next(iter(pr.message.splitlines()), '')
+
+    @api.depends("message")
+    def _compute_message_html(self):
+        for pr in self:
+            match pr.message.split('\n\n', 1):
+                case [title]:
+                    pr.message_html = Markup('<h3>%s<h3>') % title
+                case [title, description]:
+                    pr.message_html = Markup('<h3>%s</h3>\n%s') % (
+                        title,
+                        dfm(pr.repository.name, description),
+                    )
+                case _:
+                    pr.message_html = ""
 
     @api.depends('repository.name', 'number', 'message')
     def _compute_display_name(self):
@@ -699,7 +734,6 @@ class PullRequests(models.Model):
                 e,
                 login, name,
                 utils.shorten(comment['body'] or '', 50),
-                exc_info=True
             )
             feedback(message=f"""@{login} {e.args[0]}.
 
@@ -796,6 +830,10 @@ For your own safety I've ignored *everything in your entire comment*.
                                 pull_request=self.number,
                                 format_args={'user': login, 'pr': self},
                             )
+                        if self.source_id:
+                            feedback("Note that only this forward-port has been"
+                                     " unapproved, sibling forward ports may "
+                                     "have to be unapproved individually.")
                         self.unstage("unreviewed (r-) by %s", login)
                     else:
                         msg = "r- makes no sense in the current PR state."
@@ -1052,10 +1090,15 @@ For your own safety I've ignored *everything in your entire comment*.
         if not newstate:
             # Don't fail the entire command if someone tries to approve an
             # already-approved PR.
+            if self.error:
+                msg = "This PR is already reviewed, it's in error, you might want to `retry` it instead " \
+                      "(if you have already confirmed the error is not legitimate)."
+            else:
+                msg = "This PR is already reviewed, reviewing it again is useless."
             self.env['runbot_merge.pull_requests.feedback'].create({
                 'repository': self.repository.id,
                 'pull_request': self.number,
-                'message': "This PR is already reviewed, reviewing it again is useless.",
+                'message': msg,
             })
             return None
 
@@ -1577,6 +1620,37 @@ For your own safety I've ignored *everything in your entire comment*.
             token_field='fp_github_token',
             format_args=format_args,
         )
+
+    def button_split(self):
+        if len(self.batch_id.prs) == 1:
+            raise UserError("Splitting a batch with a single PR is dumb")
+
+        w = self.env['runbot_merge.pull_requests.split_off'].create({
+            'pr_id': self.id,
+            'new_label': self.label,
+        })
+        return {
+            'type': 'ir.actions.act_window',
+            'res_model': w._name,
+            'res_id': w.id,
+            'target': 'new',
+            'views': [(False, 'form')],
+        }
+
+    def _split_off(self, new_label):
+        # should not be usable to move a PR between batches (maybe later)
+        batch = self.env['runbot_merge.batch']
+        if not re.search(r':patch-\d+$', new_label):
+            if batch.search([
+                ('merge_date', '=', False),
+                ('prs.label', '=', new_label),
+            ]):
+                raise UserError("Can not split off to an existing batch")
+
+        self.write({
+            'label': new_label,
+            'batch_id': batch.create({}).id,
+        })
 
 # ordering is a bit unintuitive because the lowest sequence (and name)
 # is the last link of the fp chain, reasoning is a bit more natural the
@@ -2209,9 +2283,9 @@ class Stagings(models.Model):
                     self._safety_dance(gh, self.commits)
             except exceptions.FastForwardError as e:
                 logger.warning(
-                    "Could not fast-forward successful staging on %s:%s",
+                    "Could not fast-forward successful staging on %s:%s: %s",
                     e.args[0], self.target.name,
-                    exc_info=True
+                    e,
                 )
                 self.write({
                     'state': 'ff_failed',

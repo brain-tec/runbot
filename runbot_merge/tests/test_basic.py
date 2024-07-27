@@ -492,7 +492,6 @@ def test_staging_concurrent(env, repo, config):
     assert pr2.staging_id
 
 
-@pytest.mark.expect_log_errors(reason="staging merge conflicts are logged")
 def test_staging_conflict_first(env, repo, users, config, page):
     """ If the first batch of a staging triggers a conflict, the PR should be
     marked as in error
@@ -524,7 +523,6 @@ def test_staging_conflict_first(env, repo, users, config, page):
     assert dangerbox[0].text.strip() == 'Unable to stage PR'
 
 
-@pytest.mark.expect_log_errors(reason="merge conflicts are logged as errors")
 def test_staging_conflict_second(env, repo, users, config):
     """ If the non-first batch of a staging triggers a conflict, the PR should
     just be skipped: it might be a conflict with an other PR which could fail
@@ -648,7 +646,6 @@ def test_staging_ci_failure_single(env, repo, users, config, page):
     assert dangerbox[0].text == 'ci/runbot'
 
 
-@pytest.mark.expect_log_errors(reason="failed fast forward of staging is a logged error")
 def test_ff_failure(env, repo, config, page):
     """ target updated while the PR is being staged => redo staging """
     with repo:
@@ -695,7 +692,6 @@ def test_ff_failure(env, repo, config, page):
         "PR should be staged to a new commit"
 
 
-@pytest.mark.expect_log_errors(reason="blocking fast-forward of staging which triggers a logged error when trying to patch the GH ref")
 def test_ff_failure_batch(env, repo, users, config):
     with repo:
         m = repo.make_commit(None, 'initial', None, tree={'m': 'm'})
@@ -770,7 +766,7 @@ def test_ff_failure_batch(env, repo, users, config):
     }
 
 class TestPREdition:
-    def test_edit(self, env, repo, config):
+    def test_edit(self, env, project, repo, config):
         """ Editing PR:
 
         * title (-> message)
@@ -814,7 +810,7 @@ class TestPREdition:
         assert pr.target == branch_1
         assert not pr.staging_id, "updated the base of a staged PR should have unstaged it"
         assert st.state == 'cancelled', f"expected cancellation, got {st.state}"
-        assert st.reason == f"{pr.display_name} target (base) branch was changed from 'master' to '1.0'"
+        assert st.reason == f"{pr.display_name} target (base) branch was changed from '{project.name}:master' to '{project.name}:1.0'"
 
         with repo: prx.base = '2.0'
         assert not pr.exists()
@@ -1199,33 +1195,41 @@ class TestRetry:
         reviewer asks for it
         """
         with repo:
-            prx = _simple_init(repo)
-            repo.post_status(prx.head, 'success', 'ci/runbot')
-            repo.post_status(prx.head, 'success', 'legal/cla')
-            prx.post_comment('hansen r+ delegate=%s rebase-merge' % users['other'],
-                             config["role_reviewer"]['token'])
+            pr = _simple_init(repo)
+            repo.post_status(pr.head, 'success', 'ci/runbot')
+            repo.post_status(pr.head, 'success', 'legal/cla')
+            pr.post_comment(f'hansen r+ delegate={users["other"]} rebase-merge',
+                            config["role_reviewer"]['token'])
         env.run_crons()
-        assert env['runbot_merge.pull_requests'].search([
-            ('repository.name', '=', repo.name),
-            ('number', '=', prx.number)
-        ]).staging_id
+        pr_id = to_pr(env, pr)
+        assert pr_id.staging_id
 
         staging_head = repo.commit('heads/staging.master')
         with repo:
             repo.post_status('staging.master', 'success', 'legal/cla')
             repo.post_status('staging.master', 'failure', 'ci/runbot')
         env.run_crons()
-        assert env['runbot_merge.pull_requests'].search([
-            ('repository.name', '=', repo.name),
-            ('number', '=', prx.number)
-        ]).state == 'error'
+        assert pr_id.state == 'error'
 
         with repo:
-            prx.post_comment('hansen retry', config['role_' + retrier]['token'])
-        assert env['runbot_merge.pull_requests'].search([
-            ('repository.name', '=', repo.name),
-            ('number', '=', prx.number)
-        ]).state == 'ready'
+            pr.post_comment('hansen r+ rebase-ff', config["role_reviewer"]['token'])
+        env.run_crons()
+        assert pr_id.state == 'error'
+        assert pr.comments == [
+            (users['reviewer'], f'hansen r+ delegate={users["other"]} rebase-merge'),
+            seen(env, pr, users),
+            (users['user'], 'Merge method set to rebase and merge, using the PR as merge commit message.'),
+            (users['user'], '@{user} @{reviewer} staging failed: ci/runbot'.format_map(users)),
+            (users['reviewer'], 'hansen r+ rebase-ff'),
+            (users['user'], "This PR is already reviewed, it's in error, you might want to `retry` it instead "
+                            "(if you have already confirmed the error is not legitimate)."),
+            (users['user'], 'Merge method set to rebase and fast-forward.'),
+        ]
+        assert pr_id.merge_method == 'rebase-ff'
+
+        with repo:
+            pr.post_comment('hansen retry', config['role_' + retrier]['token'])
+        assert pr_id.state == 'ready'
         env.run_crons('runbot_merge.merge_cron', 'runbot_merge.staging_cron')
 
         staging_head2 = repo.commit('heads/staging.master')
@@ -1234,10 +1238,7 @@ class TestRetry:
             repo.post_status('staging.master', 'success', 'legal/cla')
             repo.post_status('staging.master', 'success', 'ci/runbot')
         env.run_crons()
-        assert env['runbot_merge.pull_requests'].search([
-            ('repository.name', '=', repo.name),
-            ('number', '=', prx.number)
-        ]).state == 'merged'
+        assert pr_id.state == 'merged'
 
     def test_retry_again_message(self, env, repo, users, config, page):
         """ For a retried PR, the error message on the PR's page should be the
@@ -3610,7 +3611,6 @@ class TestRecognizeCommands:
             prx.post_comment('%shansen r+' % indent, config['role_reviewer']['token'])
         assert pr.state == 'approved'
 
-    @pytest.mark.expect_log_errors(reason="unknown commands are logged")
     def test_unknown_commands(self, repo, env, config, users):
         with repo:
             m = repo.make_commit(None, 'initial', None, tree={'m': 'm'})

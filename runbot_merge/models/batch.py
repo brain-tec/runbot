@@ -52,8 +52,9 @@ class Batch(models.Model):
     _description = "batch of pull request"
     _inherit = ['mail.thread']
     _parent_store = True
+    _order = "id desc"
 
-    name = fields.Char(compute="_compute_name")
+    name = fields.Char(compute="_compute_name", search="_search_name")
     target = fields.Many2one('runbot_merge.branch', store=True, compute='_compute_target')
     batch_staging_ids = fields.One2many('runbot_merge.staging.batch', 'runbot_merge_batch_id')
     staging_ids = fields.Many2many(
@@ -94,7 +95,7 @@ class Batch(models.Model):
         column_type=enum(_name, 'priority'),
     )
 
-    blocked = fields.Char(store=True, compute="_compute_stageable")
+    blocked = fields.Char(store=True, compute="_compute_blocked")
 
     # unlike on PRs, this does not get detached... ? (because batches can be
     # partially detached so that's a PR-level concern)
@@ -183,19 +184,14 @@ class Batch(models.Model):
         for batch in self:
             batch.name = batch.prs[:1].label or batch.all_prs[:1].label
 
-    @api.depends("all_prs.target")
+    def _search_name(self, operator, value):
+        return [('all_prs.label', operator, value)]
+
+    @api.depends("all_prs.target", "all_prs.closed")
     def _compute_target(self):
         for batch in self:
-            if len(batch.prs) == 1:
-                batch.target = batch.all_prs.target
-            else:
-                targets = set(batch.all_prs.mapped('target'))
-                if not targets:
-                    targets = set(batch.all_prs.mapped('target'))
-                if len(targets) == 1:
-                    batch.target = targets.pop()
-                else:
-                    batch.target = False
+            targets = batch.prs.mapped('target') or batch.all_prs.mapped('target')
+            batch.target = targets if len(targets) == 1 else False
 
     @api.depends(
         "merge_date",
@@ -203,12 +199,14 @@ class Batch(models.Model):
         "skipchecks",
         "prs.status", "prs.reviewed_by", "prs.target",
     )
-    def _compute_stageable(self):
+    def _compute_blocked(self):
         for batch in self:
             if batch.merge_date:
                 batch.blocked = "Merged."
             elif not batch.active:
                 batch.blocked = "all prs are closed"
+            elif len(targets := batch.prs.mapped('target')) > 1:
+                batch.blocked = f"Multiple target branches: {', '.join(targets.mapped('name'))!r}"
             elif blocking := batch.prs.filtered(
                 lambda p: p.error or p.draft or not (p.squash or p.merge_method)
             ):
@@ -224,8 +222,6 @@ class Batch(models.Model):
                     unvalidated and f"{unvalidated} are waiting for CI",
                     failed and f"{failed} have failed CI",
                 ]))
-            elif len(targets := batch.prs.mapped('target')) > 1:
-                batch.blocked = f"Multiple target branches: {', '.join(targets.mapped('name'))!r}"
             else:
                 if batch.blocked and batch.cancel_staging:
                     if splits := batch.target.split_ids:
