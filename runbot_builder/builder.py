@@ -23,11 +23,16 @@ class BuilderClient(RunbotClient):
         self.last_docker_update = None
 
     def loop_turn(self):
-        self.env['runbot.runbot']._start_docker_registry(self.host)
-        last_docker_update = max(self.env['runbot.dockerfile'].search([('to_build', '=', True)]).mapped('write_date'))
-        if self.count == 1 or self.last_docker_update != last_docker_update:
-            self.host._docker_build()
-            self.last_docker_update = last_docker_update
+        icp = self.env['ir.config_parameter']
+        docker_registry_host_id = icp.get_param('runbot.docker_registry_host_id', default=False)
+        is_registry = docker_registry_host_id == str(self.host.id)
+        if is_registry:
+            self.env['runbot.runbot']._start_docker_registry(self.host)
+        if is_registry or not self.host.use_remote_docker_registry:
+            last_docker_update = max(self.env['runbot.dockerfile'].search([('to_build', '=', True)]).mapped('write_date'))
+            if self.count == 1 or self.last_docker_update != last_docker_update:
+                self.last_docker_update = last_docker_update
+                self.host._docker_build(push=is_registry)
         if self.count == 1:  # cleanup at second iteration
             self.env['runbot.runbot']._source_cleanup()
             self.env['runbot.build']._local_cleanup()

@@ -45,7 +45,7 @@ class Host(models.Model):
     paused = fields.Boolean('Paused', help='Host will stop scheduling while paused')
     profile = fields.Boolean('Profile', help='Enable profiling on this host')
 
-    use_docker_registry = fields.Boolean('Use Docker Registry', default=False, help="Use docker registry for pulling images")
+    use_remote_docker_registry = fields.Boolean('Use remote Docker Registry', default=False, help="Use docker registry for pulling images")
 
     def _compute_nb(self):
         groups = self.env['runbot.build'].read_group(
@@ -119,15 +119,14 @@ class Host(models.Model):
         self._bootstrap_db_template()
         self._bootstrap_local_logs_db()
 
-    def _docker_build(self):
+    def _docker_build(self, push=False):
         """ build docker images needed by locally pending builds"""
         _logger.info('Building docker images...')
         self.ensure_one()
         icp = self.env['ir.config_parameter']
-        docker_registry_host_id = icp.get_param('runbot.docker_registry_host_id', default=False)
-        if not self.use_docker_registry or docker_registry_host_id == self.id:
-            for dockerfile in self.env['runbot.dockerfile'].search([('to_build', '=', True)]):
-                dockerfile._build(self)
+        for dockerfile in self.env['runbot.dockerfile'].search([('to_build', '=', True)]):
+            dockerfile._build(self)
+            if push:
                 docker_push(dockerfile.image_tag)
         _logger.info('Done...')
 

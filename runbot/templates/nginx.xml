@@ -52,8 +52,8 @@ server {
 }
 
 server {
-	listen 127.0.0.1:5000;
-  server_name ~^dockerhub\.<t t-esc="re_escape(build.host)"/>$;
+  listen 8080;
+  server_name ~^dockerhub\.<t t-esc="re_escape(host_name)"/>$;
 
 	location /v2/ {
 		limit_except GET HEAD OPTIONS {
