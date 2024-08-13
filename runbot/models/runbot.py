@@ -397,10 +397,11 @@ class Runbot(models.AbstractModel):
 
         if registry_container:
             if registry_container.status in ('running', 'created', 'restarting'):
-                _logger.info('Docker registry container already found with status %s, skipping start procedure.', registry_container.status)
+                if registry_container.status != 'running':
+                    _logger.info('Docker registry container already found with status %s, skipping start procedure.', registry_container.status)
                 return
-            else:
-                _logger.info('Docker registry container found with status %s, trying the start procedure.', registry_container.status)
+
+            _logger.info('Docker registry container found with status %s, trying the start procedure.', registry_container.status)
 
         try:
             registry_container = docker_client.containers.run(
