@@ -188,7 +188,7 @@ class Dockerfile(models.Model):
     def _compute_image_tag(self):
         for rec in self:
             if rec.name:
-                rec.image_tag = 'runbot:%s' % re.sub(r'[ /:\(\)\[\]]', '', rec.name)
+                rec.image_tag = 'odoo:%s' % re.sub(r'[ /:\(\)\[\]]', '', rec.name)
 
     @api.depends('template_id')
     def _compute_view_ids(self):

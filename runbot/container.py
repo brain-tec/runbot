@@ -2,7 +2,7 @@
 """Containerize builds
 
 The docker image used for the build is always tagged like this:
-    runbot:runbot_tests
+    odoo:runbot_tests
 This file contains helpers to containerize builds with Docker.
 When testing this file:
     the first parameter should be a directory containing Odoo.
@@ -175,7 +175,7 @@ def _docker_run(cmd=False, log_path=False, build_dir=False, container_name=False
     """
     assert cmd and log_path and build_dir and container_name
     run_cmd = cmd
-    image_tag = image_tag or 'runbot:DockerDefault'
+    image_tag = image_tag or 'odoo:DockerDefault'
     container_name = sanitize_container_name(container_name)
     if isinstance(run_cmd, Command):
         cmd_object = run_cmd

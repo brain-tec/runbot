@@ -95,7 +95,7 @@ USER TestUser""", docker_render)
             ],
         })
 
-        self.assertEqual(dockerfile.image_tag, 'runbot:TestsUbuntuFocal20.0Chrome86')
+        self.assertEqual(dockerfile.image_tag, 'odoo:TestsUbuntuFocal20.0Chrome86')
         self.assertTrue(dockerfile.dockerfile.startswith('FROM ubuntu:jammy'))
         self.assertIn('86.0.4240.183-1', dockerfile.dockerfile)
         self.assertIn('pip install --no-cache-dir babel==2.8.0', dockerfile.dockerfile)
