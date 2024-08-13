@@ -154,6 +154,24 @@ def _docker_push(image_tag):
         return (False, error)
     return (True, None)
 
+
+def docker_pull(image_tag):
+    return _docker_pull(image_tag)
+
+
+def _docker_pull(image_tag):
+    """Pull a docker image from a registry.
+    :param image_tag: the full image tag, including the registry host
+    e.g.: `dockerhub.runbot102.odoo.com/odoo:PureNobleTest`
+    :return: tuple(success, image) where success is a boolean and image a Docker image object or None in case of failure
+    """
+    docker_client = docker.from_env()
+    try:
+        image = docker_client.pull(image_tag)
+    except docker.errors.APIError as e:
+        return (False, None)
+    return (True, image)
+
 def docker_run(*args, **kwargs):
     return _docker_run(*args, **kwargs)
 

@@ -5,7 +5,7 @@ from collections import defaultdict
 from odoo import models, fields, api
 from odoo.tools import config, ormcache
 from ..common import fqdn, local_pgadmin_cursor, os, list_local_dbs, local_pg_cursor
-from ..container import docker_push
+from ..container import docker_push, docker_pull
 
 _logger = logging.getLogger(__name__)
 
@@ -119,15 +119,23 @@ class Host(models.Model):
         self._bootstrap_db_template()
         self._bootstrap_local_logs_db()
 
-    def _docker_build(self, push=False):
+    def _docker_update_images(self, docker_registry_host=False):
         """ build docker images needed by locally pending builds"""
         _logger.info('Building docker images...')
         self.ensure_one()
-        icp = self.env['ir.config_parameter']
-        for dockerfile in self.env['runbot.dockerfile'].search([('to_build', '=', True)]):
-            dockerfile._build(self)
-            if push:
-                docker_push(dockerfile.image_tag)
+        # pull all images from the runbot docker registry
+        is_registry = docker_registry_host == self
+        if docker_registry_host and self.use_remote_docker_registry and not is_registry:
+            for dockerfile in self.env['runbot.dockerfile'].search():
+                remote_tag = f'dockerhub.{docker_registry_host.name}/{dockerfile.image_tag}'
+                pull_result, image = docker_pull(remote_tag)
+                if pull_result:
+                    image.tag(dockerfile.image_tag)
+        else:
+            for dockerfile in self.env['runbot.dockerfile'].search([('to_build', '=', True)]):
+                dockerfile._build(self)
+                if is_registry:
+                    docker_push(dockerfile.image_tag)
         _logger.info('Done...')
 
     @ormcache()

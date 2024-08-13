@@ -224,7 +224,7 @@ class Runbot(models.AbstractModel):
         # Bootstrap
         host._bootstrap()
         if runbot_do_schedule:
-            host._docker_build()
+            host._docker_update_images()
             self._source_cleanup()
             self.env['runbot.build']._local_cleanup()
             self._docker_cleanup()
