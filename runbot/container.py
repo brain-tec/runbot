@@ -112,6 +112,7 @@ def _docker_build(build_dir, image_tag):
     """
     docker_client = docker.from_env()
     try:
+        # should we pull here ?
         docker_image, result_stream = docker_client.images.build(path=build_dir, tag=image_tag, rm=True)
         result_stream = list(result_stream)
         msg = ''.join([r.get('stream', '') for r in result_stream])
@@ -167,10 +168,40 @@ def _docker_pull(image_tag):
     """
     docker_client = docker.from_env()
     try:
-        image = docker_client.pull(image_tag)
-    except docker.errors.APIError as e:
+        image = docker_client.images.pull(image_tag)
+    except docker.errors.APIError:
+        message = f"failed Docker pull for {image_tag}"
+        _logger.warning(message)
         return (False, None)
     return (True, image)
+
+
+def docker_remove(image_tag):
+    return _docker_remove(image_tag)
+
+
+def _docker_remove(image_tag):
+    docker_client = docker.from_env()
+    try:
+        docker_client.images.remove(image_tag, force=1)
+    except docker.errors.APIError:
+        message = f"Docker remove failed for {image_tag}"
+        _logger.exception(message)
+        return False
+    return True
+
+
+def docker_prune():
+    return _docker_prune()
+
+
+def _docker_prune():
+    docker_client = docker.from_env()
+    try:
+        return docker_client.images.prune()
+    except docker.errors.APIError:
+        _logger.exception('Docker prune failed')
+        return {'ImagesDeleted': None, 'SpaceReclaimed': 0}
 
 def docker_run(*args, **kwargs):
     return _docker_run(*args, **kwargs)
@@ -343,7 +374,18 @@ def docker_ps():
 def _docker_ps():
     """Return a list of running containers names"""
     docker_client = docker.client.from_env()
-    return [ c.name for c in docker_client.containers.list()]
+    return [c.name for c in docker_client.containers.list()]
+
+
+def docker_images():
+    return _docker_images()
+
+
+def _docker_images():
+    """Return a list of running existing images"""
+    docker_client = docker.client.from_env()
+    return [c for c in docker_client.images.list()]
+
 
 def sanitize_container_name(name):
     """Returns a container name with unallowed characters removed"""
