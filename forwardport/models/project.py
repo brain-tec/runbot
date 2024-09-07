@@ -362,7 +362,8 @@ stderr:
 {err}
 """
 
-            target_head = source.stdout().rev_parse(target_branch.name).stdout.decode().strip()
+            target_head = source.stdout().rev_parse(f"refs/heads/{target_branch.name}")\
+                .stdout.decode().strip()
             commit = conf.commit_tree(
                 tree=tree.stdout.decode().splitlines(keepends=False)[0],
                 parents=[target_head],
@@ -386,7 +387,7 @@ stderr:
         logger = _logger.getChild(str(self.id)).getChild('cherrypick')
 
         # target's head
-        head = repo.stdout().rev_parse(branch).stdout.decode().strip()
+        head = repo.stdout().rev_parse(f"refs/heads/{branch}").stdout.decode().strip()
 
         commits = self.commits()
         logger.info(
@@ -484,6 +485,8 @@ stderr:
             ('source_id', '!=', False),
             # active
             ('state', 'not in', ['merged', 'closed']),
+            # not ready
+            ('blocked', '!=', False),
             ('source_id.merge_date', '<', cutoff),
         ], order='source_id, id'), lambda p: p.source_id)
 
@@ -498,11 +501,8 @@ stderr:
                 continue
             source.reminder_backoff_factor += 1
 
-            # only keep the PRs which don't have an attached descendant)
-            pr_ids = {p.id for p in prs}
-            for pr in prs:
-                pr_ids.discard(pr.parent_id.id)
-            for pr in (p for p in prs if p.id in pr_ids):
+            # only keep the PRs which don't have an attached descendant
+            for pr in set(prs).difference(p.parent_id for p in prs):
                 self.env.ref('runbot_merge.forwardport.reminder')._send(
                     repository=pr.repository,
                     pull_request=pr.number,
