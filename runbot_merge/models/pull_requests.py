@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import time
+from enum import IntEnum
 from functools import reduce
 from operator import itemgetter
 from typing import Optional, Union, List, Iterator, Tuple
@@ -619,25 +620,45 @@ class PullRequests(models.Model):
             return json.loads(self.overrides)
         return {}
 
-    def _get_or_schedule(self, repo_name, number, *, target=None, closing=False):
+    def _get_or_schedule(self, repo_name, number, *, target=None, closing=False) -> PullRequests | None:
         repo = self.env['runbot_merge.repository'].search([('name', '=', repo_name)])
         if not repo:
-            return
-
-        if target and not repo.project_id._has_branch(target):
-            self.env.ref('runbot_merge.pr.fetch.unmanaged')._send(
-                repository=repo,
-                pull_request=number,
-                format_args={'repository': repo, 'branch': target, 'number': number}
+            source = self.env['runbot_merge.events_sources'].search([('repository', '=', repo_name)])
+            _logger.warning(
+                "Got a PR notification for unknown repository %s (source %s)",
+                repo_name, source,
             )
             return
 
-        pr = self.search([
-            ('repository', '=', repo.id),
-            ('number', '=', number,)
-        ])
+        if target:
+            b = self.env['runbot_merge.branch'].with_context(active_test=False).search([
+                ('project_id', '=', repo.project_id.id),
+                ('name', '=', target),
+            ])
+            tmpl = None if b.active \
+                else 'runbot_merge.handle.branch.inactive' if b\
+                else 'runbot_merge.pr.fetch.unmanaged'
+        else:
+            tmpl = None
+
+        pr = self.search([('repository', '=', repo.id), ('number', '=', number)])
+        if pr and not pr.target.active:
+            tmpl = 'runbot_merge.handle.branch.inactive'
+            target = pr.target.name
+
+        if tmpl and not closing:
+            self.env.ref(tmpl)._send(
+                repository=repo,
+                pull_request=number,
+                format_args={'repository': repo_name, 'branch': target, 'number': number},
+            )
+
         if pr:
             return pr
+
+        # if the branch is unknown or inactive, no need to fetch the PR
+        if tmpl:
+            return
 
         Fetch = self.env['runbot_merge.fetch_job']
         if Fetch.search([('repository', '=', repo.id), ('number', '=', number)]):
@@ -879,6 +900,7 @@ For your own safety I've ignored *everything in your entire comment*.
                 case commands.Close() if source_author:
                     feedback(close=True)
                 case commands.FW():
+                    message = None
                     match command:
                         case commands.FW.NO if is_author or source_author:
                             message = "Disabled forward-porting."
@@ -890,10 +912,26 @@ For your own safety I've ignored *everything in your entire comment*.
                         #     message = "Not waiting for merge to create followup forward-ports."
                         case _:
                             msg = f"you don't have the right to {command}."
+                    if message:
+                        # TODO: feedback?
+                        if self.source_id:
+                            "if the pr is not a source, ignore (maybe?)"
+                        elif not self.merge_date:
+                            "if the PR is not merged, it'll be fw'd normally"
+                        elif self.batch_id.fw_policy != 'no' or command == commands.FW.NO:
+                            "if the policy is not being flipped from no to something else, nothing to do"
+                        elif branch_key(self.limit_id) <= branch_key(self.target):
+                            "if the limit is lower than current (old style ignore) there's nothing to do"
+                        else:
+                            message = f"Starting forward-port. {message}"
+                            self.env['forwardport.batches'].create({
+                                'batch_id': self.batch_id.id,
+                                'source': 'merge',
+                            })
 
-                    if not msg:
                         (self.source_id or self).batch_id.fw_policy = command.name.lower()
                         feedback(message=message)
+
                 case commands.Limit(branch) if is_author:
                     if branch is None:
                         feedback(message="'ignore' is deprecated, use 'fw=no' to disable forward porting.")
@@ -901,7 +939,7 @@ For your own safety I've ignored *everything in your entire comment*.
                     for p in self.batch_id.prs:
                         ping, m = p._maybe_update_limit(limit)
 
-                        if ping and p == self:
+                        if ping is Ping.ERROR and p == self:
                             msg = m
                         else:
                             if ping:
@@ -934,31 +972,37 @@ For your own safety I've ignored *everything in your entire comment*.
             feedback(message=f"@{login}{rejections}{footer}")
         return 'rejected'
 
-    def _maybe_update_limit(self, limit: str) -> Tuple[bool, str]:
+    def _maybe_update_limit(self, limit: str) -> Tuple[Ping, str]:
         limit_id = self.env['runbot_merge.branch'].with_context(active_test=False).search([
             ('project_id', '=', self.repository.project_id.id),
             ('name', '=', limit),
         ])
         if not limit_id:
-            return True, f"there is no branch {limit!r}, it can't be used as a forward port target."
+            return Ping.ERROR, f"there is no branch {limit!r}, it can't be used as a forward port target."
 
         if limit_id != self.target and not limit_id.active:
-            return True, f"branch {limit_id.name!r} is disabled, it can't be used as a forward port target."
+            return Ping.ERROR, f"branch {limit_id.name!r} is disabled, it can't be used as a forward port target."
 
         # not forward ported yet, just acknowledge the request
         if not self.source_id and self.state != 'merged':
             self.limit_id = limit_id
             if branch_key(limit_id) <= branch_key(self.target):
-                return False, "Forward-port disabled (via limit)."
+                return Ping.NO, "Forward-port disabled (via limit)."
             else:
-                return False, f"Forward-porting to {limit_id.name!r}."
+                suffix = ''
+                if self.batch_id.fw_policy == 'no':
+                    self.batch_id.fw_policy = 'default'
+                    suffix = " Re-enabled forward-porting (you should use "\
+                             "`fw=default` to re-enable forward porting "\
+                             "after disabling)."
+                return Ping.NO, f"Forward-porting to {limit_id.name!r}.{suffix}"
 
         # if the PR has been forwardported
         prs = (self | self.forwardport_ids | self.source_id | self.source_id.forwardport_ids)
         tip = max(prs, key=pr_key)
         # if the fp tip was closed it's fine
         if tip.state == 'closed':
-            return True, f"{tip.display_name} is closed, no forward porting is going on"
+            return Ping.ERROR, f"{tip.display_name} is closed, no forward porting is going on"
 
         prs.limit_id = limit_id
 
@@ -977,7 +1021,7 @@ For your own safety I've ignored *everything in your entire comment*.
             except psycopg2.errors.LockNotAvailable:
                 # row locked = port occurring and probably going to succeed,
                 # so next(real_limit) likely a done deal already
-                return True, (
+                return Ping.ERROR, (
                     f"Forward port of {tip.display_name} likely already "
                     f"ongoing, unable to cancel, close next forward port "
                     f"when it completes.")
@@ -988,6 +1032,9 @@ For your own safety I've ignored *everything in your entire comment*.
             # forward porting was previously stopped at tip, and we want it to
             # resume
             if tip.state == 'merged':
+                if tip.batch_id.source.fw_policy == 'no':
+                    # hack to ping the user but not rollback the transaction
+                    return Ping.YES, f"can not forward-port, policy is 'no' on {(tip.source_id or tip).display_name}"
                 self.env['forwardport.batches'].create({
                     'batch_id': tip.batch_id.id,
                     'source': 'fp' if tip.parent_id else 'merge',
@@ -1022,7 +1069,7 @@ For your own safety I've ignored *everything in your entire comment*.
             for p in (self.source_id | root) - self
         ])
 
-        return False, msg
+        return Ping.NO, msg
 
 
     def _find_next_target(self) -> Optional[Branch]:
@@ -1137,7 +1184,7 @@ For your own safety I've ignored *everything in your entire comment*.
         # temporarily on the same head, or on the same head with different
         # targets
         updateable = self.filtered(lambda p: not p.merge_date)
-        updateable.statuses = statuses
+        updateable.statuses = statuses or '{}'
         for pr in updateable:
             if pr.status == "failure":
                 statuses = json.loads(pr.statuses_full)
@@ -1163,7 +1210,7 @@ For your own safety I've ignored *everything in your entire comment*.
         super().modified(fnames, create, before)
 
     @api.depends(
-        'statuses', 'overrides', 'target', 'parent_id',
+        'statuses', 'overrides', 'target', 'parent_id', 'skipchecks',
         'repository.status_ids.context',
         'repository.status_ids.branch_filter',
         'repository.status_ids.prs',
@@ -1173,6 +1220,9 @@ For your own safety I've ignored *everything in your entire comment*.
             statuses = {**json.loads(pr.statuses), **pr._get_overrides()}
 
             pr.statuses_full = json.dumps(statuses, indent=4)
+            if pr.skipchecks:
+                pr.status = 'success'
+                continue
 
             st = 'success'
             for ci in pr.repository.status_ids._for_pr(pr):
@@ -1182,6 +1232,9 @@ For your own safety I've ignored *everything in your entire comment*.
                     break
                 if v == 'pending':
                     st = 'pending'
+            if pr.status != 'failure' and st == 'failure':
+                pr.unstage("had CI failure after staging")
+
             pr.status = st
 
     @api.depends(
@@ -1316,7 +1369,7 @@ For your own safety I've ignored *everything in your entire comment*.
 
         pr = super().create(vals)
         c = self.env['runbot_merge.commit'].search([('sha', '=', pr.head)])
-        pr._validate(c.statuses or '{}')
+        pr._validate(c.statuses)
 
         if pr.state not in ('closed', 'merged'):
             self.env.ref('runbot_merge.pr.created')._send(
@@ -1393,8 +1446,13 @@ For your own safety I've ignored *everything in your entire comment*.
 
         newhead = vals.get('head')
         if newhead:
+            if pid := self.env.cr.precommit.data.get('change-author'):
+                writer = self.env['res.partner'].browse(pid)
+            else:
+                writer = self.env.user.partner_id
+            self.unstage("updated by %s", writer.github_login or writer.name)
             c = self.env['runbot_merge.commit'].search([('sha', '=', newhead)])
-            self._validate(c.statuses or '{}')
+            self._validate(c.statuses)
         return w
 
     def _check_linked_prs_statuses(self, commit=False):
@@ -1627,6 +1685,13 @@ For your own safety I've ignored *everything in your entire comment*.
             'label': new_label,
             'batch_id': batch.create({}).id,
         })
+
+
+class Ping(IntEnum):
+    NO = 0
+    YES = 1
+    ERROR = 2
+
 
 # ordering is a bit unintuitive because the lowest sequence (and name)
 # is the last link of the fp chain, reasoning is a bit more natural the
@@ -2088,6 +2153,7 @@ class Stagings(models.Model):
         if not self.env.user.has_group('runbot_merge.status'):
             raise AccessError("You are not allowed to post a status.")
 
+        now = datetime.datetime.now().isoformat(timespec='seconds')
         for s in self:
             if not s.target.project_id.staging_rpc:
                 continue
@@ -2100,6 +2166,7 @@ class Stagings(models.Model):
                 'state': status,
                 'target_url': target_url,
                 'description': description,
+                'updated_at': now,
             }
             s.statuses_cache = json.dumps(st)
 
@@ -2113,39 +2180,45 @@ class Stagings(models.Model):
         "heads.repository_id.status_ids.context",
     )
     def _compute_state(self):
-        for s in self:
-            if s.state != 'pending':
+        for staging in self:
+            if staging.state != 'pending':
                 continue
 
             # maps commits to the statuses they need
             required_statuses = [
-                (h.commit_id.sha, h.repository_id.status_ids._for_staging(s).mapped('context'))
-                for h in s.heads
+                (h.commit_id.sha, h.repository_id.status_ids._for_staging(staging).mapped('context'))
+                for h in staging.heads
             ]
-            cmap = json.loads(s.statuses_cache)
+            cmap = json.loads(staging.statuses_cache)
 
-            update_timeout_limit = False
-            st = 'success'
+            last_pending = ""
+            state = 'success'
             for head, reqs in required_statuses:
                 statuses = cmap.get(head) or {}
-                for v in map(lambda n: statuses.get(n, {}).get('state'), reqs):
-                    if st == 'failure' or v in ('error', 'failure'):
-                        st = 'failure'
+                for status in (statuses.get(n, {}) for n in reqs):
+                    v = status.get('state')
+                    if state == 'failure' or v in ('error', 'failure'):
+                        state = 'failure'
                     elif v is None:
-                        st = 'pending'
+                        state = 'pending'
                     elif v == 'pending':
-                        st = 'pending'
-                        update_timeout_limit = True
+                        state = 'pending'
+                        last_pending = max(last_pending, status.get('updated_at', ''))
                     else:
                         assert v == 'success'
 
-            s.state = st
-            if s.state != 'pending':
+            staging.state = state
+            if staging.state != 'pending':
                 self.env.ref("runbot_merge.merge_cron")._trigger()
-            if update_timeout_limit:
-                s.timeout_limit = datetime.datetime.now() + datetime.timedelta(minutes=s.target.project_id.ci_timeout)
-                self.env.ref("runbot_merge.merge_cron")._trigger(s.timeout_limit)
-                _logger.debug("%s got pending status, bumping timeout to %s (%s)", self, s.timeout_limit, cmap)
+
+            if last_pending:
+                timeout = datetime.datetime.fromisoformat(last_pending) \
+                      + datetime.timedelta(minutes=staging.target.project_id.ci_timeout)
+
+                if timeout > staging.timeout_limit:
+                    staging.timeout_limit = timeout
+                    self.env.ref("runbot_merge.merge_cron")._trigger(timeout)
+                    _logger.debug("%s got pending status, bumping timeout to %s", staging, timeout)
 
     def action_cancel(self):
         w = self.env['runbot_merge.stagings.cancel'].create({
@@ -2298,7 +2371,7 @@ class Stagings(models.Model):
                 prs = self.mapped('batch_ids.prs')
                 logger.info(
                     "%s FF successful, marking %s as merged",
-                    self, prs
+                    self, prs.mapped('display_name'),
                 )
                 self.batch_ids.merge_date = fields.Datetime.now()
 

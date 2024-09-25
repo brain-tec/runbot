@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from utils import seen, Commit, to_pr, make_basic
+from utils import seen, Commit, to_pr, make_basic, prevent_unstaging
 
 
 def test_no_token(env, config, make_repo):
@@ -920,13 +920,12 @@ def test_missing_magic_ref(env, config, make_repo):
     Emulate this behaviour by updating the PR with a commit which lives in the
     repo but has no ref.
     """
-    prod, _ = make_basic(env, config, make_repo)
+    prod, _ = make_basic(env, config, make_repo, statuses='default')
     a_head = prod.commit('refs/heads/a')
     with prod:
         [c] = prod.make_commits(a_head.id, Commit('x', tree={'x': '0'}), ref='heads/change')
         pr = prod.make_pr(target='a', head='change')
-        prod.post_status(c, 'success', 'legal/cla')
-        prod.post_status(c, 'success', 'ci/runbot')
+        prod.post_status(c, 'success')
         pr.post_comment('hansen r+', config['role_reviewer']['token'])
     env.run_crons()
 
@@ -935,10 +934,10 @@ def test_missing_magic_ref(env, config, make_repo):
     pr_id = to_pr(env, pr)
     assert pr_id.staging_id
 
-    pr_id.head = '0'*40
+    with prevent_unstaging(pr_id.staging_id):
+        pr_id.head = '0'*40
     with prod:
-        prod.post_status('staging.a', 'success', 'legal/cla')
-        prod.post_status('staging.a', 'success', 'ci/runbot')
+        prod.post_status('staging.a', 'success')
     env.run_crons()
 
     assert not pr_id.staging_id
