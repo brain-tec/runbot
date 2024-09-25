@@ -33,6 +33,15 @@ class BuildErrorLink(models.Model):
     ]
 
 
+class BuildErrorGroup(models.Model):
+    _name = "runbot.build.error.group"
+
+    name = fields.Char("Name")
+    description = fields.Char("Description", store=True, compute='_compute_description')
+    
+    def _compute_description(self):
+        for record in self:
+
 class BuildError(models.Model):
 
     _name = "runbot.build.error"

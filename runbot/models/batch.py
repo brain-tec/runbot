@@ -494,7 +494,6 @@ class BatchSlot(models.Model):
     _description = 'Link between a bundle batch and a build'
     _order = 'trigger_id,id'
 
-
     batch_id = fields.Many2one('runbot.batch', index=True)
     trigger_id = fields.Many2one('runbot.trigger', index=True)
     build_id = fields.Many2one('runbot.build', index=True)
