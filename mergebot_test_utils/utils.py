@@ -3,6 +3,7 @@ import contextlib
 import itertools
 import re
 import time
+import typing
 
 from lxml import html
 
@@ -133,7 +134,7 @@ def make_basic(
     prod = make_repo(reponame)
     env['runbot_merge.events_sources'].create({'repository': prod.name})
     with prod:
-        a_0, a_1, a_2, a_3, a_4, = prod.make_commits(
+        _0, _1, a_2, _3, _4, = prod.make_commits(
             None,
             Commit("0", tree={'f': 'a'}),
             Commit("1", tree={'f': 'b'}),
@@ -142,7 +143,7 @@ def make_basic(
             Commit("4", tree={'f': 'e'}),
             ref='heads/a',
         )
-        b_1, b_2 = prod.make_commits(
+        b_1, _2 = prod.make_commits(
             a_2,
             Commit('11', tree={'g': 'a'}),
             Commit('22', tree={'g': 'b'}),
@@ -214,3 +215,17 @@ def prevent_unstaging(st) -> None:
         yield
     finally:
         st.active = True
+
+
+TYPE_MAPPING = {
+    'boolean': 'integer',
+    'date': 'datetime',
+    'monetary': 'float',
+    'selection': 'char',
+    'many2one': 'char',
+}
+def read_tracking_value(tv) -> tuple[str, typing.Any, typing.Any]:
+    field_id = tv.field_id if 'field_id' in tv else tv.field
+    field_type = field_id.field_type if 'field_type' in field_id else field_id.ttype
+    t = TYPE_MAPPING.get(field_type) or field_type
+    return field_id.name, tv[f"old_value_{t}"], tv[f"new_value_{t}"]

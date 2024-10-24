@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import logging
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import sentry_sdk
 import werkzeug.exceptions
@@ -210,12 +210,8 @@ def handle_pr(env, event):
                 updates['target'] = branch.id
                 updates['squash'] = pr['commits'] == 1
 
-        # turns out github doesn't bother sending a change key if the body is
-        # changing from empty (None), therefore ignore that entirely, just
-        # generate the message and check if it changed
-        message = utils.make_message(pr)
-        if message != pr_obj.message:
-            updates['message'] = message
+        if 'title' in event['changes'] or 'body' in event['changes']:
+            updates['message'] = utils.make_message(pr)
 
         _logger.info("update: %s = %s (by %s)", pr_obj.display_name, updates, event['sender']['login'])
         if updates:
@@ -294,6 +290,12 @@ def handle_pr(env, event):
             event['sender']['login'],
             pr['commits'] == 1
         )
+        if pr['base']['ref'] != pr_obj.target.name:
+            env['runbot_merge.fetch_job'].create({
+                'repository': pr_obj.repository.id,
+                'number': pr_obj.number,
+                'commits_at': datetime.now() + timedelta(minutes=5),
+            })
 
         pr_obj.write({
             'reviewed_by': False,
@@ -372,7 +374,7 @@ def handle_status(env, event):
             SET to_check = true,
                 statuses = c.statuses::jsonb || EXCLUDED.statuses::jsonb
             WHERE NOT c.statuses::jsonb @> EXCLUDED.statuses::jsonb
-    """, [event['sha'], status_value])
+    """, [event['sha'], status_value], log_exceptions=False)
     env.ref("runbot_merge.process_updated_commits")._trigger()
 
     return 'ok'

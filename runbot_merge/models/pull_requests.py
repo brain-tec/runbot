@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import builtins
 import collections
 import contextlib
 import datetime
@@ -22,7 +23,7 @@ from markupsafe import Markup
 from odoo import api, fields, models, tools, Command
 from odoo.exceptions import AccessError, UserError
 from odoo.osv import expression
-from odoo.tools import html_escape, Reverse
+from odoo.tools import html_escape, Reverse, mute_logger
 from . import commands
 from .utils import enum, readonly, dfm
 
@@ -106,7 +107,7 @@ All substitutions are tentatively applied sequentially to the input.
             self._cr, 'runbot_merge_unique_repo', self._table, ['name'])
         return res
 
-    def _load_pr(self, number, *, closing=False):
+    def _load_pr(self, number, *, closing=False, squash=False):
         gh = self.github()
 
         # fetch PR object and handle as *opened*
@@ -133,6 +134,10 @@ All substitutions are tentatively applied sequentially to the input.
             ('number', '=', number),
         ])
         if pr_id:
+            if squash:
+                pr_id.squash = pr['commits'] == 1
+                return
+
             sync = controllers.handle_pr(self.env, {
                 'action': 'synchronize',
                 'pull_request': pr,
@@ -426,10 +431,16 @@ class PullRequests(models.Model):
     staging_id = fields.Many2one('runbot_merge.stagings', compute='_compute_staging', inverse=readonly, readonly=True, store=True)
     staging_ids = fields.Many2many('runbot_merge.stagings', string="Stagings", compute='_compute_stagings', inverse=readonly, readonly=True, context={"active_test": False})
 
-    @api.depends('batch_id.batch_staging_ids.runbot_merge_stagings_id.active')
+    @api.depends(
+        'closed',
+        'batch_id.batch_staging_ids.runbot_merge_stagings_id.active',
+    )
     def _compute_staging(self):
         for p in self:
-            p.staging_id = p.batch_id.staging_ids.filtered('active')
+            if p.closed:
+                p.staging_id = False
+            else:
+                p.staging_id = p.batch_id.staging_ids.filtered('active')
 
     @api.depends('batch_id.batch_staging_ids.runbot_merge_stagings_id')
     def _compute_stagings(self):
@@ -583,8 +594,6 @@ class PullRequests(models.Model):
 
     @api.depends(
         'batch_id.prs.draft',
-        'batch_id.prs.squash',
-        'batch_id.prs.merge_method',
         'batch_id.prs.state',
         'batch_id.skipchecks',
     )
@@ -592,12 +601,11 @@ class PullRequests(models.Model):
         self.blocked = False
         requirements = (
             lambda p: not p.draft,
-            lambda p: p.squash or p.merge_method,
             lambda p: p.state == 'ready' \
                   or p.batch_id.skipchecks \
                  and all(pr.state != 'error' for pr in p.batch_id.prs)
         )
-        messages = ('is in draft', 'has no merge method', 'is not ready')
+        messages = ('is in draft', 'is not ready')
         for pr in self:
             if pr.state in ('merged', 'closed'):
                 continue
@@ -834,6 +842,10 @@ For your own safety I've ignored *everything in your entire comment*.
                         pull_request=self.number,
                         format_args={'new_method': explanation, 'pr': self, 'user': login},
                     )
+                    # if the merge method is the only thing preventing (but not
+                    # *blocking*) staging, trigger a staging
+                    if self.state == 'ready':
+                        self.env.ref("runbot_merge.staging_cron")._trigger()
                 case commands.Retry() if is_author or source_author:
                     if self.error:
                         self.error = False
@@ -1244,10 +1256,10 @@ For your own safety I've ignored *everything in your entire comment*.
     )
     def _compute_state(self):
         for pr in self:
-            if pr.batch_id.merge_date:
-                pr.state = 'merged'
-            elif pr.closed:
+            if pr.closed:
                 pr.state = "closed"
+            elif pr.batch_id.merge_date:
+                pr.state = 'merged'
             elif pr.error:
                 pr.state = "error"
             elif pr.batch_id.skipchecks: # skipchecks behaves as both approval and status override
@@ -1331,12 +1343,6 @@ For your own safety I've ignored *everything in your entire comment*.
         self._cr.execute("CREATE INDEX IF NOT EXISTS runbot_merge_pr_head "
                          "ON runbot_merge_pull_requests "
                          "USING hash (head)")
-
-    @property
-    def _tagstate(self):
-        if self.state == 'ready' and self.staging_id.heads:
-            return 'staged'
-        return self.state
 
     def _get_batch(self, *, target, label):
         batch = self.env['runbot_merge.batch']
@@ -1752,6 +1758,8 @@ class Tagging(models.Model):
             values['tags_remove'] = json.dumps(list(values['tags_remove']))
         if not isinstance(values.get('tags_add', ''), str):
             values['tags_add'] = json.dumps(list(values['tags_add']))
+        if values:
+            self.env.ref('runbot_merge.labels_cron')._trigger()
         return super().create(values)
 
     def _send(self):
@@ -1970,9 +1978,11 @@ class Commit(models.Model):
             self.env.ref("runbot_merge.process_updated_commits")._trigger()
         return r
 
+    @mute_logger('odoo.sql_db')
     def _notify(self):
         Stagings = self.env['runbot_merge.stagings']
         PRs = self.env['runbot_merge.pull_requests']
+        serialization_failures = False
         # chances are low that we'll have more than one commit
         for c in self.search([('to_check', '=', True)]):
             sha = c.sha
@@ -1991,15 +2001,18 @@ class Commit(models.Model):
                 if stagings:
                     stagings._notify(c)
             except psycopg2.errors.SerializationFailure:
-                _logger.info("Failed to apply commit %s (%s): serialization failure", c, sha)
+                serialization_failures = True
+                _logger.info("Failed to apply commit %s: serialization failure", sha)
                 self.env.cr.rollback()
             except Exception:
-                _logger.exception("Failed to apply commit %s (%s)", c, sha)
+                _logger.exception("Failed to apply commit %s", sha)
                 self.env.cr.rollback()
             else:
                 self.env.cr.precommit.data['change-message'] = \
                     f"statuses changed on {sha}"
                 self.env.cr.commit()
+        if serialization_failures:
+            self.env.ref("runbot_merge.process_updated_commits")._trigger()
 
     _sql_constraints = [
         ('unique_sha', 'unique (sha)', 'no duplicated commit'),
@@ -2497,31 +2510,41 @@ class FetchJob(models.Model):
     repository = fields.Many2one('runbot_merge.repository', required=True)
     number = fields.Integer(required=True, group_operator=None)
     closing = fields.Boolean(default=False)
+    commits_at = fields.Datetime(index="btree_not_null")
 
     @api.model_create_multi
     def create(self, vals_list):
-        self.env.ref('runbot_merge.fetch_prs_cron')._trigger()
+        now = fields.Datetime.now()
+        self.env.ref('runbot_merge.fetch_prs_cron')._trigger({
+            fields.Datetime.to_datetime(
+                vs.get('commits_at') or now
+            )
+            for vs in vals_list
+        })
         return super().create(vals_list)
 
     def _check(self, commit=False):
         """
         :param bool commit: commit after each fetch has been executed
         """
+        now = getattr(builtins, 'current_date', None) or fields.Datetime.to_string(datetime.datetime.now())
         while True:
-            f = self.search([], limit=1)
+            f = self.search([
+                '|', ('commits_at', '=', False), ('commits_at', '<=', now)
+            ], limit=1)
             if not f:
                 return
 
+            f.active = False
             self.env.cr.execute("SAVEPOINT runbot_merge_before_fetch")
             try:
-                f.repository._load_pr(f.number, closing=f.closing)
+                f.repository._load_pr(f.number, closing=f.closing, squash=bool(f.commits_at))
             except Exception:
                 self.env.cr.execute("ROLLBACK TO SAVEPOINT runbot_merge_before_fetch")
                 _logger.exception("Failed to load pr %s, skipping it", f.number)
             finally:
                 self.env.cr.execute("RELEASE SAVEPOINT runbot_merge_before_fetch")
 
-            f.active = False
             if commit:
                 self.env.cr.commit()
 
