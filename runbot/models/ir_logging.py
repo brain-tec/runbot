@@ -11,7 +11,7 @@ from odoo.tools import html_escape
 
 _logger = logging.getLogger(__name__)
 
-TYPES = [(t, t.capitalize()) for t in 'client server runbot subbuild link markdown'.split()]
+TYPES = [(t, t.capitalize()) for t in 'client server runbot subbuild markdown'.split()]
 
 
 class IrLogging(models.Model):
