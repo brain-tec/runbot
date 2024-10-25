@@ -5,16 +5,21 @@
         <field name="model">runbot.build.error</field>
         <field name="arch" type="xml">
           <form>
+            <header>
+              <button type="object" name="action_qualify" string="Qualify"/>
+            </header>
             <sheet>
+              <div class="oe_button_box" name="button_box">
+                <button class="oe_stat_button" name="action_search_qualified" type="object" icon="fa-binoculars">Find Similars</button>
+              </div>
               <widget name="web_ribbon" title="Test-tags" bg_color="bg-danger" invisible="not test_tags"/>
               <widget name="web_ribbon" title="Linked to another error" bg_color="bg-warning" invisible="not parent_id"/>
-              <header>
-              </header>
                 <group name="build_error_group" string="Base info" col="2">
                   <field name="content" readonly="1"/>
                   <field name="module_name" readonly="1"/>
                   <field name="function" readonly="1"/>
                   <field name="file_path" readonly="1"/>
+                  <field name="qualifiers" readonly="1"/>
                 </group>
                 <group name="fixer_info" string="Fixing" col="2">
                   <group>
@@ -159,6 +164,7 @@
                   >
                 <header>
                   <button name="%(runbot.runbot_open_bulk_wizard)d" string="Bulk Update" type="action" groups="runbot.group_runbot_admin,runbot.group_runbot_error_manager"/>
+                  <button name="action_qualify" string="Qualify" type="object" groups="runbot.group_runbot_admin,runbot.group_runbot_error_manager"/>
                 </header>
                 <field name="module_name" optional="show" readonly="1"/>
                 <field name="summary" optional="show" readonly="1"/>
@@ -191,12 +197,16 @@
           <field name="responsible"/>
           <field name="team_id"/>
           <field name="fixing_commit"/>
+          <field name="qualifiers_search"/>
           <filter string="Assigned to me" name="my_errors" domain="[('responsible', '=', uid)]"/>
           <separator/>
           <filter string="No Parent" name="no_parent_error" domain="[('parent_id', '=', False)]"/>
           <separator/>
           <filter string="Undeterministic" name="random_error" domain="[('random', '=', True)]"/>
           <filter string="Deterministic" name="random_error" domain="[('random', '=', False)]"/>
+          <separator/>
+          <filter string="Qualified" name="qualified_errors" domain="[('qualifiers', '!=', False)]"/>
+          <filter string="Not Qualified" name="not_qualified_errors" domain="[('qualifiers', '=', False)]"/>
           <separator/>
           <filter string="Fixed" name="fixed_errors" domain="[('active', '=', False)]"/>
           <filter string="Not Fixed" name="not_fixed_errors" domain="[('active', '=', True)]"/>
@@ -273,7 +283,75 @@
         <field name="view_mode">tree,form</field>
     </record>
 
+    <record id="build_error_qualify_regex_tree" model="ir.ui.view">
+        <field name="name">runbot.error.qualify.regex.tree</field>
+        <field name="model">runbot.error.qualify.regex</field>
+        <field name="arch" type="xml">
+            <tree string="Qualifying Regexes">
+                <header>
+                </header>
+                <field name="sequence" widget="handle"/>
+                <field name="regex" readonly="1"/>
+                <field name="source_field" readonly="1"/>
+            </tree>
+        </field>
+    </record>
 
+    <record id="build_error_qualify_regex_form" model="ir.ui.view">
+        <field name="name">runbot.error.qualify.regex.form</field>
+        <field name="model">runbot.error.qualify.regex</field>
+        <field name="arch" type="xml">
+          <form>
+            <div class="alert alert-info" role="alert">
+              The regular expresion must have at least one named group pattern e.g: <code>'(?P&lt;module&gt;\w+)'</code>
+            </div>
+            <sheet>
+              <group name="Regex And Source">
+                <field name="regex"/>
+                <field name="source_field"/>
+              </group>
+              <group>
+                <field name="sample_ids">
+                  <tree string="Samples" decoration-success="is_matching" decoration-danger="not is_matching">
+                    <field name="build_error_id"/>
+                    <field name="build_error_summary"/>
+                    <field name="expected_result" widget="runbotjsonb"/>
+                    <field name="result" widget="runbotjsonb" readonly="1"/>
+                    <field name="is_matching" column_invisible="True"/>
+                  </tree>
+                </field>
+              </group>
+            </sheet>
+          </form>
+        </field>
+    </record>
+
+    <record id="runbot_error_sample_link_form" model="ir.ui.view">
+      <field name="name">runbot.error.sample.link.form</field>
+        <field name="model">runbot.error.sample.link</field>
+        <field name="arch" type="xml">
+          <form>
+            <sheet>
+              <group name="Error Sample">
+                <field name="build_error_id"/>
+                <field name="expected_result" widget="runbotjsonb"/>
+              </group>
+              <group>
+                <field name="build_error_content"/>
+              </group>
+              <group name="Result">
+                <field name="result" widget="runbotjsonb" readonly="1"/>
+              </group>
+            </sheet>
+          </form>
+        </field>
+    </record>
+
+    <record id="open_view_build_error_qualify_regex_tree" model="ir.actions.act_window">
+        <field name="name">Build Errors Qualifying Regexes</field>
+        <field name="res_model">runbot.error.qualify.regex</field>
+        <field name="view_mode">tree,form</field>
+    </record>
 
   </data>
 </odoo>

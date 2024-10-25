@@ -1,14 +1,19 @@
 # -*- coding: utf-8 -*-
 import hashlib
+import json
 import logging
 import re
 
 from collections import defaultdict
 from dateutil.relativedelta import relativedelta
+from json.decoder import JSONDecodeError
 from markupsafe import Markup
 from werkzeug.urls import url_join
 from odoo import models, fields, api
 from odoo.exceptions import ValidationError, UserError
+from odoo.tools import SQL
+
+from ..fields import JsonDictField
 
 _logger = logging.getLogger(__name__)
 
@@ -76,6 +81,8 @@ class BuildError(models.Model):
     test_tags = fields.Char(string='Test tags', help="Comma separated list of test_tags to use to reproduce/remove this error", tracking=True)
     tags_min_version_id = fields.Many2one('runbot.version', 'Tags Min version', help="Minimal version where the test tags will be applied.")
     tags_max_version_id = fields.Many2one('runbot.version', 'Tags Max version', help="Maximal version where the test tags will be applied.")
+    qualifiers = JsonDictField('Qualifiers', index=True)
+    qualifiers_search = fields.Char('Qualifiers ', store=False, search='_search_qualifiers')
 
     @api.constrains('test_tags')
     def _check_test_tags(self):
@@ -303,6 +310,34 @@ class BuildError(models.Model):
     def _search_trigger_ids(self, operator, value):
         return [('build_error_link_ids.trigger_id', operator, value)]
 
+    def _search_qualifiers(self, operator, value):
+        match operator:
+            case 'ilike' | 'not ilike':
+                try:
+                    value = json.loads(value)
+                    query = SQL(r"""
+                        SELECT id FROM runbot_build_error
+                        WHERE qualifiers @> %s
+                    """, json.dumps(value))
+                except JSONDecodeError:
+                    query = SQL(r"""
+                        SELECT id FROM runbot_build_error
+                        WHERE qualifiers::text ilike %s
+                    """, f'%{value}%')
+                domain = [('id', 'inselect' if operator == 'ilike' else 'not inselect', query)]
+                return domain
+            case '=' | '!=':
+                try:
+                    value = json.loads(value)
+                    query = SQL(r"""
+                        SELECT id FROM runbot_build_error
+                        WHERE qualifiers @> %s AND qualifiers <@ %s
+                    """, json.dumps(value), json.dumps(value))
+                    domain = [('id', 'inselect' if operator == '=' else 'not inselect', query)]
+                    return domain
+                except JSONDecodeError:
+                    ...
+
     def _get_form_url(self):
         self.ensure_one()
         return url_join(self.get_base_url(), f'/web#id={self.id}&model=runbot.build.error&view_type=form')
@@ -349,6 +384,17 @@ class BuildError(models.Model):
             error.child_ids.parent_id = base_error
             error.active = False
 
+    def _qualify(self):
+        qualify_regexes = self.env['runbot.error.qualify.regex'].search([])
+        for record in self:
+            all_qualifiers = {}
+            for qualify_regex in qualify_regexes:
+                res = qualify_regex._qualify(record.content)  # TODO, MAYBE choose the source field
+                if res:
+                    # res.update({'qualifier_id': qualify_regex.id}) Probably not a good idea
+                    all_qualifiers.update(res)
+            record.qualifiers = all_qualifiers
+
     ####################
     #   Actions
     ####################
@@ -391,6 +437,23 @@ class BuildError(models.Model):
                 if team:
                     record.team_id = team
 
+    def action_qualify(self):
+        self._qualify()
+
+    def action_search_qualified(self):
+        query = SQL(
+            r"""SELECT id FROM runbot_build_error WHERE qualifiers @> %s AND id not in %s""",
+            json.dumps(self.qualifiers.dict),
+            tuple(self.ids)
+        )
+        self.env.cr.execute(query)
+        return {
+            'type': 'ir.actions.act_window',
+            'name': "Similar Qualifiers",
+            'res_model': 'runbot.build.error',
+            'view_mode': 'list,form',
+            'domain': [('id', 'in', [rec[0] for rec in self.env.cr.fetchall()])],
+        }
 
 class BuildErrorTag(models.Model):
 
@@ -463,3 +526,76 @@ class ErrorBulkWizard(models.TransientModel):
             if self.chatter_comment:
                 for build_error in error_ids:
                     build_error.message_post(body=Markup('%s') % self.chatter_comment, subject="Bullk Wizard Comment")
+
+
+class ErrorQualifyRegex(models.Model):
+
+    _name = "runbot.error.qualify.regex"
+    _description = "Build error qualifying regex"
+    _inherit = "mail.thread"
+    _rec_name = 'id'
+    _order = 'sequence, id'
+
+    sequence = fields.Integer('Sequence', default=100)
+    active = fields.Boolean('Active', default=True, tracking=True)
+    regex = fields.Char('Regular expression', required=True)
+    source_field = fields.Selection(
+        [
+            ("content", "Content"),
+            ("module", "Module Name"),
+            ("function", "Function Name"),
+            ("file_path", "File Path"),
+        ],
+        default="content",
+        string="Source Field",
+        help="Build error field on which the regex will be applied to extract a qualifier",
+    )
+
+    sample_ids = fields.One2many('runbot.error.sample.link', 'qualify_regex_id', string="Sample", help="Error samples to test qualifying regex")
+
+    @api.constrains('regex')
+    def _validate(self):
+        for rec in self:
+            try:
+                r = re.compile(rec.regex)
+            except re.error as e:
+                raise ValidationError("Unable to compile regular expression: %s" % e)
+            # verify that a named group exist in the pattern
+            if not re.search(r'\(\?P<\w+>.+\)', r.pattern):
+                raise ValidationError(
+                    "The regular expresion should contain at least one named group pattern e.g: '(?P<module>.+)'"
+                )
+
+    def _qualify(self, content):
+        self.ensure_one()
+        result = False
+        if content and self.regex:
+            result = re.search(self.regex, content, flags=re.MULTILINE)
+        return result.groupdict() if result else {}
+
+    @api.depends('regex', 'test_string')
+    def _compute_qualifiers(self):
+        for record in self:
+            if record.regex and record.test_string:
+                record.qualifiers = record._qualify(record.test_string)
+            else:
+                record.qualifiers = {}
+
+
+class QualifyErrorSampleLink(models.Model):
+    _name = 'runbot.error.sample.link'
+    _description = 'Extended Relation between a qualify regex and a build error taken as sample'
+
+    qualify_regex_id = fields.Many2one('runbot.error.qualify.regex', required=True)
+    build_error_id = fields.Many2one('runbot.build.error', string='Build Error', required=True)
+    build_error_summary = fields.Char(related='build_error_id.summary')
+    build_error_content = fields.Text(related='build_error_id.content')
+    expected_result = JsonDictField('Expected Qualifiers')
+    result = JsonDictField('Result', compute='_compute_result')
+    is_matching = fields.Boolean(compute='_compute_result', default=False)
+
+    @api.depends('qualify_regex_id', 'build_error_id')
+    def _compute_result(self):
+        for record in self:
+            record.result = record.qualify_regex_id._qualify(record.build_error_content)
+            record.is_matching = record.result == record.expected_result

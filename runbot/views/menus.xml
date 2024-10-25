@@ -36,6 +36,7 @@
 
     <menuitem name="Manage errors" id="runbot_menu_manage_errors" parent="runbot_menu_root" sequence="900"/>
     <menuitem name="Build errors" id="runbot_menu_build_error_tree" parent="runbot_menu_manage_errors" sequence="10" action="open_view_build_error_tree"/>
+    <menuitem name="Errors Qualifying" id="runbot_menu_build_error_qualify_regex_tree" parent="runbot_menu_manage_errors" sequence="10" action="open_view_build_error_qualify_regex_tree"/>
     <menuitem name="Error Logs" id="runbot_menu_error_logs" parent="runbot_menu_manage_errors" sequence="20" action="open_view_error_log_tree"/>
 
     <menuitem name="Teams" id="runbot_menu_teams" parent="runbot_menu_root" sequence="1000"/>
