@@ -83,6 +83,7 @@ class BuildError(models.Model):
     tags_max_version_id = fields.Many2one('runbot.version', 'Tags Max version', help="Maximal version where the test tags will be applied.")
     qualifiers = JsonDictField('Qualifiers', index=True)
     qualifiers_search = fields.Char('Qualifiers ', store=False, search='_search_qualifiers')
+    similar_ids = fields.One2many('runbot.build.error', compute='_compute_similar_ids')
 
     @api.constrains('test_tags')
     def _check_test_tags(self):
@@ -212,6 +213,21 @@ class BuildError(models.Model):
         for error in self:
             fingerprints = [error.fingerprint] + [rec.fingerprint for rec in error.child_ids]
             error.error_history_ids = self.search([('fingerprint', 'in', fingerprints), ('active', '=', False), ('id', '!=', error.id or False)])
+
+    @api.depends('qualifiers')
+    def _compute_similar_ids(self):
+        for record in self:
+            if record.qualifiers:
+                query = SQL(
+                    r"""SELECT id FROM runbot_build_error WHERE id != %s AND qualifiers @> %s AND qualifiers <@ %s""",
+                    record.id,
+                    json.dumps(self.qualifiers.dict),
+                    json.dumps(self.qualifiers.dict),
+                )
+                self.env.cr.execute(query)
+                record.similar_ids = self.env['runbot.build.error'].browse([rec[0] for rec in self.env.cr.fetchall()])
+            else:
+                record.similar_ids = False
 
     @api.model
     def _digest(self, s):
@@ -454,6 +470,7 @@ class BuildError(models.Model):
             'view_mode': 'list,form',
             'domain': [('id', 'in', [rec[0] for rec in self.env.cr.fetchall()])],
         }
+
 
 class BuildErrorTag(models.Model):
 
