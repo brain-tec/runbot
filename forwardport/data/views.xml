@@ -161,7 +161,7 @@
                     </group>
                 </group>
             </xpath>
-            <xpath expr="//field[@name='repo_ids']/tree" position="inside">
+            <xpath expr="//field[@name='repo_ids']/list" position="inside">
                 <field string="FP remote" name="fp_remote_target"
                        help="Repository where forward port branches will be created"
                 />

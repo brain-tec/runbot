@@ -8,10 +8,10 @@
         <field name="name">Forward port batches</field>
         <field name="model">forwardport.batches</field>
         <field name="arch" type="xml">
-            <tree>
+            <list>
                 <field name="source"/>
                 <field name="batch_id"/>
-            </tree>
+            </list>
         </field>
     </record>
     <record id="form_forward_port" model="ir.ui.view">
@@ -35,10 +35,10 @@
         <field name="name">Followup Updates</field>
         <field name="model">forwardport.updates</field>
         <field name="arch" type="xml">
-            <tree editable="bottom">
+            <list editable="bottom">
                 <field name="original_root"/>
                 <field name="new_root"/>
-            </tree>
+            </list>
         </field>
     </record>
 

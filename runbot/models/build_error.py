@@ -267,7 +267,7 @@ class BuildError(models.Model):
             window_action = {
                 "type": "ir.actions.act_window",
                 "res_model": "runbot.build.error",
-                "views": [[False, "tree"]],
+                "views": [[False, "list"]],
                 "domain": [('id', 'in', build_errors.ids)]
             }
             if len(build_errors) == 1:
