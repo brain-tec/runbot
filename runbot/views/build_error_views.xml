@@ -11,6 +11,10 @@
             <sheet>
               <div class="oe_button_box" name="button_box">
                 <button class="oe_stat_button" name="action_search_qualified" type="object" icon="fa-binoculars">Find Similars</button>
+                <button class="oe_stat_button" name="action_search_qualified" type="object" icon="fa-thermometer-half">
+                  <field name="almost_similar_count" class="o_stat_value"/>
+                  <span class="o_stat_text">Almost Similars</span>
+                </button>
               </div>
               <widget name="web_ribbon" title="Test-tags" bg_color="bg-danger" invisible="not test_tags"/>
               <widget name="web_ribbon" title="Linked to another error" bg_color="bg-warning" invisible="not parent_id"/>

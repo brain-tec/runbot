@@ -84,6 +84,7 @@ class BuildError(models.Model):
     qualifiers = JsonDictField('Qualifiers', index=True)
     qualifiers_search = fields.Char('Qualifiers ', store=False, search='_search_qualifiers')
     similar_ids = fields.One2many('runbot.build.error', compute='_compute_similar_ids')
+    almost_similar_count = fields.Integer(compute='_compute_almost_similar_count')
 
     @api.constrains('test_tags')
     def _check_test_tags(self):
@@ -228,6 +229,14 @@ class BuildError(models.Model):
                 record.similar_ids = self.env['runbot.build.error'].browse([rec[0] for rec in self.env.cr.fetchall()])
             else:
                 record.similar_ids = False
+
+    @api.depends('qualifiers')
+    def _compute_almost_similar_count(self):
+        q = self.mapped('qualifiers')
+        qualifiers_read_group = self.env['runbot.build.error']._read_group([('qualifiers', 'in', q)], ['qualifiers'], ['__count'])
+        count_by_qualifiers = {tuple(sorted(qualifiers)): count - 1 for qualifiers, count in qualifiers_read_group}
+        for record in self:
+            self.almost_similar_count = count_by_qualifiers[tuple(sorted(record.qualifiers.dict))] if record.qualifiers else 0
 
     @api.model
     def _digest(self, s):
