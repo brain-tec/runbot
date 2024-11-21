@@ -316,7 +316,7 @@ class BuildResult(models.Model):
     @api.depends('build_error_link_ids')
     def _compute_build_error_ids(self):
         for record in self:
-            record.build_error_ids = record.build_error_link_ids.mapped('build_error_id')
+            record.build_error_ids = record.build_error_link_ids.error_content_id.error_id
 
     def _get_worst_result(self, results, max_res=False):
         results = [result for result in results if result]  # filter Falsy values
@@ -996,7 +996,7 @@ class BuildResult(models.Model):
                 message = message % args
             except TypeError:
                 _logger.exception(f'Error while formating `{message}` with `{args}`')
-                message = ' ' .join([message] + args)
+                message = ' ' .join([message] + list(args))
 
         message = truncate(message)
 
@@ -1100,7 +1100,7 @@ class BuildResult(models.Model):
         python_params = python_params or []
         py_version = py_version if py_version is not None else build._get_py_version()
         pres = []
-        if not self.params_id.skip_requirements:
+        if not self.params_id.skip_requirements and not self.params_id.config_data.get('skip_requirements'):
             for commit_id in self.env.context.get('defined_commit_ids') or self.params_id.commit_ids.sorted(lambda c: (c.repo_id.sequence, c.repo_id.id)):
                 if os.path.isfile(commit_id._source_path('requirements.txt')):
                     repo_dir = self._docker_source_folder(commit_id)
@@ -1182,11 +1182,10 @@ class BuildResult(models.Model):
 
     def _parse_logs(self):
         """ Parse build logs to classify errors """
-        BuildError = self.env['runbot.build.error']
         # only parse logs from builds in error and not already scanned
-        builds_to_scan = self.search([('id', 'in', self.ids), ('local_result', 'in', ('ko', 'killed', 'warn')), ('build_error_link_ids', '=', False)])
-        ir_logs = self.env['ir.logging'].search([('level', 'in', ('ERROR', 'WARNING', 'CRITICAL')), ('type', '=', 'server'), ('build_id', 'in', builds_to_scan.ids)])
-        return BuildError._parse_logs(ir_logs)
+        builds_to_scan = self.filtered(lambda b: b.local_result in ('ko', 'killed', 'warn') and not b.build_error_link_ids)
+        ir_logs = builds_to_scan.log_ids.filtered(lambda l: l.level in ('ERROR', 'WARNING', 'CRITICAL'))
+        return self.env['runbot.build.error']._parse_logs(ir_logs)
 
     def _is_file(self, file, mode='r'):
         file_path = self._path(file)

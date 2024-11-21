@@ -1,6 +1,7 @@
 import logging
 
 from collections import defaultdict
+from docker.errors import ImageNotFound
 
 from odoo import models, fields, api
 from odoo.tools import config, ormcache
@@ -46,6 +47,7 @@ class Host(models.Model):
     profile = fields.Boolean('Profile', help='Enable profiling on this host')
 
     use_remote_docker_registry = fields.Boolean('Use remote Docker Registry', default=False, help="Use docker registry for pulling images")
+    docker_registry_url = fields.Char('Registry Url', help="Override global registry URL for this host.")
 
     def _compute_nb(self):
         groups = self.env['runbot.build'].read_group(
@@ -124,6 +126,7 @@ class Host(models.Model):
         self.ensure_one()
         icp = self.env['ir.config_parameter']
         docker_registry_host = self.browse(int(icp.get_param('runbot.docker_registry_host_id', default=0)))
+        registry_url = self.docker_registry_url.strip('/') if self.docker_registry_url else f'dockerhub.{docker_registry_host.name}'
         # pull all images from the runbot docker registry
         is_registry = docker_registry_host == self
         all_docker_files = self.env['runbot.dockerfile'].search([])
@@ -132,7 +135,7 @@ class Host(models.Model):
             _logger.info('Pulling docker images...')
             total_duration = 0
             for dockerfile in all_docker_files.filtered('always_pull'):
-                remote_tag = f'dockerhub.{docker_registry_host.name}/{dockerfile.image_tag}'
+                remote_tag = f'{registry_url}/{dockerfile.image_tag}'
                 result = docker_pull(remote_tag)
                 if result['success']:
                     result['image'].tag(dockerfile.image_tag)
@@ -145,7 +148,10 @@ class Host(models.Model):
             for dockerfile in self.env['runbot.dockerfile'].search([('to_build', '=', True)]):
                 dockerfile._build(self)
                 if is_registry:
-                    docker_push(dockerfile.image_tag)
+                    try:
+                        docker_push(dockerfile.image_tag)
+                    except ImageNotFound:
+                        _logger.warning("Image tag `%s` not found. Skipping push", dockerfile.image_tag)
 
         _logger.info('Cleaning docker images...')
         for image in docker_images():
