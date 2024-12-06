@@ -57,6 +57,16 @@ class Batch(models.Model):
     def _get_formated_age(self):
         return s2human_long(self.age)
 
+    def _get_global_result(self):
+        """Returns the worst result from the related builds and logs"""
+        self.ensure_one()
+        batch_result = 'warn' if any(log.level != 'INFO' for log in self.log_ids) else 'ok'
+        if self.state == 'skipped':
+            batch_result = 'skipped'
+        return self.env['runbot.build']._get_worst_result([
+            batch_result, *self.slot_ids.build_id.mapped('global_result'),
+        ])
+
     def _url(self):
         self.ensure_one()
         return "/runbot/batch/%s" % self.id
@@ -109,7 +119,11 @@ class Batch(models.Model):
     def _process(self):
         processed = self.browse()
         for batch in self:
-            if batch.state == 'preparing' and batch.last_update <= fields.Datetime.now() - datetime.timedelta(seconds=60):
+            process_delay = batch.bundle_id.project_id.process_delay
+            if batch.state == 'preparing' and (
+                process_delay == 0 or
+                batch.last_update <= fields.Datetime.now() - datetime.timedelta(seconds=process_delay)
+            ):
                 batch._prepare()
                 processed |= batch
             if batch.state == 'ready':

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import hashlib
+import json
 import logging
 import re
 
@@ -9,6 +10,9 @@ from markupsafe import Markup
 from werkzeug.urls import url_join
 from odoo import models, fields, api
 from odoo.exceptions import ValidationError, UserError
+from odoo.tools import SQL
+
+from ..fields import JsonDictField
 
 _logger = logging.getLogger(__name__)
 
@@ -67,6 +71,10 @@ def _compute_related_error_content_ids(field_name):
             record[field_name] = record.error_content_ids[field_name]
     return _compute
 
+def _search_related_error_content_ids(field_name):
+    def _search(self, operator, value):
+        return [(f'error_content_ids.{field_name}', operator, value)]
+    return _search
 
 class BuildError(models.Model):
     _name = "runbot.build.error"
@@ -96,13 +104,13 @@ class BuildError(models.Model):
     tags_max_version_id = fields.Many2one('runbot.version', 'Tags Max version', help="Maximal version where the test tags will be applied.")
 
     # Build error related data
-    build_error_link_ids = fields.Many2many('runbot.build.error.link', compute=_compute_related_error_content_ids('build_error_link_ids'))
+    build_error_link_ids = fields.Many2many('runbot.build.error.link', compute=_compute_related_error_content_ids('build_error_link_ids'), search=_search_related_error_content_ids('build_error_link_ids'))
     unique_build_error_link_ids = fields.Many2many('runbot.build.error.link', compute='_compute_unique_build_error_link_ids')
-    build_ids = fields.Many2many('runbot.build', compute=_compute_related_error_content_ids('build_ids'))
-    bundle_ids = fields.Many2many('runbot.bundle', compute=_compute_related_error_content_ids('bundle_ids'))
-    version_ids = fields.Many2many('runbot.version', string='Versions', compute=_compute_related_error_content_ids('version_ids'))
+    build_ids = fields.Many2many('runbot.build', compute=_compute_related_error_content_ids('build_ids'), search=_search_related_error_content_ids('build_ids'))
+    bundle_ids = fields.Many2many('runbot.bundle', compute=_compute_related_error_content_ids('bundle_ids'), search=_search_related_error_content_ids('bundle_ids'))
+    version_ids = fields.Many2many('runbot.version', string='Versions', compute=_compute_related_error_content_ids('version_ids'), search=_search_related_error_content_ids('version_ids'))
     trigger_ids = fields.Many2many('runbot.trigger', string='Triggers', compute=_compute_related_error_content_ids('trigger_ids'), store=True)
-    tag_ids = fields.Many2many('runbot.build.error.tag', string='Tags', compute=_compute_related_error_content_ids('tag_ids'))
+    tag_ids = fields.Many2many('runbot.build.error.tag', string='Tags', compute=_compute_related_error_content_ids('tag_ids'), search=_search_related_error_content_ids('tag_ids'))
 
     random = fields.Boolean('Random', compute="_compute_random", store=True)
 
@@ -195,6 +203,7 @@ class BuildError(models.Model):
                     error.team_id = previous_error.team_id
             previous_error.error_content_ids.write({'error_id': self})
             if not previous_error.test_tags:
+                previous_error.message_post(body=Markup('Error merged into %s') % error._get_form_link())
                 previous_error.active = False
 
     @api.model
@@ -344,6 +353,8 @@ class BuildErrorContent(models.Model):
     version_ids = fields.One2many('runbot.version', compute='_compute_version_ids', string='Versions', search='_search_version')
     trigger_ids = fields.Many2many('runbot.trigger', compute='_compute_trigger_ids', string='Triggers', search='_search_trigger_ids')
     tag_ids = fields.Many2many('runbot.build.error.tag', string='Tags')
+    qualifiers = JsonDictField('Qualifiers', index=True)
+    similar_ids = fields.One2many('runbot.build.error.content', compute='_compute_similar_ids')
 
     responsible = fields.Many2one(related='error_id.responsible')
     customer = fields.Many2one(related='error_id.customer')
@@ -433,6 +444,22 @@ class BuildErrorContent(models.Model):
         for error_content in self:
             error_content.error_display_id = error_content.error_id.id
 
+    @api.depends('qualifiers')
+    def _compute_similar_ids(self):
+        """error contents having the exactly the same qualifiers"""
+        for record in self:
+            if record.qualifiers:
+                query = SQL(
+                    r"""SELECT id FROM runbot_build_error_content WHERE id != %s AND qualifiers @> %s AND qualifiers <@ %s""",
+                    record.id,
+                    json.dumps(self.qualifiers.dict),
+                    json.dumps(self.qualifiers.dict),
+                )
+                self.env.cr.execute(query)
+                record.similar_ids = self.env['runbot.build.error.content'].browse([rec[0] for rec in self.env.cr.fetchall()])
+            else:
+                record.similar_ids = False
+
     @api.model
     def _digest(self, s):
         """
@@ -450,31 +477,52 @@ class BuildErrorContent(models.Model):
     def _search_trigger_ids(self, operator, value):
         return [('build_error_link_ids.trigger_id', operator, value)]
 
-    def _merge(self):
+    def _relink(self):
         if len(self) < 2:
             return
-        _logger.debug('Merging errors %s', self)
+        _logger.debug('Relinking error contents %s', self)
         base_error_content = self[0]
         base_error = base_error_content.error_id
         errors = self.env['runbot.build.error']
+        links_to_remove = self.env['runbot.build.error.link']
+        content_to_remove = self.env['runbot.build.error.content']
         for error_content in self[1:]:
             assert base_error_content.fingerprint == error_content.fingerprint, f'Errors {base_error_content.id} and {error_content.id} have a different fingerprint'
-            for build_error_link in error_content.build_error_link_ids:
-                if build_error_link.build_id not in base_error_content.build_error_link_ids.build_id:
-                    build_error_link.error_content_id = base_error_content
-                else:
-                    # as the relation already exists and was not transferred we can remove the old one
-                    build_error_link.unlink()
+            existing_build_ids = set(base_error_content.build_error_link_ids.build_id.ids)
+            links_to_relink = error_content.build_error_link_ids.filtered(lambda rec: rec.build_id.id not in existing_build_ids)
+            links_to_remove |= error_content.build_error_link_ids - links_to_relink  # a link already exists to the base error
+
+            links_to_relink.error_content_id = base_error_content
+
             if error_content.error_id != base_error_content.error_id:
                 base_error.message_post(body=Markup('Error content coming from %s was merged into this one') % error_content.error_id._get_form_link())
                 if not base_error.active and error_content.error_id.active:
                     base_error.active = True
             errors |= error_content.error_id
-            error_content.unlink()
+            content_to_remove |= error_content
+        content_to_remove.unlink()
+        links_to_remove.unlink()
+
         for error in errors:
-            error.message_post(body=Markup('Some error contents from this error where merged into %s') % base_error._get_form_link())
+            error.message_post(body=Markup('Some error contents from this error where moved into %s') % base_error._get_form_link())
             if not error.error_content_ids:
                 base_error._merge(error)
+
+    def _get_duplicates(self):
+        """ returns a list of lists of duplicates"""
+        domain = [('id', 'in', self.ids)] if self else []
+        return [r['id_arr'] for r in self.env['runbot.build.error.content'].read_group(domain, ['id_count:count(id)', 'id_arr:array_agg(id)', 'fingerprint'], ['fingerprint']) if r['id_count'] >1]
+
+    def _qualify(self):
+        qualify_regexes = self.env['runbot.error.qualify.regex'].search([])
+        for record in self:
+            all_qualifiers = {}
+            for qualify_regex in qualify_regexes:
+                res = qualify_regex._qualify(record.content)  # TODO, MAYBE choose the source field
+                if res:
+                    # res.update({'qualifier_id': qualify_regex.id}) Probably not a good idea
+                    all_qualifiers.update(res)
+            record.qualifiers = all_qualifiers
 
     ####################
     #   Actions
@@ -509,7 +557,31 @@ class BuildErrorContent(models.Model):
             to_merge.append(errors_content_by_fingerprint.filtered(lambda r: r.fingerprint == fingerprint))
         # this must be done in other iteration since filtered may fail because of unlinked records from _merge
         for errors_content_to_merge in to_merge:
-            errors_content_to_merge._merge()
+            errors_content_to_merge._relink()
+
+    def action_deduplicate(self):
+        rg = self._get_duplicates()
+        for ids_list in rg:
+            self.env['runbot.build.error.content'].browse(ids_list)._relink()
+
+    def action_find_duplicates(self):
+        rg = self._get_duplicates()
+        duplicate_ids = []
+        for ids_lists in rg:
+            duplicate_ids += ids_lists
+
+        return {
+            "type": "ir.actions.act_window",
+            "res_model": "runbot.build.error.content",
+            "domain": [('id', 'in', duplicate_ids)],
+            "context": {"create": False, 'group_by': ['fingerprint']},
+            "name": "Duplicate Error contents",
+            'view_mode': 'tree,form'
+        }
+
+    def action_qualify(self):
+        self._qualify()
+
 
 
 class BuildErrorTag(models.Model):
@@ -583,3 +655,98 @@ class ErrorBulkWizard(models.TransientModel):
             if self.chatter_comment:
                 for build_error in error_ids:
                     build_error.message_post(body=Markup('%s') % self.chatter_comment, subject="Bullk Wizard Comment")
+
+
+class ErrorQualifyRegex(models.Model):
+
+    _name = "runbot.error.qualify.regex"
+    _description = "Build error qualifying regex"
+    _inherit = "mail.thread"
+    _rec_name = 'id'
+    _order = 'sequence, id'
+
+    sequence = fields.Integer('Sequence', default=100)
+    active = fields.Boolean('Active', default=True, tracking=True)
+    regex = fields.Char('Regular expression', required=True)
+    source_field = fields.Selection(
+        [
+            ("content", "Content"),
+            ("module", "Module Name"),
+            ("function", "Function Name"),
+            ("file_path", "File Path"),
+        ],
+        default="content",
+        string="Source Field",
+        help="Build error field on which the regex will be applied to extract a qualifier",
+    )
+
+    test_ids = fields.One2many('runbot.error.qualify.test', 'qualify_regex_id', string="Test Sample", help="Error samples to test qualifying regex")
+
+    def action_generate_fields(self):
+        for rec in self:
+            for field in list(re.compile(rec.regex).groupindex.keys()):
+                existing = self.env['ir.model.fields'].search([('model', '=', 'runbot.build.error.content'), ('name', '=', f'x_{field}')])
+                if existing:
+                    _logger.info("Field x_%s already exists", field)
+                else:
+                    _logger.info("Creating field x_%s", field)
+                    self.env['ir.model.fields'].create({
+                        'model_id': self.env['ir.model']._get('runbot.build.error.content').id,
+                        'name': f'x_{field}',
+                        'field_description': ' '.join(field.capitalize().split('_')),
+                        'ttype': 'char',
+                        'required': False,
+                        'readonly': True,
+                        'store': True,
+                        'depends': 'qualifiers',
+                        'compute': f"""
+for error_content in self:
+    error_content['x_{field}'] = error_content.qualifiers.get('{field}', '')""",
+                    })
+
+    @api.constrains('regex')
+    def _validate(self):
+        for rec in self:
+            try:
+                r = re.compile(rec.regex)
+            except re.error as e:
+                raise ValidationError("Unable to compile regular expression: %s" % e)
+            # verify that a named group exist in the pattern
+            if not re.search(r'\(\?P<\w+>.+\)', r.pattern):
+                raise ValidationError(
+                    "The regular expresion should contain at least one named group pattern e.g: '(?P<module>.+)'"
+                )
+
+    def _qualify(self, content):
+        self.ensure_one()
+        result = False
+        if content and self.regex:
+            result = re.search(self.regex, content, flags=re.MULTILINE)
+        return result.groupdict() if result else {}
+
+    @api.depends('regex', 'test_string')
+    def _compute_qualifiers(self):
+        for record in self:
+            if record.regex and record.test_string:
+                record.qualifiers = record._qualify(record.test_string)
+            else:
+                record.qualifiers = {}
+
+
+class QualifyErrorTest(models.Model):
+    _name = 'runbot.error.qualify.test'
+    _description = 'Extended Relation between a qualify regex and a build error taken as sample'
+
+    qualify_regex_id = fields.Many2one('runbot.error.qualify.regex', required=True)
+    error_content_id = fields.Many2one('runbot.build.error.content', string='Build Error', required=True)
+    build_error_summary = fields.Char(related='error_content_id.summary')
+    build_error_content = fields.Text(related='error_content_id.content')
+    expected_result = JsonDictField('Expected Qualifiers')
+    result = JsonDictField('Result', compute='_compute_result')
+    is_matching = fields.Boolean(compute='_compute_result', default=False)
+
+    @api.depends('qualify_regex_id', 'error_content_id')
+    def _compute_result(self):
+        for record in self:
+            record.result = record.qualify_regex_id._qualify(record.build_error_content)
+            record.is_matching = record.result == record.expected_result and record.result != {}

@@ -122,6 +122,8 @@ def make_basic(
             'name': project_name,
             'github_token': config['github']['token'],
             'github_prefix': 'hansen',
+            'github_name': config['github']['name'],
+            'github_email': "foo@example.org",
             'fp_github_token': fp_token and config['github']['token'],
             'fp_github_name': 'herbert',
             'branch_ids': [
@@ -178,8 +180,8 @@ def make_basic(
 def pr_page(page, pr):
     return html.fromstring(page(f'/{pr.repo.name}/pull/{pr.number}'))
 
-def to_pr(env, pr):
-    for _ in range(5):
+def to_pr(env, pr, *, attempts=5):
+    for _ in range(attempts):
         pr_id = env['runbot_merge.pull_requests'].search([
             ('repository.name', '=', pr.repo.name),
             ('number', '=', pr.number),

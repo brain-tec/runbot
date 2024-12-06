@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from utils import seen, Commit
+from utils import seen, Commit, to_pr
 
 
 def test_no_duplicates(env):
@@ -21,6 +21,7 @@ def test_finding(env):
     project = env['runbot_merge.project'].create({
         'name': 'test',
         'github_token': 'xxx', 'github_prefix': 'no',
+        'github_name': "xxx", 'github_email': "xxx@example.org",
     })
     repo_1 = env['runbot_merge.repository'].create({'project_id': project.id, 'name': 'r1'})
     repo_2 = env['runbot_merge.repository'].create({'project_id': project.id, 'name': 'r2'})
@@ -69,10 +70,7 @@ def test_basic(env, project, make_repo, users, setreviewers, config):
         pr.post_comment('hansen r+', config['role_reviewer']['token'])
     env.run_crons()
 
-    pr_id = env['runbot_merge.pull_requests'].search([
-        ('repository.name', '=', repo.name),
-        ('number', '=', pr.number)
-    ])
+    pr_id = to_pr(env, pr)
     assert pr_id.state == 'approved'
 
     with repo:
@@ -140,10 +138,7 @@ def test_multiple(env, project, make_repo, users, setreviewers, config):
             pr = repo.make_pr(target='master', title=f'super change {i}', head=f'change{i}')
         env.run_crons()
 
-        pr_id = env['runbot_merge.pull_requests'].search([
-            ('repository.name', '=', repo.name),
-            ('number', '=', pr.number)
-        ])
+        pr_id = to_pr(env, pr)
         assert pr_id.state == 'opened'
 
         with repo:
@@ -192,10 +187,7 @@ def test_no_repository(env, project, make_repo, users, setreviewers, config):
         pr.post_comment('hansen r+', config['role_reviewer']['token'])
     env.run_crons()
 
-    pr_id = env['runbot_merge.pull_requests'].search([
-        ('repository.name', '=', repo.name),
-        ('number', '=', pr.number)
-    ])
+    pr_id = to_pr(env, pr)
     assert pr_id.state == 'approved'
 
     with repo:
