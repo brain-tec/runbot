@@ -45,39 +45,44 @@ publicWidget.registry.RunbotPage = publicWidget.Widget.extend({
     }
 });
 
+publicWidget.registry.ThemeSwitcher = publicWidget.Widget.extend({
+    selector: '.o_runbot_theme_switcher',
+    events: {
+        'click .btn[data-theme]': '_onClickSwitchTheme',
+    },
+
+    _onClickSwitchTheme: ({ currentTarget: target }) => {
+        document.documentElement.dataset.bsTheme = target.dataset.theme;
+    }
+});
+
+publicWidget.registry.RunbotToolbar = publicWidget.Widget.extend({
+    selector: '.o_runbot_toolbar.position-sticky',
+
+    start: function () {
+        this._super();
+
+        const navbarElem = document.querySelector('nav.navbar');
+        if (!navbarElem) {
+            return;
+        }
+        this.resizeObserver = new ResizeObserver(() => {
+            this.el.style.top = navbarElem.getBoundingClientRect().height;
+        });
+        this.resizeObserver.observe(this.el);
+    },
+
+    destroy: function () {
+        if (this.resizeObserver) {
+            this.resizeObserver.disconnect();
+        }
+        this._super();
+    }
+})
+
 const copyHashToClipboard = (hash) => {
     if (!navigator.clipboard) {
         return
     }
     navigator.clipboard.writeText(location.origin + location.pathname + `#${hash}`);
 }
-
-const switchTheme = (theme) => {
-    document.documentElement.dataset.bsTheme = theme;
-}
-
-// setInterval(() => {
-//     if (document.documentElement.dataset.bsTheme === 'dark') {
-//         switchTheme('light');
-//     } else {
-//         switchTheme('dark');
-//     }
-// }, 2000)
-
-const dark = switchTheme.bind(null, 'dark');
-const legacy = switchTheme.bind(null, 'legacy');
-const light = switchTheme.bind(null, 'light');
-const red404 = switchTheme.bind(null, 'red404');
-
-setTimeout(() => {
-    const navbarElem = document.querySelector('nav.navbar');
-    const toolbarElem = document.querySelector('.o_runbot_toolbar.position-sticky');
-
-    if (navbarElem && toolbarElem) {
-        toolbarElem.style.top = navbarElem.getBoundingClientRect().height;
-        new ResizeObserver(() => {
-            console.log('resize')
-            toolbarElem.style.top = navbarElem.getBoundingClientRect().height;
-        }).observe(navbarElem);
-    }
-}, 150);

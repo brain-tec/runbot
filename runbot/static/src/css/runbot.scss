@@ -411,6 +411,14 @@ code {
 	}
 }
 
+@media (min-width: 992px) {
+	.o_runbot_bundle .o_runbot_batch_card>.o_runbot_batch_card_content>.o_runbot_batch_card_slots>.o_runbot_batch_card_slot {
+		flex-basis: 200px;
+		flex-grow: 1;
+		max-width: 20%;
+	}
+}
+
 .o_runbot_bundle>.col-12 {
 	--bs-gutter-x: 0.5rem;
 	--bs-gutter-y: 0.5rem;
@@ -531,4 +539,11 @@ code {
 .bg-killed-subtle-hover:hover {
 	background-color: var(--body-secondary-bg);
 	color: var(--body-secondary-color);
+}
+
+
+@media (min-width: 768px) {
+	.w-md-auto {
+		width: auto !important;
+	}
 }

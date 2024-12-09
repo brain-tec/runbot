@@ -262,7 +262,7 @@ class Runbot(Controller):
             'page_info_state': bundle.last_batch._get_global_result(),
             'toolbar': ToolbarContext(
                 breadcrumbs=[
-                    Breadcrumb('/runbot/%s' % bundle.project_id, bundle.project_id.display_name),
+                    Breadcrumb('/runbot/%s' % request.env['ir.http']._slug(bundle.project_id), bundle.project_id.display_name),
                     Breadcrumb('/runbot/bundle/%s' % bundle.id, bundle.display_name),
                 ],
                 middle_template='runbot.bundle_toolbar_middle_section',
@@ -297,7 +297,7 @@ class Runbot(Controller):
             'page_info_state': batch._get_global_result(),
             'toolbar': ToolbarContext(
                 breadcrumbs=[
-                    Breadcrumb('/runbot/%s' % project, project.display_name),
+                    Breadcrumb('/runbot/%s' % request.env['ir.http']._slug(project), project.display_name),
                     Breadcrumb('/runbot/bundle/%s' % bundle.id, bundle.display_name),
                     Breadcrumb('/runbot/bundle/batch/%s' % batch.id, batch.display_name),
                 ],
@@ -389,7 +389,7 @@ class Runbot(Controller):
             return request.not_found()
         siblings = (build.parent_id.children_ids if build.parent_id else from_batch.slot_ids.build_id if from_batch else build).sorted('id')
         project = build.params_id.trigger_id.project_id
-        breadcrumbs: Breadcrumbs = [Breadcrumb('/runbot/%s' % project, project.display_name)]
+        breadcrumbs: Breadcrumbs = [Breadcrumb('/runbot/%s' % request.env['ir.http']._slug(project), project.display_name)]
         batch = bundle = None
         if from_batch:
             batch = from_batch

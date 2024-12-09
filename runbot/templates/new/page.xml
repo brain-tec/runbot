@@ -8,9 +8,7 @@
         <html t-att-data-bs-theme="theme or 'light'">
             <title t-out="title or 'Runbot'"/>
 
-            <!-- <t t-call-assets="runbot.assets_frontend_new"/> -->
-            <!-- <t t-call-assets="web.assets_frontend"/> -->
-            <t t-call-assets="runbot.assets_frontend_new"/>
+            <t t-call-assets="runbot.assets_frontend"/>
 
             <t t-if="refresh">
                 <!-- TODO: replace this with javascript code -->
@@ -137,11 +135,11 @@
                                 <a class="nav-link fw-bold" t-attf-href="/web/login?redirect={{request.httprequest.path}}">Login</a>
                             </li>
                             <li class="nav-item">
-                                <div class="btn-group" role="group">
-                                    <a class="btn btn-outline-secondary" onclick="legacy()">a</a>
-                                    <a class="btn btn-outline-secondary" onclick="light()">b</a>
-                                    <a class="btn btn-outline-secondary" onclick="dark()">c</a>
-                                    <a class="btn btn-outline-secondary" onclick="red404()">d</a>
+                                <div class="btn-group o_runbot_theme_switcher" role="group">
+                                    <a class="btn btn-outline-secondary" data-theme="legacy">a</a>
+                                    <a class="btn btn-outline-secondary" data-theme="light">b</a>
+                                    <a class="btn btn-outline-secondary" data-theme="dark">c</a>
+                                    <a class="btn btn-outline-secondary" data-theme="red404">d</a>
                                 </div>
                             </li>
                         </ul>
@@ -224,7 +222,7 @@
                 <div class="d-flex d-empty-none order-0" style="flex: 1;">
                     <t t-call="{{toolbar.get('start_template', 'runbot.layout_toolbar_start_section')}}"/>
                 </div>
-                <div class="d-flex d-empty-none justify-content-start justify-content-md-around order-2 order-md-1 w-100 w-md-auto mw-100" style="flex: 1;">
+                <div class="d-flex d-empty-none justify-content-start justify-content-md-around order-2 order-md-1 w-100 w-md-auto mw-100">
                     <t t-call="{{toolbar.get('middle_template', 'runbot.layout_toolbar_middle_section')}}"/>
                 </div>
                 <div class="d-flex d-empty-none justify-content-end order-1 order-md-2 flex-grow-1 gap-1" style="flex: 1;">
