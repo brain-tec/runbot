@@ -36,6 +36,11 @@
         'templates/git.xml',
         'templates/nginx.xml',
         'templates/build_error.xml',
+        'templates/new/page.xml',
+        'templates/new/bundle.xml',
+        'templates/new/batch.xml',
+        'templates/new/build.xml',
+        'templates/new/slot.xml',
 
         'views/branch_views.xml',
         'views/build_error_views.xml',
