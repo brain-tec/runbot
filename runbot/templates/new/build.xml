@@ -43,7 +43,11 @@
             <div class="o_runbot_build row gy-2">
                 <t t-set="rowclass" t-value="build._get_view_class()"/>
                 <div class="o_runbot_build_information col-12 col-md-6">
-                    <div t-attf-class="bg-{{rowclass}}-subtle card p-2">
+                    <div t-attf-class="card">
+                        <div class="card-header px-2 py-1">
+                            Build
+                        </div>
+                        <div t-attf-class="card-body bg-{{rowclass}}-subtle p-2">
                         <!-- Batch/bundles links-->
                         <div t-if="len(bundles) > 1">
                             This build is referenced in <t t-out="len(bundles)"/> bundles
@@ -133,19 +137,20 @@
                         <div t-if="build.stat_ids">
                             <b>Stats: <a t-attf-href="/runbot/build/stats/{{build.id}}">Build <t t-out="build.id"/></a></b>
                         </div>
+                        </div>
                     </div>
                 </div>
                 <div class="o_runbot_build_child_information col-12 col-md-6" t-if="build.children_ids">
                     <div class="card">
-                        <div class="card-header">
+                        <div t-attf-class="card-header px-2 py-1">
                             Children
                         </div>
                         <ul class="list-group list-group-flush">
                             <li t-foreach="build.children_ids" t-as="child"
-                                t-attf-class="list-group-item bg-{{child._get_view_class()}}-subtle{{' text-decoration-line-through' if child.orphan_result else ''}}">
+                                t-attf-class="list-group-item px-2 py-1 bg-{{child._get_view_class()}}{{' text-decoration-line-through' if child.orphan_result else ''}}">
                                 <div class="btn-group btn-group-ssm d-flex flex-grow-1">
                                     <a t-attf-href="/runbot/{{'batch/%s/' % from_batch.id if from_batch else ''}}build/{{child.id}}"
-                                        class="btn btn-default flex-grow-1 text-start text-truncate">
+                                        t-attf-class="btn btn-default flex-grow-1 text-start text-truncate bg-{{child._get_view_class()}}-subtle">
                                         <div class="d-flex flex-row align-items-center gap-2">
                                             <div>
                                                 Build <t t-out="child.id"/>
@@ -158,10 +163,8 @@
                                                     </t>
                                                     <i t-if="child.orphan_result" class="fa fa-chain-broken" title="Build result ignored for parent"/>
                                                 </div>
-                                                <div>
-                                                    <t t-if="child.job">
-                                                        <small>Running step: <t t-out="child.job"/></small>
-                                                    </t>
+                                                <div t-if="child.job">
+                                                    <small>Running step: <t t-out="child.job"/></small>
                                                 </div>
                                             </div>
                                             <div t-if="child.global_state in ('testing', 'waiting') or True">
@@ -215,9 +218,7 @@
                         />
                         <a t-if="not error" groups="runbot.group_runbot_admin" t-attf-href="/runbot/parse_log/{{l.id}}" class="btn btn-default fa fa-magic sm"
                           title="Parse this log line to follow this error."/>
-                        <a class="btn btn-default fa fa-link" t-attf-onclick="copyHashToClipboard('log_line_{{l.id}}')"
-                          title="Copy link to line"
-                        />
+                        <a class="btn btn-default fa fa-link o_runbot_copy_link" t-attf-href="#log_line_{{l.id}}" title="Copy link to line"/>
                       </div>
                       <t t-if="l.type not in ('runbot', 'link', 'markdown')">
                         <t t-if="l.type == 'subbuild'">

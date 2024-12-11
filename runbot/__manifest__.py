@@ -99,6 +99,8 @@
 
             '/runbot/static/src/libs/bootstrap/js/bootstrap.bundle.js',
             '/runbot/static/src/js/runbot.js',
+            '/runbot/static/src/js/manage_preferences_dialog.js',
+            '/runbot/static/src/js/manage_preferences_dialog.xml',
         ],
     },
     'post_load': 'runbot_post_load',

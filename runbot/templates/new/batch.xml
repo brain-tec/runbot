@@ -24,9 +24,8 @@
                     </div>
                     <t t-foreach="batch.slot_ids" t-as="slot">
                         <t t-if="slot.build_id">
-                            <div class="o_runbot_batch_card_slot col-auto">
-                                <t t-if="((not slot.trigger_id.hide and trigger_display is None) or (trigger_display and slot.trigger_id.id in trigger_display)) or slot.build_id.global_result != 'ok'"
-                                    t-call="runbot.slot_btn_group"/>
+                            <div class="o_runbot_batch_card_slot col-auto" t-if="((not slot.trigger_id.hide and trigger_display is None) or (trigger_display and slot.trigger_id.id in trigger_display)) or slot.build_id.global_result != 'ok'">
+                                <t t-call="runbot.slot_btn_group"/>
                             </div>
                         </t>
                     </t>

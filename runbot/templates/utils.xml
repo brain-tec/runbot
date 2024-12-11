@@ -343,7 +343,7 @@
                             </a>
                         </t>
                     </t>
-                    <div t-if="bu.global_state not in ('testing', 'waiting', 'pending')" groups="base.group_user" class="dropdown-divider"/>
+                    <div t-if="bu.global_state not in ('testing', 'waiting', 'pending') and bu.log_list" groups="base.group_user" class="dropdown-divider"/>
                     <t t-set="log_url" t-value="'http://%s' % bu.host if bu.host != fqdn else ''"/>
                     <t t-if="bu.host" t-foreach="bu.log_list.split(',') if bu.log_list else []" t-as="log_name">
                         <a class="dropdown-item" t-attf-href="{{log_url}}/runbot/static/build/#{bu.dest}/logs/#{log_name}.txt">

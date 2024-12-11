@@ -1,4 +1,8 @@
 import publicWidget from "@web/legacy/js/public/public_widget";
+import { debounce } from "@web/core/utils/timing";
+import { cookie } from "@web/core/browser/cookie";
+import { ManagePreferencesDialog } from "@runbot/js/manage_preferences_dialog";
+// import { FormErrorDialog } from "@web/views/form/form_error_dialog/form_error_dialog";
 
 
 publicWidget.registry.RunbotPage = publicWidget.Widget.extend({
@@ -7,18 +11,16 @@ publicWidget.registry.RunbotPage = publicWidget.Widget.extend({
     events: {
         'click [data-runbot]': '_onClickDataRunbot',
         'click [data-runbot-clipboard]': '_onClickRunbotCopy',
+        'click .o_runbot_copy_link': '_onClickCopyLink',
     },
 
     _onClickDataRunbot: async (event) => {
         const { currentTarget: target } = event;
-        if (!target) {
-            return;
-        }
-        event.preventDefault();
         const { runbot: operation, runbotBuild } = target.dataset;
         if (!operation) {
             return;
         }
+        event.preventDefault();
         let url = target.href;
         if (runbotBuild) {
             url = `/runbot/build/${runbotBuild}/${operation}`
@@ -35,25 +37,78 @@ publicWidget.registry.RunbotPage = publicWidget.Widget.extend({
         }
     },
 
-    _onClickRunbotCopy: ({ currentTarget: target }) => {
-        if (!navigator.clipboard || !target) {
+    _writeClipboard: function (text) {
+        return navigator.clipboard.writeText(text);
+    },
+
+    _onClickRunbotCopy: function ({ currentTarget: target }) {
+        if (!navigator.clipboard) {
             return;
         }
-        navigator.clipboard.writeText(
+        this._writeClipboard(
             target.dataset.runbotClipboard
         );
+    },
+
+    _onClickCopyLink: function (event) {
+        if (event.altKey || event.ctrlKey || event.metaKey) {
+            return;
+        }
+        const { currentTarget: target } = event;
+        // Check meta keys and stuff
+        event.preventDefault();
+        this._writeClipboard(target.href);
     }
 });
 
+// Set initial theme on page load
+document.documentElement.dataset.bsTheme = localStorage.getItem('runbotTheme') || 'light';
+
 publicWidget.registry.ThemeSwitcher = publicWidget.Widget.extend({
-    selector: '.o_runbot_theme_switcher',
+    selector: '.o_runbot_preferences',
     events: {
-        'click .btn[data-theme]': '_onClickSwitchTheme',
+        'change .o_runbot_theme_switcher': '_onChangeTheme',
+        'click .o_runbot_more_info': '_onChangeMoreInfo',
+        'click .o_runbot_manage_filters': '_onClickManageFilters',
     },
 
-    _onClickSwitchTheme: ({ currentTarget: target }) => {
-        document.documentElement.dataset.bsTheme = target.dataset.theme;
-    }
+    init: function () {
+        this._super(...arguments);
+        this.theme = localStorage.getItem('runbotTheme') || 'light';
+        document.documentElement.dataset.bsTheme = this.theme;
+        this._onChangeMoreInfo = debounce(this._onChangeMoreInfo, 300).bind(this);
+    },
+
+    start: function () {
+        this.moreInfoEl = this.el.querySelector('.o_runbot_more_info');
+        this.dropdownMenu = this.el.querySelector('.dropdown-menu');
+        this.el.querySelector('.o_runbot_theme_switcher').value = this.theme;
+    },
+
+    _onChangeTheme: ({ currentTarget: target }) => {
+        this.theme = target.value;
+        document.documentElement.dataset.bsTheme = this.theme;
+        localStorage.setItem('runbotTheme', this.theme);
+    },
+
+    _onChangeMoreInfo: function () {
+        const { checked } = this.moreInfoEl;
+        const cookieChecked = cookie.get('more');
+        if (checked && !cookieChecked) {
+            cookie.set('more', 'true');
+        } else if (!checked && cookieChecked) {
+            cookie.delete('more');
+        } else {
+            return;
+        }
+        location.reload();
+    },
+
+    _onClickManageFilters: function (event) {
+        event.preventDefault();
+        this.dropdownMenu.classList.remove('show');
+        this.call('dialog', 'add', ManagePreferencesDialog);
+    },
 });
 
 publicWidget.registry.RunbotToolbar = publicWidget.Widget.extend({
@@ -78,11 +133,4 @@ publicWidget.registry.RunbotToolbar = publicWidget.Widget.extend({
         }
         this._super();
     }
-})
-
-const copyHashToClipboard = (hash) => {
-    if (!navigator.clipboard) {
-        return
-    }
-    navigator.clipboard.writeText(location.origin + location.pathname + `#${hash}`);
-}
+});

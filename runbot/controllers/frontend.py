@@ -51,7 +51,7 @@ def route(routes, **kw):
         @functools.wraps(f)
         def response_wrap(*args, **kwargs):
             projects = request.env['runbot.project'].search([('hidden', '=', False)])
-            more = request.httprequest.cookies.get('more', False) == '1'
+            more = request.httprequest.cookies.get('more', False) in ('1', 'true')
             filter_mode = request.httprequest.cookies.get('filter_mode', 'all')
             keep_search = request.httprequest.cookies.get('keep_search', False) == '1'
             cookie_search = request.httprequest.cookies.get('search', '')
@@ -74,7 +74,6 @@ def route(routes, **kw):
 
                 project = response.qcontext.get('project') or projects and projects[0]
 
-                response.qcontext['theme'] = kwargs.get('theme', request.httprequest.cookies.get('theme', 'legacy'))
                 response.qcontext['projects'] = projects
                 response.qcontext['more'] = more
                 response.qcontext['keep_search'] = keep_search
@@ -124,27 +123,6 @@ class Runbot(Controller):
         pending_assigned_count = request.env['runbot.build'].search_count([('local_state', '=', 'pending'), ('build_type', '!=', 'scheduled'), ('host', '!=', False)])
         level = ['info', 'warning', 'danger'][int(pending_count > warn) + int(pending_count > crit)]
         return pending_count, level, scheduled_count, pending_assigned_count
-
-    @o_route([
-        '/runbot/submit'
-    ], type='http', auth="public", methods=['GET', 'POST'], csrf=False)
-    def submit(self, more=False, redirect='/', keep_search=False, category=False, filter_mode=False, update_triggers=False, **kwargs):
-        assert redirect.startswith('/')
-        response = werkzeug.utils.redirect(redirect)
-        response.set_cookie('more', '1' if more else '0')
-        if update_triggers:
-            enabled_triggers = []
-            project_id = int(update_triggers)
-            for key in kwargs.keys():
-                if key.startswith('trigger_'):
-                    enabled_triggers.append(key.replace('trigger_', ''))
-
-            key = 'trigger_display_%s' % project_id
-            if len(request.env['runbot.trigger'].search([('project_id', '=', project_id)])) == len(enabled_triggers):
-                response.delete_cookie(key)
-            else:
-                response.set_cookie(key, '-'.join(enabled_triggers))
-        return response
 
     @route(['/',
             '/runbot',
