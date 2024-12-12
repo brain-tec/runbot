@@ -178,7 +178,7 @@ class BuildError(models.Model):
                 if not (self.env.su or self.user_has_groups('runbot.group_runbot_admin')):
                     if build_error.test_tags:
                         raise UserError("This error as a test-tag and can only be (de)activated by admin")
-                    if not vals['active'] and build_error.last_seen_date + relativedelta(days=1) > fields.Datetime.now():
+                    if not vals['active'] and build_error.active and build_error.last_seen_date and build_error.last_seen_date + relativedelta(days=1) > fields.Datetime.now():
                         raise UserError("This error broke less than one day ago can only be deactivated by admin")
         return super().write(vals)
 
@@ -235,7 +235,7 @@ class BuildError(models.Model):
     def action_view_errors(self):
         return {
             'type': 'ir.actions.act_window',
-            'views': [(False, 'tree'), (False, 'form')],
+            'views': [(False, 'list'), (False, 'form')],
             'res_model': 'runbot.build.error.content',
             'domain': [('error_id', '=', self.id)],
             'context': {'active_test': False},
@@ -311,7 +311,7 @@ class BuildError(models.Model):
             window_action = {
                 "type": "ir.actions.act_window",
                 "res_model": "runbot.build.error",
-                "views": [[False, "tree"]],
+                "views": [[False, "list"]],
                 "domain": [('id', 'in', build_error_contents.ids)]
             }
             if len(build_error_contents) == 1:
@@ -576,7 +576,7 @@ class BuildErrorContent(models.Model):
             "domain": [('id', 'in', duplicate_ids)],
             "context": {"create": False, 'group_by': ['fingerprint']},
             "name": "Duplicate Error contents",
-            'view_mode': 'tree,form'
+            'view_mode': 'list,form'
         }
 
     def action_qualify(self):
@@ -701,7 +701,7 @@ class ErrorQualifyRegex(models.Model):
                         'depends': 'qualifiers',
                         'compute': f"""
 for error_content in self:
-    error_content['x_{field}'] = error_content.qualifiers.get('{field}', '')""",
+    error_content['x_{field}'] = error_content.qualifiers.get('{field}', False)""",
                     })
 
     @api.constrains('regex')
@@ -745,7 +745,7 @@ class QualifyErrorTest(models.Model):
     result = JsonDictField('Result', compute='_compute_result')
     is_matching = fields.Boolean(compute='_compute_result', default=False)
 
-    @api.depends('qualify_regex_id', 'error_content_id')
+    @api.depends('qualify_regex_id.regex', 'error_content_id', 'expected_result', 'result')
     def _compute_result(self):
         for record in self:
             record.result = record.qualify_regex_id._qualify(record.build_error_content)
