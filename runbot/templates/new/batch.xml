@@ -16,7 +16,7 @@
                 </span>
             </a>
             <div class="o_runbot_batch_card_content d-flex flex-column justify-content-between h-100">
-                <div class="o_runbot_batch_card_slots card-body row g-1 p-1">
+                <div class="o_runbot_batch_card_slots card-body row g-1 p-1 flex-grow-0">
                     <div t-if="batch.state == 'preparing'" class="col-12 btn-group btn-group-ssm">
                         <span class="btn btn-default disabled" titled="Preparing">
                             <i class="fa fa-cog fa-spin fa-fw"/> Preparing

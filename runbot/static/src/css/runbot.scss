@@ -396,6 +396,12 @@ code {
 	flex-grow: 1;
 }
 
+@media (min-width: 1400px) {
+	.o_runbot_bundle_row .o_runbot_batch_card>.o_runbot_batch_card_content>.o_runbot_batch_card_slots>.o_runbot_batch_card_slot:not(.o_runbot_batch_card_slot_preparing) {
+		max-width: 50%;
+	}
+}
+
 @media (max-width: 576px) {
 	.o_runbot_bundle .o_runbot_batch_card>.o_runbot_batch_card_content>.o_runbot_batch_card_slots>.o_runbot_batch_card_slot {
 		min-width: 50%;

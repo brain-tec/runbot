@@ -9,7 +9,7 @@
                     <!-- TODO: use css for style -->
                     <div class="text-truncate">
                         <i t-if="bundle.sticky" class="o_runbot_sticky_star fa fa-star"/>
-                        <a t-attf-href="/runbot/bundle/#{bundle.id}" t-attf-title="View Bundle ${bundle.name}" class="fw-bold" t-out="bundle.name"/>
+                        <a t-attf-href="/runbot/bundle/#{bundle.id}" t-attf-title="View Bundle {{bundle.name}}" class="fw-bold" t-out="bundle.name"/>
                     </div>
                     <div class="btn-toolbar" role="toolbar">
                         <!-- Fetch last batch for each category -->
@@ -19,7 +19,10 @@
                         <t t-set="categories_and_batch" t-value="[tpl for tpl in categories_and_batch if tpl[1]]"/>
                         <div class="btn-group" role="group" t-if="categories_and_batch">
                             <t t-foreach="categories_and_batch" t-as="category_and_batch">
-                                <t t-if="category_and_batch[0].view_id" t-call="{{category.view_id.sudo().key}}"/>
+                                <t t-if="category_and_batch[0].view_id" t-call="{{category_and_batch[0].view_id.sudo().key}}">
+                                    <t t-set="category" t-value="category_and_batch[0]"/>
+                                    <t t-set="last_category_batch" t-value="category_and_batch[1]"/>
+                                </t>
                                 <a t-else=""
                                     t-attf-title="View last {{category_and_batch[0].name}} batch"
                                     t-attf-href="/runbot/batch/{{category_and_batch[1].id}}"

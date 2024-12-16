@@ -192,7 +192,7 @@
                 <t t-foreach="build.sudo().log_ids" t-as="l">
                   <div t-if="l.level == 'SEPARATOR'" class="separator"/>
                   <div class="o_runbot_log_grid_date text-truncate">
-                    <t t-out="str(l.id) + ' ' + l.create_date.strftime('%Y-%m-%d %H:%M:%S')"/>
+                    <t t-out="l.create_date.strftime('%Y-%m-%d %H:%M:%S')"/>
                     <span t-attf-id="log_line_{{l.id}}" style="scroll-margin-top: 120px;"/>
                   </div>
                   <div class="fw-bold" t-out="l.level if l.type not in ('link', 'markdown') and l.level != 'SEPARATOR' else ''"/>

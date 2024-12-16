@@ -4,9 +4,7 @@
         <t t-set="bu" t-value="slot.build_id"/>
         <t t-set="color" t-value="bu._get_color_class()"/>
         <div class="o_runbot_slot_btn_group btn-group btn-group-ssm">
-            <span t-attf-class="o_runbot_slot_btn_small btn btn-{{color}} disabled" t-att-title="slot.link_type">
-                <i t-attf-class="fa fa-{{slot._fa_link_type()}}"/>
-            </span>
+            <button t-attf-class="o_runbot_slot_btn_small btn btn-{{color}} disabled fa fa-{{slot._fa_link_type()}}" t-att-title="slot.link_type"/>
             <a t-att-href="'/runbot/batch/%s/build/%s' % (slot.batch_id.id, bu.id) if bu else None"
                 t-attf-class="btn btn-default text-start text-nowrap text-truncate flex-grow-1{{' disabled' if not bu else ''}}"
                 t-out="slot.trigger_id.name"
