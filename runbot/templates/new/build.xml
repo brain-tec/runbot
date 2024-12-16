@@ -47,7 +47,7 @@
                         <div class="card-header px-2 py-1">
                             Build
                         </div>
-                        <div t-attf-class="card-body bg-{{rowclass}}-subtle p-2">
+                        <div t-attf-class="card-body bg-{{rowclass}}-subtle p-2 overflow-auto text-nowrap">
                         <!-- Batch/bundles links-->
                         <div t-if="len(bundles) > 1">
                             This build is referenced in <t t-out="len(bundles)"/> bundles
@@ -204,7 +204,7 @@
                     <t t-set="message_class" t-value="subbuild and subbuild._get_view_class() or ''"/>
                     <div t-attf-class="bg-{{message_class or logclass}}-subtle p-1">
                       
-                      <div class="o_runbot_log_message_toolbox btn-group btn-group-ssm" role="group" t-if="l.level in ('CRITICAL', 'ERROR', 'WARNING')">
+                      <div class="o_runbot_log_message_toolbox btn-group btn-group-ssm" role="group" t-if="l.level in ('CRITICAL', 'ERROR', 'WARNING') and None">
                         <t t-set="error_content" t-value="l.error_content_id"/>
                         <t t-set="error" t-value="error_content.error_id"/>
                         <a t-if="error" class="btn btn-default" t-attf-href="/web#id={{error.id}}&amp;view_type=form&amp;model=runbot.build.error&amp;menu_id={{env['ir.model.data']._xmlid_to_res_id('runbot.runbot_menu_root')}}" target="new">
@@ -261,6 +261,21 @@
                         <t t-if="'\n' not in l.message" t-out="l.message"/>
                         <pre t-if="'\n' in l.message" style="margin:0;padding:0; border: none;"><t t-out="l.message"/></pre>
                       </span>
+                      <div class="o_runbot_log_message_toolbox btn-group btn-group-ssm" role="group" t-if="l.level in ('CRITICAL', 'ERROR', 'WARNING')">
+                        <t t-set="error_content" t-value="l.error_content_id"/>
+                        <t t-set="error" t-value="error_content.error_id"/>
+                        <a t-if="error" class="btn btn-default" t-attf-href="/web#id={{error.id}}&amp;view_type=form&amp;model=runbot.build.error&amp;menu_id={{env['ir.model.data']._xmlid_to_res_id('runbot.runbot_menu_root')}}" target="new">
+                          This error is already <em t-attf-title="{{'Was detected by runbot in nightly builds.' if error.active else 'Either the error is not properly fixed or the branch does not contain the fix.'}}"><t t-out="'known' if error.active else 'fixed'"/></em>
+                          <span groups="runbot.group_runbot_admin" t-if="error.responsible or error.responsible.id == uid">(<i t-out="error.responsible.name"/>)</span>
+                        </a>
+                        <a t-if="error" t-attf-class="btn btn-default bg-{{'info' if error.active else 'success'}}-subtle fa fa-list"
+                          t-attf-href="/web#id={{error.id}}&amp;view_type=form&amp;model=runbot.build.error&amp;menu_id={{env['ir.model.data']._xmlid_to_res_id('runbot.runbot_menu_root')}}"
+                          title="View in Backend" target="new"
+                        />
+                        <a t-if="not error" groups="runbot.group_runbot_admin" t-attf-href="/runbot/parse_log/{{l.id}}" class="btn btn-default fa fa-magic sm"
+                          title="Parse this log line to follow this error."/>
+                        <a class="btn btn-default fa fa-link o_runbot_copy_link" t-attf-href="#log_line_{{l.id}}" title="Copy link to line"/>
+                      </div>
                     </div>
                   </div>
                 </t>

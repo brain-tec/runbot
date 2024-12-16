@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
-    <!-- Homepage and bundles searc -->
+    <!-- Homepage and bundles search -->
     <template id="runbot.bundles_new">
         <t t-call="runbot.layout_new">
             <div class="o_runbot_bundle_row row" t-foreach="bundles" t-as="bundle">
                 <!-- TODO: missing style -->
                 <div class="o_runbot_bundle_info col-12 col-md-auto me-1 mb-2">
-                    <!-- TODO: use css for style -->
                     <div class="text-truncate">
                         <i t-if="bundle.sticky" class="o_runbot_sticky_star fa fa-star"/>
                         <a t-attf-href="/runbot/bundle/#{bundle.id}" t-attf-title="View Bundle {{bundle.name}}" class="fw-bold" t-out="bundle.name"/>
@@ -79,69 +78,55 @@
         <t t-call="runbot.layout_new">
             <div class="o_runbot_bundle row p-2">
                 <div class="col-12">
-                    <table class="table table-condensed table-responsive table-stripped table-bordered">
-                        <tbody>
-                            <tr groups="base.group_user" t-if="not bundle.sticky and not bundle.is_base">
+                    <div class="container-lg p-0 card o_runbot_bundle_meta">
+                        <div class="card-header fw-medium"><t t-out="bundle.name"/> <i t-if="bundle.sticky" class="fa fa-star" style="color: #f0ad4e" /></div>
+                        <div class="o_runbot_grid o_runbot_grid_2">
+                            <t groups="base.group_user" t-if="not bundle.sticky and not bundle.is_base">
                                 <t t-if="bundle.no_build">
-                                    <td class="text-danger">Build disabled</td>
-                                    <td>
+                                    <div class="text-danger">Build disabled</div>
+                                    <div>
                                         <a class="btn btn-primary btn-ssm"
                                             t-attf-href="/runbot/bundle/toggle_no_build/{{bundle.id}}/0">
                                         Enable builds
                                         </a>
-                                    </td>
+                                    </div>
                                 </t>
                                 <t t-else="">
-                                    <td>Build enabled</td>
-                                    <td>
+                                    <div>Build enabled</div>
+                                    <div>
                                         <a class="btn btn-secondary btn-ssm"
                                             t-attf-href="/runbot/bundle/toggle_no_build/{{bundle.id}}/1">
                                         Disable builds
                                         </a>
-                                    </td>
+                                    </div>
                                 </t>
-                            </tr>
-                            <tr>
-                                <td>Version</td>
-                                <td>
-                                    <t t-out="bundle.version_id.name"/>
-                                </td>
-                            </tr>
-                            <tr>
-                                <td>Branches</td>
-                                <td>
-                                    <div class="row gx-0 gy-1">
-                                        <t t-foreach="bundle._branch_groups().items()" t-as="group">
-                                            <div t-foreach="group[1]" t-as="branch" class="btn-group btn-group-ssm" role="group">
-                                                <a t-att-href="branch.branch_url" class="o_runbot_slot_btn_small btn btn-default text-start" title="View Branch on Github"><i class="fa fa-github"/></a>
-                                                <a groups="runbot.group_runbot_admin" class="o_runbot_slot_btn_small btn btn-default fa fa-list text-start" t-attf-href="/web/#id={{branch.id}}&amp;view_type=form&amp;model=runbot.branch" target="new" title="View Branch in Backend"/>
-                                                <a href="#" t-out="branch.remote_id.short_name" class="btn btn-default disabled text-start flex-grow-1"/>
-                                                <a t-attf-href="/runbot/branch/{{branch.id}}" class="btn btn-default text-start flex-grow-0" title="View Branch Details"><span t-att-class="'' if branch.alive else 'line-through'" t-out="branch.name"/> <i t-if="not branch.alive" title="deleted/closed" class="fa fa-ban text-danger"/></a>
-                                                <t t-if="not any (b.is_pr and b.alive for b in group[1]) and not branch.is_pr">
-                                                    <a t-attf-href="https://{{group[0].main_remote_id.base_url}}/compare/{{bundle.version_id.name}}...{{branch.remote_id.owner}}:{{branch.name}}?expand=1" class="btn btn-default text-start flex-grow-0" title="Create pr"><i class="fa fa-code-fork"/> Create pr</a>
-                                                </t>
-                                            </div>
+                            </t>
+                            <div>Version</div>
+                            <div t-out="bundle.version_id.name"/>
+                            <div>Branches</div>
+                            <div class="row gx-0 gy-1">
+                                <t t-foreach="bundle._branch_groups().items()" t-as="group">
+                                    <div t-foreach="group[1]" t-as="branch" class="btn-group btn-group-ssm" role="group">
+                                        <a t-att-href="branch.branch_url" class="o_runbot_slot_btn_small btn btn-default text-start" title="View Branch on Github"><i class="fa fa-github"/></a>
+                                        <a groups="runbot.group_runbot_admin" class="o_runbot_slot_btn_small btn btn-default fa fa-list text-start" t-attf-href="/web/#id={{branch.id}}&amp;view_type=form&amp;model=runbot.branch" target="new" title="View Branch in Backend"/>
+                                        <a href="#" t-out="branch.remote_id.short_name" class="btn btn-default disabled text-start flex-grow-1"/>
+                                        <a t-attf-href="/runbot/branch/{{branch.id}}" class="btn btn-default text-start flex-grow-0" title="View Branch Details"><span t-att-class="'' if branch.alive else 'line-through'" t-out="branch.name"/> <i t-if="not branch.alive" title="deleted/closed" class="fa fa-ban text-danger"/></a>
+                                        <t t-if="not any (b.is_pr and b.alive for b in group[1]) and not branch.is_pr">
+                                            <a t-attf-href="https://{{group[0].main_remote_id.base_url}}/compare/{{bundle.version_id.name}}...{{branch.remote_id.owner}}:{{branch.name}}?expand=1" class="btn btn-default text-start flex-grow-0" title="Create pr"><i class="fa fa-code-fork"/> Create pr</a>
                                         </t>
                                     </div>
-                                </td>
-                            </tr>
-
-                            <tr t-if="more">
-                                <td>Project</td>
-                                <td t-out="bundle.project_id.name"/>
-                            </tr>
-                            <tr t-if="more">
-                                <td>New build enabled</td>
-                                <td>
-                                    <i t-attf-class="fa fa-{{'times' if bundle.no_build else 'check'}}"/>
-                                </td>
-                            </tr>
-                            <tr t-if="more">
-                                <td>Modules</td>
-                                <td t-out="bundle.modules or '/'"/>
-                            </tr>
-                        </tbody>
-                    </table>
+                                </t>
+                            </div>
+                            <t t-if="more">
+                                <div>Project</div>
+                                <div t-out="bundle.project_id.name"/>
+                                <div>New build enabled</div>
+                                <div t-attf-class="fa fa-{{'times' if bundle.no_build else 'check'}}"/>
+                                <div>Modules</div>
+                                <div t-out="bundle.modules or '/'"/>
+                            </t>
+                        </div>
+                    </div>
                 </div>
                 <div t-foreach="bundle._consistency_warning()" t-as="warning" t-out="warning[1]" t-attf-class="col-12 alert alert-{{warning[0]}}"/>
                 <div class="col-12" t-foreach="batchs" t-as="batch">

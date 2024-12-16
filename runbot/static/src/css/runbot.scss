@@ -422,6 +422,7 @@ code {
 		flex-basis: 200px;
 		flex-grow: 1;
 		max-width: 20%;
+		min-width: 12.5%;
 	}
 }
 
@@ -468,6 +469,65 @@ code {
 	flex: 0 0 25px;
 }
 
+@for $size from 2 through 5 {
+	.o_runbot_grid_#{$size} {
+		--runbot-grid-columns: #{$size};
+	}
+}
+
+.o_runbot_grid {
+	--runbot-grid-fit-content-width: 200px;
+
+	display: grid;
+	line-height: normal;
+	min-width: 0;
+	grid-template-columns: repeat(calc(var(--runbot-grid-columns) - 1), fit-content(var(--runbot-grid-fit-content-width))) 1fr;
+
+	&>.separator {
+		grid-column: span var(--runbot-grid-columns);
+	}
+
+	&>*:not(.separator) {
+		// Same as .border-bottom;
+		border-bottom: var(--bs-border-width) var(--bs-border-style) var(--bs-border-color) !important;
+	}
+
+	&>.o_runbot_grid_full_row {
+		grid-column: span var(--runbot-grid-columns);
+	}
+}
+
+.o_runbot_batch .o_runbot_batch_details .o_runbot_grid {
+	&>* {
+		padding: 0.25rem;
+	}
+
+	&>*:nth-child(even) {
+		border-left: var(--bs-border-width) var(--bs-border-style) var(--bs-border-color) !important;
+	}
+	// We are in a card which will have it's own border-bottom
+	&>*:nth-last-child(-n + 2) {
+		border-bottom: none !important;
+	}
+}
+
+.o_runbot_bundle .o_runbot_bundle_meta .o_runbot_grid {
+
+	--runbot-grid-fit-content-width: 120px;
+
+	&>* {
+		padding: 0.25rem;
+	}
+
+	&>*:nth-child(even) {
+		border-left: var(--bs-border-width) var(--bs-border-style) var(--bs-border-color) !important;
+	}
+	// We are in a card which will have it's own border-bottom
+	&>*:nth-last-child(-n + 2) {
+		border-bottom: none !important;
+	}
+}
+
 .o_runbot_log_grid {
 	display: grid;
 	grid-template-columns: repeat(3, fit-content(200px)) 1fr;
@@ -505,9 +565,12 @@ code {
 		}
 
 		.o_runbot_log_message_toolbox {
+			display: flex;
+			position: sticky;
+			left: 0;
+			width: fit-content;
+			margin-top: 0.5rem;
 			opacity: 0.8;
-			position: absolute;
-			right: 12px;
 
 			&:hover {
 				opacity: 1;

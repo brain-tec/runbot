@@ -125,55 +125,47 @@
             <div class="o_runbot_batch row">
                 <div class="o_runbot_batch_details col-12 col-lg-6">
                     <t t-set="batch_class" t-value="'bg-info-subtle' if batch.state=='preparing' else 'bg-success-subtle' if not any(log.level != 'INFO' for log in batch.log_ids) else 'bg-warning-subtle'"/>
-                    <table class="table table-bordered">
-                        <tr>
-                            <td>Bundle</td>
-                            <td>
+                    <div class="card mb-2">
+                        <div class="card-header">Batch #<t t-out="batch.id"/></div>
+                        <div class="o_runbot_grid o_runbot_grid_2">
+                            <div>Bundle</div>
+                            <div>
                                 <a t-out="batch.bundle_id.name" t-attf-href="/runbot/bundle/{{batch.bundle_id.id}}"/>
-                            </td>
-                        </tr>
-                        <tr t-if="batch.category_id.id != default_category">
-                            <td>Category</td>
-                            <td t-out="batch.category_id.name"></td>
-                        </tr>
-                        <tr>
-                            <td>Version</td>
-                            <td t-out="batch.slot_ids[0].params_id.version_id.name if batch.slot_ids else batch.bundle_id.version_id.name"/>
-                        </tr>
-                        <tr>
-                            <td>Create date</td>
-                            <td t-out="batch.create_date"/>
-                        </tr>
-                        <tr t-if="more">
-                            <td>Last update</td>
-                            <td>
-                                <t t-out="batch.last_update"/>
-                                <span class="badge text-bg-info pull-right" t-out="s2human_long(batch.last_update - batch.create_date)"/>
-                            </td>
-                        </tr>
-                        <tr t-if="more and batch.reference_batch_ids">
-                            <td>Version reference batches (for upgrade)</td>
-                            <td>
-                                <t t-foreach="batch.reference_batch_ids" t-as="reference_batch"/>
-                                <div><a t-attf-href="/runbot/batch/{{reference_batch.id}}"><t t-out="reference_batch.bundle_id.version_id.name"/> (<t t-out="reference_batch.id"/>)</a></div>
-                            </td>
-                        </tr>
-                        <t t-set="commit_links" t-value="batch.commit_link_ids.sorted(key=lambda lc: (lc.commit_id.repo_id.sequence, lc.commit_id.repo_id.id))"/>
-                        <tr>
-                            <td t-att-class="batch_class" t-att-rowspan="len(batch.commit_link_ids)">Commits</td>
-                            <!-- TODO: dedup -->
-                            <td t-att-class="batch_class">
-                                <t t-call="runbot.batch_commit_link_cell">
-                                    <t t-set="commit_link" t-value="commit_links[0]"/>
-                                </t>
-                            </td>
-                        </tr>
-                        <tr t-foreach="commit_links[1:]" t-as="commit_link">
-                            <td t-att-class="batch_class">
-                                <t t-call="runbot.batch_commit_link_cell"/>
-                            </td>
-                        </tr>
-                    </table>
+                            </div>
+                            <t t-if="batch.category_id.id != default_category">
+                                <div>Category</div>
+                                <div t-out="batch.category_id.name"></div>
+                            </t>
+                            <div>Version</div>
+                            <div t-out="batch.slot_ids[0].params_id.version_id.name if batch.slot_ids else batch.bundle_id.version_id.name"/>
+                            <div>Create date</div>
+                            <div t-out="batch.create_date"/>
+                            <t t-if="more">
+                                <div>Last update</div>
+                                <div>
+                                    <t t-out="batch.last_update"/>
+                                    <span class="badge text-bg-info pull-right" t-out="s2human_long(batch.last_update - batch.create_date)"/>
+                                </div>
+                            </t>
+                            <t t-if="more and batch.reference_batch_ids">
+                                <div>Version reference batches (for upgrade)</div>
+                                <div>
+                                    <t t-foreach="batch.reference_batch_ids" t-as="reference_batch"/>
+                                    <div><a t-attf-href="/runbot/batch/{{reference_batch.id}}"><t t-out="reference_batch.bundle_id.version_id.name"/> (<t t-out="reference_batch.id"/>)</a></div>
+                                </div>
+                            </t>
+
+                            <t t-set="commit_links" t-value="batch.commit_link_ids.sorted(key=lambda lc: (lc.commit_id.repo_id.sequence, lc.commit_id.repo_id.id))"/>
+                            <div t-att-class="batch_class">Commits</div>
+                            <div class="p-0">
+                                <ul class="list-group list-group-flush">
+                                    <li t-foreach="commit_links" t-as="commit_link" t-attf-class="list-group-item p-1 {{batch_class}}">
+                                        <t t-call="runbot.batch_commit_link_cell"/>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="o_runbot_batch_slots col-12 col-lg-6">
                     <table class="table table-bordered">
