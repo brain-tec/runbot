@@ -557,3 +557,31 @@ code {
 .modal:not([data-bs-backdrop="false"]) {
     background-color: rgba(0, 0, 0, 0.5);
 }
+
+.fa-bounce {
+	animation: bounceIn 2s 1;
+}
+
+@keyframes bounceIn {
+    0% {
+        transform: scale(1) translateY(0);
+    }
+    // 10% {
+    //     transform:  translateY(0);
+    // }
+    // 30% {
+    //     transform:  translateY(var(--fa-bounce-height, -.5em));
+    // }
+    50% {
+        transform: scale(1.1) translateY(0);
+    }
+    // 57% {
+    //     transform: scale(1) translateY(var(--fa-bounce-rebound, -.125em));
+    // }
+    // 64% {
+    //     transform: scale(1) translateY(0);
+    // }
+    100% {
+        transform: scale(1) translateY(0);
+    }
+}

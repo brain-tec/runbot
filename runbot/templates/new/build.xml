@@ -42,8 +42,8 @@
         <t t-call="runbot.layout_new">
             <div class="o_runbot_build row gy-2">
                 <t t-set="rowclass" t-value="build._get_view_class()"/>
-                <div class="o_runbot_build_information col-12 col-md-6">
-                    <div t-attf-class="card">
+                <div t-attf-class="o_runbot_build_information col-12 col-md-{{'6' if build.children_ids else '12'}}">
+                    <div t-attf-class="card h-100">
                         <div class="card-header px-2 py-1">
                             Build
                         </div>
@@ -167,7 +167,7 @@
                                                     <small>Running step: <t t-out="child.job"/></small>
                                                 </div>
                                             </div>
-                                            <div t-if="child.global_state in ('testing', 'waiting') or True">
+                                            <div t-if="child.global_state in ('testing', 'waiting')">
                                                 <i class="fa fa-spinner fa-spin"/>
                                                 <t t-out="child.global_state"/>
                                             </div>
@@ -192,8 +192,7 @@
                 <t t-foreach="build.sudo().log_ids" t-as="l">
                   <div t-if="l.level == 'SEPARATOR'" class="separator"/>
                   <div class="o_runbot_log_grid_date text-truncate">
-                    <t t-out="l.create_date.strftime('%Y-%m-%d %H:%M:%S')"/>
-                    <span t-attf-id="log_line_{{l.id}}" style="scroll-margin-top: 120px;"/>
+                    <span t-attf-id="log_line_{{l.id}}" class="d-inline-block" style="scroll-margin-top: 120px;" t-out="l.create_date.strftime('%Y-%m-%d %H:%M:%S')"/>
                   </div>
                   <div class="fw-bold" t-out="l.level if l.type not in ('link', 'markdown') and l.level != 'SEPARATOR' else ''"/>
                   <div t-out="l.type if l.type not in ('link', 'markdown') and l.level != 'SEPARATOR' else ''"/>

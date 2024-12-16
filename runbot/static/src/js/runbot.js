@@ -14,6 +14,19 @@ publicWidget.registry.RunbotPage = publicWidget.Widget.extend({
         'click .o_runbot_copy_link': '_onClickCopyLink',
     },
 
+    start: function () {
+        this._super(...arguments);
+
+        // If we have a hash, try to animate the hashed id
+        const hash = window.location.hash.substring(1);
+        if (hash.length) {
+            const elem = document.getElementById(hash);
+            if (elem) {
+                elem.classList.add('fa-bounce', 'text-bg-warning');
+            }
+        }
+    },
+
     _onClickDataRunbot: async (event) => {
         const { currentTarget: target } = event;
         const { runbot: operation, runbotBuild } = target.dataset;
