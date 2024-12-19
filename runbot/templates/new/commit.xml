@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+  <template id="runbot.commit_new">
+    <t t-call="runbot.layout_new">
+      <div class="o_runbot_commit row">
+        <!-- Commit base information -->
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-header px-2 py-1">Commit</div>
+            <div class="o_runbot_grid o_runbot_grid_2">
+              <div>Name</div>
+              <div>
+                <t t-out="commit.name"/>
+                <div class="btn-group" role="group">
+                  <a t-att-href="'' if not reflogs else 'https://%s/commit/%s' % (reflogs[0].branch_id.remote_id.base_url, commit.name)" class="btn btn-sm text-start" title="View Commit on Github"><i class="fa fa-github"/></a>
+                  <a groups="runbot.group_runbot_admin" class="btn btn-sm fa fa-list text-start" t-attf-href="/web/#id={{commit.id}}&amp;view_type=form&amp;model=runbot.commit" target="new" title="View Commit in Backend"/>
+                </div>
+              </div>
+              <div>Tree hash</div>
+              <div t-out="commit.tree_hash"/>
+            </div>
+          </div>
+        </div>
+        <div class="o_runbot_grid o_runbot_grid_4">
+        </div>
+      </div>
+    </t>
+  </template>
+</odoo>
