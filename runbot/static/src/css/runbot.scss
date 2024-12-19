@@ -497,7 +497,7 @@ code {
 	}
 }
 
-.o_runbot_batch .o_runbot_batch_details .o_runbot_grid {
+.o_runbot_batch .o_runbot_batch_details .o_runbot_grid, .o_runbot_batch .o_runbot_batch_slots .o_runbot_grid {
 	&>* {
 		padding: 0.25rem;
 	}
