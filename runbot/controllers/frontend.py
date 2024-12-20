@@ -244,7 +244,7 @@ class Runbot(Controller):
                     Breadcrumb('/runbot/bundle/%s' % bundle.id, bundle.display_name),
                 ],
                 middle_template='runbot.bundle_toolbar_middle_section',
-                end_template='website.pager',
+                end_template='runbot.pager',
             )
         }
         return request.render(f'runbot.bundle{"_new" if not old else ""}', context)
@@ -313,7 +313,6 @@ class Runbot(Controller):
             'status_list': status_list,
             'last_status_by_context': last_status_by_context,
             'title': 'Commit %s' % commit.name[:8],
-            'toolbar': self._get_default_toolbar(),
         }
         return request.render(f'runbot.commit{"_new" if not old else ""}', context)
 
