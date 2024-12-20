@@ -293,7 +293,7 @@ class Runbot(Controller):
         '/runbot/commit/<model("runbot.commit"):commit>',
         '/runbot/commit/<string(minlength=6, maxlength=40):commit_hash>'
     ], website=True, auth='public', type='http', sitemap=False)
-    def commit(self, commit=None, commit_hash=None, **kwargs):
+    def commit(self, commit=None, commit_hash=None, old=None, **kwargs):
         if commit_hash:
             commit = request.env['runbot.commit'].search([('name', '=like', f'{commit_hash}%')], limit=1)
             if not commit.exists():
@@ -312,9 +312,10 @@ class Runbot(Controller):
             'reflogs': request.env['runbot.ref.log'].search([('commit_id', '=', commit.id)]),
             'status_list': status_list,
             'last_status_by_context': last_status_by_context,
-            'title': 'Commit %s' % commit.name[:8]
+            'title': 'Commit %s' % commit.name[:8],
+            'toolbar': self._get_default_toolbar(),
         }
-        return request.render('runbot.commit', context)
+        return request.render(f'runbot.commit{"_new" if not old else ""}', context)
 
     @o_route(['/runbot/commit/resend/<int:status_id>'], website=True, auth='user', type='http')
     def resend_status(self, status_id=None, **kwargs):

@@ -469,19 +469,25 @@ code {
 	flex: 0 0 25px;
 }
 
-@for $size from 2 through 5 {
-	.o_runbot_grid_#{$size} {
-		--runbot-grid-columns: #{$size};
-	}
-}
-
 .o_runbot_grid {
+	// Max width for regular columns
 	--runbot-grid-fit-content-width: 200px;
 
 	display: grid;
 	line-height: normal;
 	min-width: 0;
-	grid-template-columns: repeat(calc(var(--runbot-grid-columns) - 1), fit-content(var(--runbot-grid-fit-content-width))) 1fr;
+	grid-template-columns: (
+		repeat(calc(var(--runbot-grid-columns) - 1), fit-content(var(--runbot-grid-fit-content-width)))
+		1fr
+	);
+
+	&.o_runbot_grid_auto {
+		grid-template-columns: repeat(var(--runbot-grid-columns), 1fr);
+	}
+
+	&>* {
+		padding: 0.25rem;
+	}
 
 	&>.separator {
 		grid-column: span var(--runbot-grid-columns);
@@ -497,35 +503,26 @@ code {
 	}
 }
 
-.o_runbot_batch .o_runbot_batch_details .o_runbot_grid {
-	&>* {
-		padding: 0.25rem;
-	}
+@for $size from 2 through 5 {
+	.o_runbot_grid_#{$size} {
+		--runbot-grid-columns: #{$size};
 
-	&>*:nth-child(even) {
-		border-left: var(--bs-border-width) var(--bs-border-style) var(--bs-border-color) !important;
-	}
-	// We are in a card which will have it's own border-bottom
-	&>*:nth-last-child(-n + 2) {
-		border-bottom: none !important;
+		&>*:nth-last-child(-n + #{$size}) {
+			border-bottom: none !important;
+		}
+
+		&>*:not(:nth-child(#{$size}n+1)) {
+			border-left: var(--bs-border-width) var(--bs-border-style) var(--bs-border-color) !important;
+		}
 	}
 }
 
-.o_runbot_bundle .o_runbot_bundle_meta .o_runbot_grid {
+.o_runbot_commit_status_grid {
+	grid-template-columns: fit-content(var(--runbot-grid-fit-content-width)) 1fr repeat(3, fit-content(var(--runbot-grid-fit-content-width)));
+}
 
-	--runbot-grid-fit-content-width: 120px;
-
-	&>* {
-		padding: 0.25rem;
-	}
-
-	&>*:nth-child(even) {
-		border-left: var(--bs-border-width) var(--bs-border-style) var(--bs-border-color) !important;
-	}
-	// We are in a card which will have it's own border-bottom
-	&>*:nth-last-child(-n + 2) {
-		border-bottom: none !important;
-	}
+.o_runbot_commit_status_history_grid {
+	grid-template-columns: fit-content(var(--runbot-grid-fit-content-width)) 1fr repeat(2, fit-content(var(--runbot-grid-fit-content-width)));
 }
 
 .o_runbot_log_grid {

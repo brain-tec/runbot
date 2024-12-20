@@ -41,6 +41,7 @@
         'templates/new/batch.xml',
         'templates/new/build.xml',
         'templates/new/slot.xml',
+        'templates/new/commit.xml',
 
         'views/branch_views.xml',
         'views/build_error_views.xml',
