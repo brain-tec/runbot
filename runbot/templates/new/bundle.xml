@@ -3,7 +3,7 @@
     <!-- Homepage and bundles search -->
     <template id="runbot.bundles_new">
         <t t-call="runbot.layout_new">
-            <div class="o_runbot_bundle_row row" t-foreach="bundles" t-as="bundle">
+            <div class="o_runbot_bundle_row row" t-foreach="bundles" t-as="bundle" t-if="bundle.last_batchs">
                 <!-- TODO: missing style -->
                 <div class="o_runbot_bundle_info col-12 col-md-auto me-1 mb-2">
                     <div class="text-truncate">
@@ -16,7 +16,7 @@
                             t-value="[(category, bundle.with_context(category_id=category.id).last_done_batch) for category in categories if category.id != active_category_id]"
                         />
                         <t t-set="categories_and_batch" t-value="[tpl for tpl in categories_and_batch if tpl[1]]"/>
-                        <div class="btn-group" role="group" t-if="categories_and_batch">
+                        <div class="btn-group btn-group-ssm" role="group" t-if="categories_and_batch">
                             <t t-foreach="categories_and_batch" t-as="category_and_batch">
                                 <t t-if="category_and_batch[0].view_id" t-call="{{category_and_batch[0].view_id.sudo().key}}">
                                     <t t-set="category" t-value="category_and_batch[0]"/>
@@ -25,7 +25,7 @@
                                 <a t-else=""
                                     t-attf-title="View last {{category_and_batch[0].name}} batch"
                                     t-attf-href="/runbot/batch/{{category_and_batch[1].id}}"
-                                    t-attf-class="fa fa-{{category_and_batch[0].icon}}"
+                                    t-attf-class="btn btn-default fa fa-{{category_and_batch[0].icon}}"
                                 />
                             </t>
                         </div>
