@@ -27,6 +27,12 @@
                     </list>
                 </field>
               </group>
+              <group string="Qualifying">
+                  <field name="qualifiers" widget="runbotjsonb"/>
+                  <button class="btn btn-link" type="object" name="action_infer_qualifiers">
+                    Propose Qualifiers
+                  </button>
+              </group>
               <group name="fixer_info" string="Fixing" col="2">
                 <group>
                   <field name="responsible"/>

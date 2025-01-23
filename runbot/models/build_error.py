@@ -103,6 +103,8 @@ class BuildError(models.Model):
     tags_min_version_id = fields.Many2one('runbot.version', 'Tags Min version', help="Minimal version where the test tags will be applied.")
     tags_max_version_id = fields.Many2one('runbot.version', 'Tags Max version', help="Maximal version where the test tags will be applied.")
 
+    qualifiers = JsonDictField('Selection Qualifiers', help="Minimal qualifiers needed to link error content.")
+
     # Build error related data
     build_error_link_ids = fields.Many2many('runbot.build.error.link', compute=_compute_related_error_content_ids('build_error_link_ids'), search=_search_related_error_content_ids('build_error_link_ids'))
     unique_build_error_link_ids = fields.Many2many('runbot.build.error.link', compute='_compute_unique_build_error_link_ids')
@@ -241,6 +243,19 @@ class BuildError(models.Model):
             'context': {'active_test': False},
             'target': 'current',
         }
+
+    def action_infer_qualifiers(self):
+        for record in self:
+            all_qualifiers = [r.qualifiers.dict for r in record.error_content_ids]
+            common_keys = set.intersection(*map(set, [q.keys() for q in all_qualifiers]))
+            if common_keys:
+                infered_qualifiers = dict()
+                for k in common_keys:
+                    values = {q.get(k) for q in all_qualifiers}
+                    if len(values) == 1:
+                        infered_qualifiers[k] = values.pop()
+                if infered_qualifiers:
+                    record.qualifiers = infered_qualifiers
 
     def action_assign(self):
         teams = None
