@@ -14,6 +14,7 @@ import { useRef, xml, Component } from "@odoo/owl";
 import { useAutoresize } from "@web/core/utils/autoresize";
 import { getFormattedValue } from "@web/views/utils";
 
+import { UrlField } from "@web/views/fields/url/url_field";
 
 function stringify(obj) {
     return JSON.stringify(obj, null, '\t')
@@ -134,6 +135,33 @@ registry.category("fields").add("char_frontend_url", {
     supportedTypes: ["char"],
     component: FieldCharFrontendUrl,
 });
+
+
+// Pull Request URL Widget
+const pullRequestRegex = /\/([a-zA-Z-_]+\/[a-zA-Z-_]+)\/pull\/(\d+)/;
+class PullRequestUrlField extends UrlField {
+    static template = xml`
+        <UrlField t-props="fieldProps"/>
+    `;
+    static components = { UrlField }
+    get fieldProps() {
+        const props = {...this.props};
+        const parts = pullRequestRegex.exec(this.props.record.data[props.name])
+        if (parts) {
+            props.text = `${parts[1]}#${parts[2]}`;
+        }
+        return props
+    }
+}
+
+PullRequestUrlField.supportedTypes = ["char"];
+
+
+registry.category("fields").add("pull_request_url", {
+    supportedTypes: ["char"],
+    component: PullRequestUrlField,
+});
+
 
 //export class GithubTeamWidget extends CharField {
 
