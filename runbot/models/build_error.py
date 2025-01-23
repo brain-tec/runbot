@@ -103,6 +103,9 @@ class BuildError(models.Model):
     tags_min_version_id = fields.Many2one('runbot.version', 'Tags Min version', help="Minimal version where the test tags will be applied.")
     tags_max_version_id = fields.Many2one('runbot.version', 'Tags Max version', help="Maximal version where the test tags will be applied.")
 
+    qualifiers = JsonDictField('Selection Qualifiers', help="Minimal qualifiers needed to link error content.")
+    similar_ids = fields.One2many('runbot.build.error', compute='_compute_similar_ids', string="Similar Errors", help="Similar Errors based on qualifiers")
+
     # Build error related data
     build_error_link_ids = fields.Many2many('runbot.build.error.link', compute=_compute_related_error_content_ids('build_error_link_ids'), search=_search_related_error_content_ids('build_error_link_ids'))
     unique_build_error_link_ids = fields.Many2many('runbot.build.error.link', compute='_compute_unique_build_error_link_ids')
@@ -149,6 +152,19 @@ class BuildError(models.Model):
         for record in self:
             record.random = any(error.random for error in record.error_content_ids)
 
+    @api.depends('qualifiers')
+    def _compute_similar_ids(self):
+        for record in self:
+            if record.qualifiers:
+                query = SQL(
+                    r"""SELECT error_id FROM runbot_build_error_content WHERE error_id != %s AND qualifiers @> %s""",
+                    record.id,
+                    json.dumps(record.qualifiers.dict),
+                )
+                self.env.cr.execute(query)
+                record.similar_ids = self.env['runbot.build.error'].browse([rec[0] for rec in self.env.cr.fetchall()])
+            else:
+                record.similar_ids = False
 
     @api.constrains('test_tags')
     def _check_test_tags(self):
@@ -202,6 +218,7 @@ class BuildError(models.Model):
                 if not error.team_id:
                     error.team_id = previous_error.team_id
             previous_error.error_content_ids.write({'error_id': self})
+            previous_error.qualifiers = dict()
             if not previous_error.test_tags:
                 previous_error.message_post(body=Markup('Error merged into %s') % error._get_form_link())
                 previous_error.active = False
@@ -241,6 +258,42 @@ class BuildError(models.Model):
             'context': {'active_test': False},
             'target': 'current',
         }
+
+    def action_infer_qualifiers(self):
+        for record in self:
+            all_qualifiers = [r.qualifiers.dict for r in record.error_content_ids]
+            common_keys = set.intersection(*map(set, [q.keys() for q in all_qualifiers]))
+            if common_keys:
+                infered_qualifiers = dict()
+                for k in common_keys:
+                    values = {q.get(k) for q in all_qualifiers}
+                    if len(values) == 1:
+                        infered_qualifiers[k] = values.pop()
+                if infered_qualifiers:
+                    record.qualifiers = infered_qualifiers
+
+    def action_show_qualified_contents(self):
+        similar_content_ids = []
+        for record in self:
+            if record.qualifiers:
+                query = SQL(
+                    r"""SELECT id FROM runbot_build_error_content WHERE error_id != %s AND qualifiers @> %s""",
+                    record.id,
+                    json.dumps(record.qualifiers.dict),
+                )
+                self.env.cr.execute(query)
+                similar_content_ids += [rec[0] for rec in self.env.cr.fetchall()]
+        return {
+            'type': 'ir.actions.act_window',
+            'views': [(False, 'list'), (False, 'form')],
+            'res_model': 'runbot.build.error.content',
+            'domain': [('id', 'in', similar_content_ids)],
+            'target': 'current',
+        }
+
+    def action_merge_similary_qualified(self):
+        for record in self:
+            record._merge(record.similar_ids)
 
     def action_assign(self):
         teams = None
