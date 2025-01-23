@@ -452,8 +452,8 @@ class BuildErrorContent(models.Model):
                 query = SQL(
                     r"""SELECT id FROM runbot_build_error_content WHERE id != %s AND qualifiers @> %s AND qualifiers <@ %s""",
                     record.id,
-                    json.dumps(self.qualifiers.dict),
-                    json.dumps(self.qualifiers.dict),
+                    json.dumps(record.qualifiers.dict),
+                    json.dumps(record.qualifiers.dict),
                 )
                 self.env.cr.execute(query)
                 record.similar_ids = self.env['runbot.build.error.content'].browse([rec[0] for rec in self.env.cr.fetchall()])
