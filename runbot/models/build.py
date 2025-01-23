@@ -155,7 +155,7 @@ class BuildResult(models.Model):
     # could be a default value, but possible to change it to allow duplicate accros branches
 
     description = fields.Char('Description', help='Informative description')
-    md_description = fields.Char(compute='_compute_md_description', string='MD Parsed Description', help='Informative description markdown parsed')
+    md_description = fields.Html(compute='_compute_md_description', string='MD Parsed Description', help='Informative description markdown parsed', sanitize=False)
     display_name = fields.Char(compute='_compute_display_name')
 
     # Related fields for convenience
@@ -215,9 +215,9 @@ class BuildResult(models.Model):
                                   string='Build type')
 
     parent_id = fields.Many2one('runbot.build', 'Parent Build', index=True)
-    parent_path = fields.Char('Parent path', index=True, unaccent=False)
-    top_parent =  fields.Many2one('runbot.build', compute='_compute_top_parent')
-    ancestors =  fields.Many2many('runbot.build', compute='_compute_ancestors')
+    parent_path = fields.Char('Parent path', index=True)
+    top_parent = fields.Many2one('runbot.build', compute='_compute_top_parent')
+    ancestors = fields.Many2many('runbot.build', compute='_compute_ancestors')
     # should we add a has children stored boolean?
     children_ids = fields.One2many('runbot.build', 'parent_id')
 

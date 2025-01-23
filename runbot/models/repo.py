@@ -14,6 +14,7 @@ from pathlib import Path
 from odoo import models, fields, api
 from odoo.tools import file_open, mail
 from ..common import os, RunbotException, make_github_session, sanitize
+from ..fields import JsonDictField
 from odoo.exceptions import UserError
 from odoo.tools.safe_eval import safe_eval
 
@@ -70,6 +71,7 @@ class Trigger(models.Model):
     )
     module_filters = fields.One2many('runbot.module.filter', 'trigger_id', string="Module filters", help='Will be combined with repo module filters when used with this trigger')
     config_id = fields.Many2one('runbot.build.config', string="Config", required=True)
+    config_data = JsonDictField('Config Data')
     batch_dependent = fields.Boolean('Batch Dependent', help="Force adding batch in build parameters to make it unique and give access to bundle")
 
     ci_context = fields.Char("CI context", tracking=True)
@@ -278,9 +280,9 @@ class Remote(models.Model):
                     while try_count < nb_tries:
                         try:
                             if payload:
-                                response = session.post(url, data=json.dumps(payload))
+                                response = session.post(url, data=json.dumps(payload), timeout=20)
                             else:
-                                response = session.get(url)
+                                response = session.get(url, timeout=20)
                             response.raise_for_status()
                             if try_count > 0:
                                 _logger.info('Success after %s tries', (try_count + 1))
@@ -308,7 +310,7 @@ class Remote(models.Model):
                                     raise
 
     def action_check_token(self):
-        if not self.user_has_groups('runbot.group_runbot_admin'):
+        if not self.env.user.has_group('runbot.group_runbot_admin'):
             raise UserError('This action is restricted to admin users')
         token_results = {}
         for repo in self:

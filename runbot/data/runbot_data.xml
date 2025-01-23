@@ -19,7 +19,7 @@
     <data noupdate="1">
         <record model="ir.config_parameter" id="runbot.runbot_upgrade_exception_message">
             <field name="key">runbot.runbot_upgrade_exception_message</field>
-            <field name="value">Upgrade exception [#{exception.id}]({base_url}/web/#id={exception.id}&amp;view_type=form&amp;model=runbot.upgrade.exception) added\
+            <field name="value">Upgrade exception [#{exception.id}]({base_url}/odoo/runbot.upgrade.exception/{exception.id}) added\
     {exception.elements}
             </field>
         </record>
@@ -103,8 +103,6 @@ admin_passwd=running_master_password</field>
         <field name="active" eval="False"/>
         <field name="interval_number">10</field>
         <field name="interval_type">seconds</field>
-        <field name="numbercall">-1</field>
-        <field name="doall" eval="False"/>
         <field name="model_id" ref="model_runbot_runbot"/>
         <field name="code">model._cron()</field>
         <field name="state">code</field>

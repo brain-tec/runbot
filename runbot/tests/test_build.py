@@ -181,6 +181,64 @@ class TestBuildParams(RunbotCaseMinimalSetup):
         batch._process()
         self.assertEqual(batch.state, 'done')
 
+    def test_trigger_config_data(self):
+        """Test that a config_data on the trigger is given to the build"""
+        self.additionnal_setup()
+        self.start_patchers()
+
+        # A commit is found on the dev remote
+        branch_a_name = 'master-test-something'
+        self.push_commit(self.remote_server_dev, branch_a_name, 'nice subject', sha='d0d0caca')
+        # batch preparation
+        self.repo_server.project_id.process_delay = 10
+        self.repo_server._update_batches()
+
+        # set config data on the trigger
+        self.trigger_server.config_data = {'moc_var': 'bar'}
+
+        # create a custom trigger for the bundle
+        bundle = self.Bundle.search([('name', '=', branch_a_name), ('project_id', '=', self.project.id)])
+
+        self.repo_server.project_id.process_delay = 0
+        bundle.last_batch._process()
+        build_slot = bundle.last_batch.slot_ids.filtered(lambda rec: rec.trigger_id == self.trigger_server)
+        self.assertIn(
+            'moc_var', build_slot.params_id.config_data
+        )
+        self.assertEqual('bar', build_slot.params_id.config_data['moc_var'])
+
+    def test_trigger_config_data_custom_trigger(self):
+        """Test that a config_data on a custom trigger overrides the config_data on the trigger"""
+        self.additionnal_setup()
+        self.start_patchers()
+
+        # A commit is found on the dev remote
+        branch_a_name = 'master-test-something'
+        self.push_commit(self.remote_server_dev, branch_a_name, 'nice subject', sha='d0d0caca')
+        # batch preparation
+        self.repo_server.project_id.process_delay = 10
+        self.repo_server._update_batches()
+
+        # set config data on the trigger
+        self.trigger_server.config_data = {'moc_var': 'bar'}
+
+        # create a custom trigger for the bundle
+        bundle = self.Bundle.search([('name', '=', branch_a_name), ('project_id', '=', self.project.id)])
+
+        # create a custom trigger with the custom config linked to the bundle
+        self.env['runbot.bundle.trigger.custom'].create({
+            'trigger_id': self.trigger_server.id,
+            'bundle_id': bundle.id,
+            'config_data': {'moc_var': 'foo'},
+        })
+
+        self.repo_server.project_id.process_delay = 0
+        bundle.last_batch._process()
+        build_slot = bundle.last_batch.slot_ids.filtered(lambda rec: rec.trigger_id == self.trigger_server)
+        self.assertIn(
+            'moc_var', build_slot.params_id.config_data
+        )
+        self.assertEqual('foo', build_slot.params_id.config_data['moc_var'])
 
 class TestBuildResult(RunbotCase):
 
@@ -473,7 +531,12 @@ class TestBuildResult(RunbotCase):
         self.assertEqual('pending', build1_1_2.global_state)
 
         build1_2.flush_recordset()
-        with self.assertQueries(['''UPDATE "runbot_build" SET "global_state"=%s,"local_state"=%s,"write_date"=%s,"write_uid"=%s WHERE id IN %s''']):
+        expected = """ UPDATE "runbot_build"
+                    SET "global_state" = "__tmp"."global_state"::VARCHAR, "local_state" = "__tmp"."local_state"::VARCHAR, "write_date" = "__tmp"."write_date"::timestamp, "write_uid" = "__tmp"."write_uid"::int4
+                    FROM (VALUES %s) AS "__tmp"("id", "global_state", "local_state", "write_date", "write_uid")
+                    WHERE "runbot_build"."id" = "__tmp"."id" """
+
+        with self.assertQueries([expected]):
             build1_2.local_state = "testing"
             build1_2.flush_recordset()
 
