@@ -104,6 +104,7 @@ class BuildError(models.Model):
     tags_max_version_id = fields.Many2one('runbot.version', 'Tags Max version', help="Maximal version where the test tags will be applied.")
 
     qualifiers = JsonDictField('Selection Qualifiers', help="Minimal qualifiers needed to link error content.")
+    similar_ids = fields.One2many('runbot.build.error', compute='_compute_similar_ids')
 
     # Build error related data
     build_error_link_ids = fields.Many2many('runbot.build.error.link', compute=_compute_related_error_content_ids('build_error_link_ids'), search=_search_related_error_content_ids('build_error_link_ids'))
@@ -151,6 +152,19 @@ class BuildError(models.Model):
         for record in self:
             record.random = any(error.random for error in record.error_content_ids)
 
+    @api.depends('qualifiers')
+    def _compute_similar_ids(self):
+        for record in self:
+            if record.qualifiers:
+                query = SQL(
+                    r"""SELECT error_id FROM runbot_build_error_content WHERE error_id != %s AND qualifiers @> %s""",
+                    record.id,
+                    json.dumps(record.qualifiers.dict),
+                )
+                self.env.cr.execute(query)
+                record.similar_ids = self.env['runbot.build.error'].browse([rec[0] for rec in self.env.cr.fetchall()])
+            else:
+                record.similar_ids = False
 
     @api.constrains('test_tags')
     def _check_test_tags(self):

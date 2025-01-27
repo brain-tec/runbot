@@ -35,6 +35,28 @@
                   <button class="btn btn-link" type="object" name="action_show_qualified_contents">
                     View corresponding contents
                   </button>
+                  <field name="similar_ids" widget="one2many" options="{'not_delete': True, 'no_create': True}" readonly="1">
+                    <list string="Similar Errors"
+                              decoration-danger="test_tags and (fixing_pr_alive or not fixing_pr_id)"
+                              decoration-success="fixing_pr_id and not test_tags and not fixing_pr_alive"
+                              decoration-warning="test_tags and fixing_pr_id and not fixing_pr_alive"
+                              multi_edit="1"
+                              >
+                            <field name="id"/>
+                            <field name="name" optional="show" readonly="1"/>
+                            <field name="description" optional="hide" readonly="1"/>
+                            <field name="first_seen_date" string="First Seen" optional="hide" readonly="1"/>
+                            <field name="last_seen_date" string="Last Seen" readonly="1" options="{'link_field': 'last_seen_build_id'}"/>
+                            <field name="last_seen_build_id" column_invisible="True"/>
+                            <field name="error_count" readonly="1"/>
+                            <field name="build_count" readonly="1"/>
+                            <field name="team_id"/>
+                            <field name="responsible" optional="show"/>
+                            <field name="test_tags" optional="hide"/>
+                            <field name="fixing_pr_id" optional="hide"/>
+                            <field name="fixing_pr_alive" optional="hide"/>
+                    </list>
+                  </field>
               </group>
               <group name="fixer_info" string="Fixing" col="2">
                 <group>
