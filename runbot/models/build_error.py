@@ -257,6 +257,25 @@ class BuildError(models.Model):
                 if infered_qualifiers:
                     record.qualifiers = infered_qualifiers
 
+    def action_show_qualified_contents(self):
+        similar_content_ids = []
+        for record in self:
+            if record.qualifiers:
+                query = SQL(
+                    r"""SELECT id FROM runbot_build_error_content WHERE error_id != %s AND qualifiers @> %s""",
+                    record.id,
+                    json.dumps(record.qualifiers.dict),
+                )
+                self.env.cr.execute(query)
+                similar_content_ids += [rec[0] for rec in self.env.cr.fetchall()]
+        return {
+            'type': 'ir.actions.act_window',
+            'views': [(False, 'list'), (False, 'form')],
+            'res_model': 'runbot.build.error.content',
+            'domain': [('id', 'in', similar_content_ids)],
+            'target': 'current',
+        }
+
     def action_assign(self):
         teams = None
         repos = None

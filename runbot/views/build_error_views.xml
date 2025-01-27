@@ -32,6 +32,9 @@
                   <button class="btn btn-link" type="object" name="action_infer_qualifiers">
                     Propose Qualifiers
                   </button>
+                  <button class="btn btn-link" type="object" name="action_show_qualified_contents">
+                    View corresponding contents
+                  </button>
               </group>
               <group name="fixer_info" string="Fixing" col="2">
                 <group>
