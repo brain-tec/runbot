@@ -218,6 +218,7 @@ class BuildError(models.Model):
                 if not error.team_id:
                     error.team_id = previous_error.team_id
             previous_error.error_content_ids.write({'error_id': self})
+            previous_error.qualifiers = dict()
             if not previous_error.test_tags:
                 previous_error.message_post(body=Markup('Error merged into %s') % error._get_form_link())
                 previous_error.active = False
@@ -289,6 +290,10 @@ class BuildError(models.Model):
             'domain': [('id', 'in', similar_content_ids)],
             'target': 'current',
         }
+
+    def action_merge_similary_qualified(self):
+        for record in self:
+            record._merge(record.similar_ids)
 
     def action_assign(self):
         teams = None
