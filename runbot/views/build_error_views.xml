@@ -29,8 +29,8 @@
               </group>
               <group string="Qualifying">
                   <field name="qualifiers" widget="runbotjsonb"/>
-                  <button class="btn btn-link" type="object" name="action_infer_qualifiers">
-                    Propose Qualifiers
+                  <button class="btn btn-link" type="object" name="action_infer_qualifiers" help="Suggest qualifiers based on content's qualifiers">
+                    Suggest Qualifiers
                   </button>
                   <button class="btn btn-link" type="object" name="action_show_qualified_contents">
                     View corresponding contents
