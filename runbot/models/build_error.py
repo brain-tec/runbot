@@ -104,7 +104,7 @@ class BuildError(models.Model):
     tags_max_version_id = fields.Many2one('runbot.version', 'Tags Max version', help="Maximal version where the test tags will be applied.")
 
     qualifiers = JsonDictField('Selection Qualifiers', help="Minimal qualifiers needed to link error content.")
-    similar_ids = fields.One2many('runbot.build.error', compute='_compute_similar_ids')
+    similar_ids = fields.One2many('runbot.build.error', compute='_compute_similar_ids', string="Similar Errors", help="Similar Errors based on qualifiers")
 
     # Build error related data
     build_error_link_ids = fields.Many2many('runbot.build.error.link', compute=_compute_related_error_content_ids('build_error_link_ids'), search=_search_related_error_content_ids('build_error_link_ids'))
