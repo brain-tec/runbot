@@ -27,7 +27,62 @@
                     </list>
                 </field>
               </group>
-              <group string="Qualifying">
+              <group name="fixer_info" string="Fixing" col="2">
+                <group>
+                  <field name="responsible"/>
+                  <field name="customer"/>
+                  <field name="team_id"/>
+                  <field name="fixing_pr_id"/>
+                  <field name="fixing_pr_url" widget="pull_request_url"/>
+                  <field name="active"/>
+                  <field name="test_tags" decoration-danger="True" readonly="1" groups="!runbot.group_runbot_admin"/>
+                  <field name="test_tags" decoration-danger="True" groups="runbot.group_runbot_admin"/>
+                  <field name="tags_min_version_id" invisible="not test_tags"/>
+                  <field name="tags_max_version_id" invisible="not test_tags"/>
+                </group>
+                <group>
+                  <field name="version_ids" widget="many2many_tags"/>
+                  <field name="trigger_ids" widget="many2many_tags"/>
+                  <field name="tag_ids" widget="many2many_tags"/>
+                  <field name="random"/>
+                  <field name="first_seen_date" widget="frontend_url" options="{'link_field': 'first_seen_build_id'}"/>
+                  <field name="last_seen_date" widget="frontend_url" options="{'link_field': 'last_seen_build_id'}"/>
+                  <field name="first_seen_build_id" invisible="True"/>
+                  <field name="last_seen_build_id" invisible="True"/>
+                </group>
+              </group>
+              <group>
+                <field name="previous_error_id" readonly="1" invisible="not previous_error_id" text-decoration-danger="True"/>
+              </group>
+              <notebook>
+                <page string="Builds">
+                  <field name="unique_build_error_link_ids" widget="one2many" options="{'not_delete': True, 'no_create': True}" readonly="1">
+                    <list default_order="log_date desc,id desc">
+                      <field name="log_date"/>
+                      <field name="host" groups="base.group_no_one" optional="hide"/>
+                      <field name="dest" optional="hide"/>
+                      <field name="version_id"/>
+                      <field name="trigger_id"/>
+                      <field name="description"/>
+                      <field name="build_url" widget="url" readonly="1" text="View build"/>
+                    </list>
+                  </field>
+                </page>
+                <page string="All links">
+                  <field name="build_error_link_ids" widget="one2many" options="{'not_delete': True, 'no_create': True}" readonly="1">
+                    <list default_order="log_date desc,id desc">
+                      <field name="log_date"/>
+                      <field name="host" groups="base.group_no_one" optional="hide"/>
+                      <field name="dest" optional="hide"/>
+                      <field name="version_id"/>
+                      <field name="trigger_id"/>
+                      <field name="description"/>
+                      <field name="error_content_id" widget="many2one" string="Linked Error log"/>
+                      <field name="build_url" widget="url" readonly="1" text="View build"/>
+                    </list>
+                  </field>
+                </page>
+                <page string="Qualifying" groups="runbot.group_runbot_admin,runbot.group_runbot_error_manager">
                   <div class="btn-group">
                     <button class="btn btn-sm btn-primary" type="object" name="action_infer_qualifiers" help="Suggest qualifiers based on content's qualifiers">
                       Suggest Qualifiers
@@ -58,61 +113,6 @@
                       <field name="test_tags" optional="hide"/>
                       <field name="fixing_pr_id" optional="hide"/>
                       <field name="fixing_pr_alive" optional="hide"/>
-                    </list>
-                  </field>
-              </group>
-              <group name="fixer_info" string="Fixing" col="2">
-                <group>
-                  <field name="responsible"/>
-                  <field name="customer"/>
-                  <field name="team_id"/>
-                  <field name="fixing_pr_id"/>
-                  <field name="fixing_pr_url" widget="pull_request_url"/>
-                  <field name="active"/>
-                  <field name="test_tags" decoration-danger="True" readonly="1" groups="!runbot.group_runbot_admin"/>
-                  <field name="test_tags" decoration-danger="True" groups="runbot.group_runbot_admin"/>
-                  <field name="tags_min_version_id" invisible="not test_tags"/>
-                  <field name="tags_max_version_id" invisible="not test_tags"/>
-                </group>
-                <group>
-                  <field name="version_ids" widget="many2many_tags"/>
-                  <field name="trigger_ids" widget="many2many_tags"/>
-                  <field name="tag_ids" widget="many2many_tags"/>
-                  <field name="random"/>
-                  <field name="first_seen_date" widget="frontend_url" options="{'link_field': 'first_seen_build_id'}"/>
-                  <field name="last_seen_date" widget="frontend_url" options="{'link_field': 'last_seen_build_id'}"/>
-                  <field name="first_seen_build_id" invisible="True"/>
-                  <field name="last_seen_build_id" invisible="True"/>
-                </group>
-              </group>
-              <group>
-                <field name="previous_error_id" readonly="1" invisible="not previous_error_id" text-decoration-danger="True"/>
-              </group>  
-              <notebook>
-                <page string="Builds">
-                  <field name="unique_build_error_link_ids" widget="one2many" options="{'not_delete': True, 'no_create': True}" readonly="1">
-                    <list default_order="log_date desc,id desc">
-                      <field name="log_date"/>
-                      <field name="host" groups="base.group_no_one" optional="hide"/>
-                      <field name="dest" optional="hide"/>
-                      <field name="version_id"/>
-                      <field name="trigger_id"/>
-                      <field name="description"/>
-                      <field name="build_url" widget="url" readonly="1" text="View build"/>
-                    </list>
-                  </field>
-                </page>
-                <page string="All links">
-                  <field name="build_error_link_ids" widget="one2many" options="{'not_delete': True, 'no_create': True}" readonly="1">
-                    <list default_order="log_date desc,id desc">
-                      <field name="log_date"/>
-                      <field name="host" groups="base.group_no_one" optional="hide"/>
-                      <field name="dest" optional="hide"/>
-                      <field name="version_id"/>
-                      <field name="trigger_id"/>
-                      <field name="description"/>
-                      <field name="error_content_id" widget="many2one" string="Linked Error log"/>
-                      <field name="build_url" widget="url" readonly="1" text="View build"/>
                     </list>
                   </field>
                 </page>
