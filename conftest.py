@@ -58,6 +58,7 @@ import os
 import pathlib
 import pprint
 import re
+import secrets
 import select
 import shutil
 import socket
@@ -73,7 +74,7 @@ import xmlrpc.client
 from contextlib import closing
 from dataclasses import dataclass
 from typing import Optional
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, quote
 
 import pytest
 import requests
@@ -366,7 +367,7 @@ def port():
 def page(port):
     with requests.Session() as s:
         def get(url):
-            r = s.get('http://localhost:{}{}'.format(port, url))
+            r = s.get(f'http://localhost:{port}{url}')
             r.raise_for_status()
             return r.content
         yield get
@@ -533,6 +534,39 @@ def reviewer_admin(env, partners):
         ],
     })
 
+VARCHAR = "[0-9a-z_]|%[0-9a-f]{2}"
+VARNAME = f"(?:(?:{VARCHAR})(?:\.|{VARCHAR})*)"
+VARLIST = fr"{VARNAME}(?:\,{VARNAME})*"
+TEMPLATE = re.compile(fr'''
+\{{
+    # op level 2/3/reserved
+    (?P<operator>[+\#./;?&=,!@|])?
+    (?P<varlist>{VARLIST})
+    # modifier level 4
+    (:? (?P<prefix>:[0-9]+) | (?P<explode>\*) )
+\}}
+''', flags=re.VERBOSE | re.IGNORECASE)
+def template(tmpl, **params):
+    # FIXME: actually implement RFC 6570 cleanly
+    # see https://stackoverflow.com/a/76276177/8182118 for the expansions github
+    # seems to be using (except it's missing + so probably incomplete...)
+    def replacer(m):
+        esc = lambda v: quote(v, safe="")
+        match m['operator']:
+            case None: # simple
+                pass
+            case '+': # allowReserved
+                esc = lambda v: v
+            case s:
+                raise NotImplementedError(f"Operator {s!r} is not supported")
+
+        v = params[m['varlist']]
+        if not isinstance(v, str):
+            raise TypeError(f"Unsupported parameter type {type(v).__name__!r}")
+        return esc(v)
+
+    return TEMPLATE.sub(replacer, tmpl)
+
 def check(response):
     assert response.ok, response.text or response.reason
     return response
@@ -550,10 +584,10 @@ def make_repo(request, config, tunnel, users):
 
     # check whether "owner" is a user or an org, as repo-creation endpoint is
     # different
-    q = _rate_limited(lambda: github.get('https://api.github.com/users/{}'.format(owner)))
+    q = _rate_limited(lambda: github.get(f'https://api.github.com/users/{owner}'))
     q.raise_for_status()
     if q.json().get('type') == 'Organization':
-        endpoint = 'https://api.github.com/orgs/{}/repos'.format(owner)
+        endpoint = f'https://api.github.com/orgs/{owner}/repos'
     else:
         endpoint = 'https://api.github.com/user/repos'
         r = check(github.get('https://api.github.com/user'))
@@ -561,13 +595,9 @@ def make_repo(request, config, tunnel, users):
 
     repos = []
     def repomaker(name, *, hooks=True):
-        name = 'ignore_%s_%s' % (name, base64.b64encode(os.urandom(6), b'-_').decode())
-        fullname = '{}/{}'.format(owner, name)
-        repo_url = 'https://api.github.com/repos/{}'.format(fullname)
-
         # create repo
         r = check(github.post(endpoint, json={
-            'name': name,
+            'name': f'ignore_{name}_{secrets.token_urlsafe(6)}',
             'has_issues': True,
             'has_projects': False,
             'has_wiki': False,
@@ -578,17 +608,18 @@ def make_repo(request, config, tunnel, users):
             'allow_rebase_merge': False,
         }))
         r = r.json()
+        repo_url = r['url']
         # wait for repository visibility
         while True:
             time.sleep(1)
-            if github.head(r['url']).ok:
+            if github.head(repo_url).ok:
                 break
 
-        repo = Repo(github, fullname, repos)
+        repo = Repo(github, r['full_name'], repos)
 
         if hooks:
             # create webhook
-            check(github.post('{}/hooks'.format(repo_url), json={
+            check(github.post(r['hooks_url'], json={
                 'name': 'web',
                 'config': {
                     'url': '{}/runbot_merge/hooks'.format(tunnel),
@@ -599,11 +630,11 @@ def make_repo(request, config, tunnel, users):
             }))
             time.sleep(1)
 
-        check(github.put('{}/contents/{}'.format(repo_url, 'a'), json={
+        check(github.put(template(r['contents_url'], path='a'), json={
             'path': 'a',
             'message': 'github returns a 409 (Git Repository is Empty) if trying to create a tree in a repo with no objects',
             'content': base64.b64encode(b'whee').decode('ascii'),
-            'branch': 'garbage_%s' % uuid.uuid4()
+            'branch': f'garbage_{uuid.uuid4()}'
         }))
         time.sleep(1)
         return repo
@@ -880,7 +911,9 @@ class Repo:
     def fork(self, *, token=None):
         s = self._get_session(token)
 
-        r = s.post('https://api.github.com/repos/{}/forks'.format(self.name))
+        r = s.post(f'https://api.github.com/repos/{self.name}/forks', json={
+            'default_branch_only': True,
+        })
         assert 200 <= r.status_code < 300, r.text
 
         repo_name = r.json()['full_name']
