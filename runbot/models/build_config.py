@@ -191,6 +191,9 @@ class ConfigStep(models.Model):
     upgrade_from_all_intermediate_version = fields.Boolean() # 13.2 # 13.1
     upgrade_from_version_ids = fields.Many2many('runbot.version', relation='runbot_upgrade_from_version_ids', string='Forced version to use as source (cartesian with target)')
 
+    # wip replace previous field by matrix
+    upgrade_matrix_id = fields.Many2one('runbot.upgrade.matrix', 'Upgrade matrix', tracking=True)
+
     upgrade_flat = fields.Boolean("Flat", help="Take all decisions in on build")
 
     upgrade_config_id = fields.Many2one('runbot.build.config',string='Upgrade Config', tracking=True, index=True)
