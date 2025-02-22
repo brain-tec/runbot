@@ -174,8 +174,10 @@ class Batch(models.Model):
             build._github_status()
         return link_type, build
 
-    def _prepare(self, auto_rebase=False):
+    def _prepare(self, auto_rebase=False, use_base_commits=False):
         _logger.info('Preparing batch %s', self.id)
+        if use_base_commits:
+            self._warning('This batch will use base commits instead of bundle commits')
         if not self.bundle_id.base_id:
             # in some case the base can be detected lately. If a bundle has no base, recompute the base before preparing
             self.bundle_id._compute_base_id()
@@ -358,6 +360,9 @@ class Batch(models.Model):
             for commit_link in self.commit_link_ids:
                 commit_link.commit_id = commit_link.commit_id._rebase_on(commit_link.base_commit_id)
         commit_link_by_repos = {commit_link.commit_id.repo_id.id: commit_link for commit_link in self.commit_link_ids}
+        base_commit_link_by_repos = {commit_link.commit_id.repo_id.id: commit_link for commit_link in self.base_reference_batch_id.commit_link_ids}
+        if use_base_commits:
+            commit_link_by_repos = base_commit_link_by_repos
         version_id = self.bundle_id.version_id.id
         project_id = self.bundle_id.project_id.id
         trigger_customs = {}
@@ -373,6 +378,11 @@ class Batch(models.Model):
             config = trigger_custom.config_id or trigger.config_id
             extra_params = trigger_custom.extra_params or ''
             config_data = dict(trigger.config_data or {}) | dict(trigger_custom.config_data or {})
+            trigger_commit_link_by_repos = commit_link_by_repos
+            if trigger_custom.use_base_commits and self.base_reference_batch_id:
+                self._warning(f'This batch will use base commits instead of bundle commits for trigger {trigger.name}')
+                trigger_commit_link_by_repos = base_commit_link_by_repos
+            commits_links = [trigger_commit_link_by_repos[repo.id].id for repo in trigger_repos]
             params_value = {
                 'version_id':  version_id,
                 'extra_params': extra_params,
@@ -380,7 +390,7 @@ class Batch(models.Model):
                 'project_id': project_id,
                 'trigger_id': trigger.id,  # for future reference and access rights
                 'config_data': config_data,
-                'commit_link_ids': [(6, 0, [commit_link_by_repos[repo.id].id for repo in trigger_repos])],
+                'commit_link_ids': [(6, 0, commits_links)],
                 'modules': bundle.modules,
                 'dockerfile_id': dockerfile_id,
                 'create_batch_id': self.id,
