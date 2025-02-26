@@ -708,7 +708,7 @@ class ConfigStep(models.Model):
                         dbs = dump_builds.database_ids.sorted('db_suffix')
                         valid_databases += list(self._filter_upgrade_database(dbs, upgrade_db.db_pattern))
                         if not valid_databases:
-                            build._log('_run_configure_upgrade', 'No datase found for pattern %s' % (upgrade_db.db_pattern), level='ERROR')
+                            build._log('_run_configure_upgrade', 'No database found for pattern %s' % (upgrade_db.db_pattern), level='ERROR')
                 for db in valid_databases:
                     #commit_ids = build.params_id.commit_ids
                     #if commit_ids != target.params_id.commit_ids:
@@ -722,7 +722,7 @@ class ConfigStep(models.Model):
                         'upgrade_to_build_id': target.id,
                         'upgrade_from_build_id': source,
                         'dump_db': db.id,
-                        'config_id': self.upgrade_config_id
+                        'config_id': self.upgrade_config_id,
                     })
 
                     child.description = 'Testing migration from %s to %s using db %s (%s)' % (
@@ -890,9 +890,9 @@ class ConfigStep(models.Model):
             for next_version in next_versions:
                 if bundle.version_id in upgrade_complement_step._get_upgrade_source_versions(next_version):
                     target_versions |= next_version
-        return target_versions.with_context(
-            category_id=category_id, project_id=bundle.project_id.id,
-            ).mapped('base_bundle_id').filtered('to_upgrade').mapped('last_done_batch')
+
+        base_batch = batch if batch.reference_batch_ids else batch.base_reference_batch_id
+        return base_batch.reference_batch_ids.filtered(lambda batch: batch.bundle_id.version_id in target_versions and batch.category_id.id == category_id)
 
     def _reference_batches_upgrade(self, batch, category_id):
         if not batch.bundle_id.base_id.to_upgrade:
@@ -932,9 +932,9 @@ class ConfigStep(models.Model):
                 from_versions(f_bundle)
             source_refs_bundles = source_refs_bundles.filtered('to_upgrade_from')
 
-        return (target_refs_bundles | source_refs_bundles).with_context(
-            category_id=category_id
-            ).mapped('last_done_batch')
+        ref_bundles = target_refs_bundles | source_refs_bundles
+        base_batch = batch if batch.reference_batch_ids else batch.base_reference_batch_id
+        return base_batch.reference_batch_ids.filtered(lambda batch: batch.bundle_id in ref_bundles and batch.category_id.id == category_id)
 
     def _log_end(self, build):
         if self.job_type == 'create_build':
