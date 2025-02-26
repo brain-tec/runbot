@@ -21,7 +21,7 @@
                 <field name="head"/>
                 <field name="alive"/>
                 <field name="pr_title"/>
-                <field name="pr_body"/>
+                <field name="pr_body" widget="text"/>
               </group>
             </sheet>
           </form>
