@@ -22,7 +22,7 @@ class UpgradeExceptions(models.Model):
             raise UserError('You are not allowed to send messages')
         for pr in self.pr_ids:
             pr.remote_id._github('/repos/:owner/:repo/issues/%s/comments' % pr.name, {'body': self.message})
-    
+
     def action_auto_rebuild(self):
         builds = self.create_build_id.parent_id.children_ids if self.create_build_id.parent_id else self.create_build_id
         for build in builds:
@@ -40,7 +40,7 @@ class UpgradeExceptions(models.Model):
         if exceptions:
             return 'suppress_upgrade_warnings=%s' % (','.join(exceptions.mapped('elements'))).replace(' ', '').replace('\n', ',')
         return False
-    
+
     def default_pr_ids(self):
         bundle_id = self.env.context.get('default_bundle_id')
         if bundle_id:
@@ -102,10 +102,10 @@ class UpgradeMatrix(models.Model):
     entry_ids = fields.One2many('runbot.upgrade.matrix.entry', 'matrix_id', 'Entries')
     auto_update = fields.Boolean('Auto update', default=True, help="Automatically update the matrix entries enabled state when new versions are created")
 
-    # fields defining default behaviour to generate the matix, 
+    # fields defining default behaviour to generate the matix
     upgrade_to_major_versions = fields.Boolean()
     upgrade_to_all_versions = fields.Boolean()
-    upgrade_from_previous_major_version = fields.Boolean() 
+    upgrade_from_previous_major_version = fields.Boolean()
     upgrade_from_last_intermediate_version = fields.Boolean()
     upgrade_from_all_intermediate_version = fields.Boolean()
 
@@ -126,40 +126,43 @@ class UpgradeMatrix(models.Model):
                 from_versions_string = ', '.join(sorted(from_versions))
                 lines.append(f'{to_version.number} - ({from_versions_string})')
             matrix.matrix_summary = '\n'.join(lines)
-            print('recompute')
-            print(matrix.matrix_summary)
 
     def update_matrix_entries(self):
         for metric in self:
             metric._update_matrix_entries()
-    
+
     def _update_matrix_entries(self):
         self.ensure_one()
         existing_entries = self.with_context(active_test=False).entry_ids
         entries_per_versions = {(e.from_version_id.id, e.to_version_id.id): e for e in existing_entries}
 
         # get all versions
-        versions = self.env['runbot.bundle'].search([('project_id', '=', self.project_id.id), ('is_base', '=', True)]).mapped('version_id')
+        versions = self.env['runbot.bundle'].search([('project_id', '=', self.project_id.id), ('is_base', '=', True), ('sticky', '=', True)]).mapped('version_id').sorted('number')
         for target_version in versions:
             compatible_versions = target_version.intermediate_version_ids | target_version.previous_major_version_id
-            for source_version in versions:
+            for source_version in compatible_versions:
                 if (source_version.id, target_version.id) not in entries_per_versions:
                     if target_version == source_version:
-                        continue
-                    if source_version not in compatible_versions:
                         continue
                     self.env['runbot.upgrade.matrix.entry'].create({
                         'matrix_id': self.id,
                         'from_version_id': source_version.id,
-                        'to_version_id': target_version.id
+                        'to_version_id': target_version.id,
                     })
+
         if self.auto_update:
             existing_entries._update_enabled()
 
     def reset_matrix_enabled(self):
         for matrix in self:
             matrix.entry_ids._update_enabled(force=True)
-        
+
+    def _get_versions_from(self, from_version):
+        return self.entries.filtered(lambda e: e.enabled and e.from_version_id == from_version).mapped('to_version_id')
+
+    def _get_versions_to(self, to_version):
+        return self.entries.filtered(lambda e: e.enabled and e.to_version_id == to_version).mapped('from_version_id')
+
 
 class UpgradeMatrixEntry(models.Model):
     _name = 'runbot.upgrade.matrix.entry'
@@ -171,7 +174,7 @@ class UpgradeMatrixEntry(models.Model):
     to_version_id = fields.Many2one('runbot.version', 'To version', required=True, ondelete='cascade')
     from_version_number = fields.Char(related='from_version_id.number', string="To version number", store=True)
     to_version_number = fields.Char(related='to_version_id.number', string="From version number", store=True)
-    target_bundle_id = fields.Many2one('runbot.bundle', compute='_compute_target_bundle_id', store=True)
+    target_bundle_id = fields.Many2one('runbot.bundle', compute='_compute_target_bundle_id', store=True, required=True)
     enabled = fields.Boolean('Enabled', default=True)
     active = fields.Boolean('Active', compute='_compute_active', store=True)
     manually_edited = fields.Boolean('Manually edited', default=False)
@@ -208,20 +211,17 @@ class UpgradeMatrixEntry(models.Model):
             to_enabled = False
             from_enabled = False
 
-            if matrix.upgrade_to_all_versions:
+            if matrix.upgrade_to_all_versions or (matrix.upgrade_to_major_versions and entry.to_version_id.is_major):
                 to_enabled = True
 
-            elif matrix.upgrade_to_major_versions and entry.to_version_id.is_major:
-                to_enabled = True
-            
             if not to_enabled:
                 entry.enabled = False
                 continue
 
-            if matrix.upgrade_from_all_intermediate_version:
-                from_enabled = True
-            elif matrix.upgrade_from_last_intermediate_version and entry.to_version_id.intermediate_version_ids and entry.from_version_id == entry.to_version_id.intermediate_version_ids[-1]:
-                from_enabled = True
-            elif matrix.upgrade_from_previous_major_version and entry.from_version_id == entry.to_version_id.previous_major_version_id:
+            if (
+                matrix.upgrade_from_all_intermediate_version or
+                (matrix.upgrade_from_last_intermediate_version and entry.to_version_id.intermediate_version_ids and entry.from_version_id == entry.to_version_id.intermediate_version_ids[-1]) or
+                (matrix.upgrade_from_previous_major_version and entry.from_version_id == entry.to_version_id.previous_major_version_id)
+            ):
                 from_enabled = True
             entry.enabled = to_enabled and from_enabled
