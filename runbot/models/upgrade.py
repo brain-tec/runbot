@@ -105,8 +105,6 @@ class UpgradeMatrix(models.Model):
                 from_versions_string = ', '.join(sorted(from_versions))
                 lines.append(f'{to_version.number} - ({from_versions_string})')
             matrix.matrix_summary = '\n'.join(lines)
-            print('recompute')
-            print(matrix.matrix_summary)
 
     def update_matrix_entries(self):
         for metric in self:
@@ -138,6 +136,16 @@ class UpgradeMatrix(models.Model):
     def reset_matrix_enabled(self):
         for matrix in self:
             matrix.entry_ids._update_enabled(force=True)
+
+    def _get_versions_from(self, from_version):
+        entries = self.entries.filtered(lambda e: e.enabled)
+        if from_version:
+            return entries.filtered(lambda e: e.from_version_id == from_version).mapped('to_version_id')
+
+    def _get_versions_to(self, to_version):
+        entries = self.entries.filtered(lambda e: e.enabled)
+        if to_version:
+            return entries.filtered(lambda e: e.to_version_id == to_version).mapped('from_version_id')
         
 
 class UpgradeMatrixEntry(models.Model):
