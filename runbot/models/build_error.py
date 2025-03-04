@@ -100,8 +100,8 @@ class BuildError(models.Model):
     fixing_pr_url = fields.Char('Fixing PR url', related='fixing_pr_id.branch_url')
 
     test_tags = fields.Char(string='Test tags', help="Comma separated list of test_tags to use to reproduce/remove this error", tracking=True)
-    tags_min_version_id = fields.Many2one('runbot.version', 'Tags Min version', help="Minimal version where the test tags will be applied.")
-    tags_max_version_id = fields.Many2one('runbot.version', 'Tags Max version', help="Maximal version where the test tags will be applied.")
+    tags_min_version_id = fields.Many2one('runbot.version', 'Tags Min version', help="Minimal version where the test tags will be applied.", tracking=True)
+    tags_max_version_id = fields.Many2one('runbot.version', 'Tags Max version', help="Maximal version where the test tags will be applied.", tracking=True)
 
     common_qualifiers = JsonDictField('Common Qualifiers', compute='_compute_common_qualifiers', store=True, help="Minimal qualifiers in common needed to link error content.")
     similar_ids = fields.One2many('runbot.build.error', compute='_compute_similar_ids', string="Similar Errors", help="Similar Errors based on common qualifiers")
@@ -322,6 +322,16 @@ class BuildError(models.Model):
         self.ensure_one()
         return Markup('<a href="%s">%s</a>') % (self._get_form_url(), self.id)
 
+    def action_get_build_link_record(self):
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_window',
+            'view_mode': 'list,form,pivot',
+            'res_model': 'runbot.build.error.link',
+            'domain': [('id', 'in', self.unique_build_error_link_ids.ids)],
+            'context': "{'create': False}"
+        }
+
     def action_view_errors(self):
         return {
             'type': 'ir.actions.act_window',
@@ -409,27 +419,26 @@ class BuildError(models.Model):
         build_error_contents = self.env['runbot.build.error.content']
         # add build ids to already detected errors
         existing_errors_contents = self.env['runbot.build.error.content'].search([('fingerprint', 'in', list(hash_dict.keys())), ('error_id.active', '=', True)])
-        existing_fingerprints = existing_errors_contents.mapped('fingerprint')
+        existing_fingerprints = {error.fingerprint: error for error in existing_errors_contents}
         build_error_contents |= existing_errors_contents
-        # for build_error_content in existing_errors_contents:
-        #     logs = hash_dict[build_error_content.fingerprint]
-        #     # update filepath if it changed. This is optionnal and mainly there in case we adapt the OdooRunner log
-        #     if logs[0].path != build_error_content.file_path:
-        #         build_error_content.file_path = logs[0].path
-        #     build_error_content.function = logs[0].func
-
         # create an error for the remaining entries
         for fingerprint, logs in hash_dict.items():
             if fingerprint in existing_fingerprints:
+                # metadata update, keep this for a while
+                error = existing_fingerprints[fingerprint]
+                if not error.metadata and logs[0].metadata:
+                    error.metadata = logs[0].metadata
+
                 continue
             new_build_error_content = self.env['runbot.build.error.content'].create({
                 'content': logs[0].message,
                 'module_name': logs[0].name.removeprefix('odoo.').removeprefix('addons.'),
                 'file_path': logs[0].path,
                 'function': logs[0].func,
+                'metadata': logs[0].metadata,
             })
             build_error_contents |= new_build_error_content
-            existing_fingerprints.append(fingerprint)
+            existing_fingerprints[fingerprint] = new_build_error_content
 
         for build_error_content in build_error_contents:
             logs = hash_dict[build_error_content.fingerprint]
@@ -474,6 +483,7 @@ class BuildErrorContent(models.Model):
     error_display_id = fields.Integer(compute='_compute_error_display_id', string="Error id")
     content = fields.Text('Error message', required=True)
     cleaned_content = fields.Text('Cleaned error message')
+    metadata = JsonDictField('Metadata')
     summary = fields.Char('Content summary', compute='_compute_summary', store=False)
     module_name = fields.Char('Module name')  # name in ir_logging
     file_path = fields.Char('File Path')  # path in ir logging
