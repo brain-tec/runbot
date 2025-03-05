@@ -1,21 +1,46 @@
 # -*- coding: utf-8 -*-
+import base64
+import datetime
 import hashlib
 import json
 import logging
 import re
+from io import BytesIO
 
 from collections import defaultdict
 from dateutil.relativedelta import relativedelta
 from markupsafe import Markup
+from PIL import Image, ImageDraw
 from werkzeug.urls import url_join
 from odoo import models, fields, api
 from odoo.exceptions import ValidationError, UserError
 from odoo.tools import SQL
+from odoo.http import request
 
 from ..fields import JsonDictField
 
 _logger = logging.getLogger(__name__)
 
+
+RED = (255, 0, 0)
+YELLOW = (255, 255, 0)
+GREEN = (0, 255, 0)
+
+def draw(l):
+    line_width = 4
+    length = len(l)*line_width
+    image = Image.new('RGB', (length+2, 22), color=(255, 255, 255))
+    draw = ImageDraw.Draw(image)   
+
+    draw.rectangle([(0, 0), (length+1, 21)], outline=(0, 0, 0)) 
+    for index, val in enumerate(l):
+        height = val * 3
+        color = RED if val > 10 else YELLOW if val > 5 else GREEN
+        start = (index * line_width) + 1
+        draw.rectangle([(start, 20), (start + line_width-1, 20-height)], fill=color,) 
+    buffered = BytesIO()
+    image.save(buffered, format="PNG")
+    return base64.b64encode(buffered.getvalue())
 
 class BuildErrorLink(models.Model):
     _name = 'runbot.build.error.link'
@@ -121,6 +146,12 @@ class BuildError(models.Model):
     tag_ids = fields.Many2many('runbot.build.error.tag', string='Tags', compute=_compute_related_error_content_ids('tag_ids'), search=_search_related_error_content_ids('tag_ids'))
 
     random = fields.Boolean('Random', compute="_compute_random", store=True)
+
+    graph_history = fields.Image('30 days history', compute='_compute_graph')
+    graph_hourly_recurence = fields.Image('Hourly recurence', compute='_compute_graph_recurence')
+    graph_day_of_week_recurence = fields.Image('Weekly recurence', compute='_compute_graph_recurence')
+    graph_day_of_month_recurence = fields.Image('Monthly recurence', compute='_compute_graph_recurence')
+
 
     @api.constrains('tags_min_version_id', 'tags_max_version_id')
     def _check_min_max_version(self):
@@ -256,6 +287,51 @@ class BuildError(models.Model):
             else:
                 record.analogous_content_ids = False
 
+    def _get_log_dates(self):
+        # This is a lot of data and is faster using sql
+        cr = self.env.cr
+        cr.execute('''
+                   SELECT error.id, link.log_date
+                   FROM runbot_build_error_link as link
+                   JOIN runbot_build_error_content as content ON link.error_content_id = content.id
+                   JOIN runbot_build_error as error ON content.error_id = error.id
+                   WHERE error.id IN %s
+        ''', (tuple(self.ids),))
+        res = cr.fetchall()
+        log_date_per_error = defaultdict(list)
+        for error_id, log_date in res:
+            log_date_per_error[error_id].append(log_date)
+        return log_date_per_error
+
+    @api.depends('build_error_link_ids')
+    def _compute_graph(self):
+        # keep this separate from recurence to avoid slowing down list view
+        log_date_per_error = self._get_log_dates()
+        for error in self:
+            error_history = [0] * 30
+            for date in log_date_per_error[error.id]:
+                reference_time = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                days_from_now = (reference_time - date).days
+                if 0 <= days_from_now < 30:
+                    error_history[days_from_now] += 1
+            error.graph_history = draw(error_history)
+            
+    @api.depends('build_error_link_ids')
+    def _compute_graph_recurence(self):     
+        log_date_per_error = self._get_log_dates()
+        for error in self:
+            error_per_hour = [0] * 24
+            error_per_day_of_week = [0] * 7
+            error_per_day_of_month = [0] * 31
+            for date in log_date_per_error[error.id]:
+                error_per_hour[date.hour] += 1
+                error_per_day_of_week[date.isoweekday() - 1] += 1
+                error_per_day_of_month[date.day - 1] += 1
+
+            error.graph_hourly_recurence = draw(error_per_hour)
+            error.graph_day_of_week_recurence = draw(error_per_day_of_week)
+            error.graph_day_of_month_recurence = draw(error_per_day_of_month)
+   
 
     @api.constrains('test_tags')
     def _check_test_tags(self):
