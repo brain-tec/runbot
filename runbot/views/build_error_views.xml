@@ -15,10 +15,14 @@
               <button name="action_view_errors" string="See all linked errors" type="object" class="oe_highlight"/>
               <group string="Base info">
                 <field name="name"/>
-                <field name="graph_history" widget="image"/>
-                <field name="graph_hourly_recurence" widget="image"/>
-                <field name="graph_day_of_week_recurence" widget="image"/>
-                <field name="graph_day_of_month_recurence" widget="image"/>
+                <group>
+                  <field name="graph_history"/>
+                  <field name="graph_hourly_recurence"/>
+                </group>
+                <group>
+                  <field name="graph_day_of_week_recurence"/>
+                  <field name="graph_day_of_month_recurence"/>
+                </group>
                 <field name="error_content_ids" readonly="1">
                     <list>
                       <field name="content" readonly="1"/>
@@ -344,7 +348,7 @@
               <field name="fixing_pr_id" optional="hide"/>
               <field name="fixing_pr_alive" optional="hide"/>
               <field name="fixing_pr_url" widget="pull_request_url" text="view PR" readonly="1" invisible="not fixing_pr_url"/>
-              <field name="graph_history" widget="image" optional="hide"/>
+              <field name="graph_history" optional="hide"/>
 
           </list>
       </field>
