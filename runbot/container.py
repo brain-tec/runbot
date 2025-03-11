@@ -17,6 +17,7 @@ import os
 import re
 import subprocess
 import time
+import shlex
 
 from odoo.tools import file_path
 
@@ -64,20 +65,29 @@ class Command():
         return Command(self.pres, self.cmd + l, self.posts, self.finals, self.config_tuples, self.cmd_checker)
 
     def __str__(self):
-        return ' '.join(self)
+        return self.craft_cmd()
 
     def __repr__(self):
         return self.build().replace('&& ', '&&\n').replace('|| ', '||\n\t').replace(';', ';\n')
+    
+    def craft_cmd(self):
+        if isinstance(self.cmd, str):
+            return self.cmd
+        elif len(self.cmd) == 1:
+            _logger.warning('Command should be a list or a raw string. Considering a raw string since there is one element. Todo adapt this step')
+            return self.cmd[0] # hack to make some custom cmd work. Should be transformed in the first version
+        else:
+            return shlex.join(self.cmd)
 
     def build(self):
         if self.cmd_checker:
             self.cmd_checker._cmd_check(self)
         cmd_chain = []
-        cmd_chain += [' '.join(pre) for pre in self.pres if pre]
-        cmd_chain.append(' '.join(self))
-        cmd_chain += [' '.join(post) for post in self.posts if post]
+        cmd_chain += [shlex.join(pre) for pre in self.pres if pre]
+        cmd_chain += [self.craft_cmd()]
+        cmd_chain += [shlex.join(post) for post in self.posts if post]
         cmd_chain = [' && '.join(cmd_chain)]
-        cmd_chain += [' '.join(final) for final in self.finals if final]
+        cmd_chain += [shlex.join(final) for final in self.finals if final]
         return ' ; '.join(cmd_chain)
 
     def add_config_tuple(self, option, value):
@@ -223,23 +233,22 @@ def _docker_run(cmd=False, log_path=False, build_dir=False, container_name=False
     :params env_variables: list of environment variables
     """
     assert cmd and log_path and build_dir and container_name
-    run_cmd = cmd
     image_tag = image_tag or 'odoo:DockerDefault'
     container_name = sanitize_container_name(container_name)
-    if isinstance(run_cmd, Command):
-        cmd_object = run_cmd
-        run_cmd = cmd_object.build()
+    cmd_str = str(cmd)
+    if isinstance(cmd, Command):
+        run_cmd = cmd.build()
     else:
-        cmd_object = Command([], run_cmd.split(' '), [])
+        run_cmd = cmd
+    run_cmd = f'cd /data/build;touch start-{container_name};{run_cmd};cd /data/build;touch end-{container_name}'
     _logger.info('Docker run command: %s', run_cmd)
-    run_cmd = 'cd /data/build;touch start-%s;%s;cd /data/build;touch end-%s' % (container_name, run_cmd, container_name)
     docker_clear_state(container_name, build_dir)  # ensure that no state are remaining
     build_dir = file_path(build_dir)
 
     file_path(os.path.dirname(log_path))
     open(os.path.join(build_dir, 'exist-%s' % container_name), 'w+').close()
     logs = open(log_path, 'w')
-    logs.write("Docker command:\n%s\n=================================================\n" % cmd_object)
+    logs.write("Docker command:\n%s\n=================================================\n" % cmd_str)
     # create start script
     volumes = {
         '/var/run/postgresql': {'bind': '/var/run/postgresql', 'mode': 'rw'},
