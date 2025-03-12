@@ -77,17 +77,20 @@ class Command():
             _logger.warning('Command should be a list or a raw string. Considering a raw string since there is one element. Todo adapt this step')
             return self.cmd[0] # hack to make some custom cmd work. Should be transformed in the first version
         else:
-            return shlex.join(self.cmd)
+            return self.shell_join(self.cmd)
+        
+    def shell_join(self, elems):
+        return ' '.join([f'"{elem}"' if ' ' in elem else elem for elem in elems])
 
     def build(self):
         if self.cmd_checker:
             self.cmd_checker._cmd_check(self)
         cmd_chain = []
-        cmd_chain += [shlex.join(pre) for pre in self.pres if pre]
+        cmd_chain += [self.shell_join(pre) for pre in self.pres if pre]
         cmd_chain += [self.craft_cmd()]
-        cmd_chain += [shlex.join(post) for post in self.posts if post]
+        cmd_chain += [self.shell_join(post) for post in self.posts if post]
         cmd_chain = [' && '.join(cmd_chain)]
-        cmd_chain += [shlex.join(final) for final in self.finals if final]
+        cmd_chain += [self.shell_join(final) for final in self.finals if final]
         return ' ; '.join(cmd_chain)
 
     def add_config_tuple(self, option, value):
