@@ -331,7 +331,7 @@ class BuildResult(models.Model):
 
     def _get_run_token(self):
         token = self.access_token or self.params_id.fingerprint
-        token_info = hex(hash(token or '' + str(self.env.user.id)))[-4:]
+        token_info = hex(hash((token or '') + str(self.env.user.id)))[-4:]
         return (token[:8], token_info[:4])
 
     def _get_run_url(self, db_suffix=None):
