@@ -6,7 +6,7 @@ from docker.errors import ImageNotFound
 from odoo import models, fields, api
 from odoo.tools import config, ormcache
 from ..common import fqdn, local_pgadmin_cursor, os, list_local_dbs, local_pg_cursor
-from ..container import docker_push, docker_pull, docker_prune, docker_images, docker_remove
+from ..container import docker_push, docker_pull, docker_prune, docker_images, docker_remove, docker_tag
 
 _logger = logging.getLogger(__name__)
 
@@ -166,23 +166,36 @@ class Host(models.Model):
         else:
             _logger.info('Building docker images...')
             for dockerfile in self.env['runbot.dockerfile'].search([('to_build', '=', True)]):
-                dockerfile._build(self)
+                future_identifier = None
+                if not dockerfile.in_error:
+                    future_identifier = dockerfile._build(self)
                 if is_registry:
-                    try:
-                        docker_push(dockerfile.image_tag)  # for now, always push locally
-                        if self.docker_registry_url:
-                            docker_registry_url = self.docker_registry_url
-                        else:
-                            docker_registry_url = icp.get_param('runbot.docker_registry_url', default='').strip('/')
-                        if docker_registry_url:
-                            docker_push(dockerfile.image_tag, docker_registry_url)
-                    except ImageNotFound:
-                        _logger.warning("Image tag `%s` not found. Skipping push", dockerfile.image_tag)
+                    if future_identifier:
+                        dockerfile.image_future_identifier = future_identifier
+                    docker_tag(dockerfile.image_previous_identifier, dockerfile.image_previous_tag)
+                    docker_tag(dockerfile.image_identifier, dockerfile.image_tag)
+                    docker_tag(dockerfile.image_future_identifier, dockerfile.image_future_tag)
+                    for tag in [dockerfile.image_tag, dockerfile.image_future_tag]:
+                        try:
+                            docker_push(tag)  # for now, always push locally
+                            if self.docker_registry_url:
+                                docker_registry_url = self.docker_registry_url
+                            else:
+                                docker_registry_url = icp.get_param('runbot.docker_registry_url', default='').strip('/')
+                            if docker_registry_url:
+                                docker_push(tag, docker_registry_url)
+                        except ImageNotFound:
+                            _logger.warning("Image tag `%s` not found. Skipping push", tag)
+                else:
+                    if future_identifier:
+                        docker_tag(future_identifier, dockerfile.image_tag) # for a setup without registry
+                        docker_tag(future_identifier, dockerfile.image_future_tag)
 
         _logger.info('Cleaning docker images...')
         for image in docker_images():
             for tag in image.tags:
-                if tag.startswith('odoo:') and tag not in all_tags:  # what about odoo:latest
+                cleaned_tag = tag.removesuffix('.future').removesuffix('.previous')
+                if tag.startswith('odoo:') and cleaned_tag not in all_tags:  # what about odoo:latest
                     _logger.info(f"Removing tag '{tag}' since it doesn't exist anymore")
                     docker_remove(tag)
 

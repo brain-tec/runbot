@@ -124,10 +124,16 @@ class Dockerfile(models.Model):
 
     name = fields.Char('Dockerfile name', required=True, help="Name of Dockerfile")
     active = fields.Boolean('Active', default=True, tracking=True)
+    image_identifier = fields.Char('Identifier', tracking=True)
+    image_future_identifier = fields.Char('Future Identifier', tracking=True)
+    image_previous_identifier = fields.Char('Previous Identifier', tracking=True)
     image_tag = fields.Char(compute='_compute_image_tag', store=True)
+    image_future_tag = fields.Char(compute='_compute_image_helper_tags')
+    image_previous_tag = fields.Char(compute='_compute_image_helper_tags')
     template_id = fields.Many2one('ir.ui.view', string='Docker Template', domain=[('type', '=', 'qweb')], context={'default_type': 'qweb', 'default_arch_base': '<t></t>'})
     arch_base = fields.Text(related='template_id.arch_base', readonly=False, related_sudo=True)
     dockerfile = fields.Text(compute='_compute_dockerfile', tracking=True)
+    in_error = fields.Boolean('In error', help='The last build failed.', default=False)
     to_build = fields.Boolean('To Build', help='Build Dockerfile. Check this when the Dockerfile is ready.', default=False)
     always_pull = fields.Boolean('Always pull', help='Always Pull on the hosts, not only at the use time', default=False, tracking=True, copy=False)
     version_ids = fields.One2many('runbot.version', 'dockerfile_id', string='Versions')
@@ -192,17 +198,38 @@ class Dockerfile(models.Model):
 
             rec.dockerfile = content
 
+    @api.onchange('dockerfile')
+    def onchange_dockerfile(self):
+        self.in_error = False
+
     @api.depends('name')
     def _compute_image_tag(self):
         for rec in self:
             if rec.name:
                 rec.image_tag = 'odoo:%s' % re.sub(r'[ /:\(\)\[\]]', '', rec.name)
 
+    @api.depends('image_tag')
+    def _compute_image_helper_tags(self):
+        for rec in self:
+            rec.image_future_tag = f'{rec.image_tag}.future'
+            rec.image_previous_tag = f'{rec.image_tag}.previous'
+
     @api.depends('template_id')
     def _compute_view_ids(self):
         for rec in self:
             keys = re.findall(r'<t.+t-call="(.+)".+', rec.arch_base or '')
             rec.view_ids = self.env['ir.ui.view'].search([('type', '=', 'qweb'), ('key', 'in', keys)]).ids
+
+    def write(self, values):
+        if 'image_identifier' in values and not 'image_previous_identifier' in values and self.image_identifier != values['image_identifier']:
+            self.ensure_one()
+            values['image_previous_identifier'] = self.image_identifier
+        return super().write(values)
+
+    def action_sync_identifiers(self):
+        for dockerfile in self:
+            if dockerfile.image_future_identifier and dockerfile.image_future_identifier != dockerfile.image_identifier:
+                dockerfile.image_identifier = dockerfile.image_future_identifier
 
     def _template_to_layers(self):
 
@@ -332,7 +359,7 @@ class Dockerfile(models.Model):
 
         with open(self.env['runbot.runbot']._path('docker', self.image_tag, 'Dockerfile'), 'w') as Dockerfile:
             Dockerfile.write(content)
-        result = docker_build(docker_build_path, self.image_tag)
+        result = docker_build(docker_build_path, self.image_future_tag)
         duration = result['duration']
         msg = result['msg']
         success = image_id = result.get('image_id')
@@ -342,7 +369,7 @@ class Dockerfile(models.Model):
             docker_build_result_values['identifier'] = image_id
         else:
             docker_build_result_values['result'] = 'error'
-            self.to_build = False
+            self.in_error = True
 
         should_save_result = not success  # always save in case of failure
         if not should_save_result:
@@ -372,6 +399,7 @@ class Dockerfile(models.Model):
                 message = f'Build failure, check results for more info ({result.summary})'
                 self.message_post(body=message)
                 _logger.error(message)
+        return image_id
 
 
 class DockerBuildOutput(models.Model):
