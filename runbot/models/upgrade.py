@@ -9,7 +9,7 @@ class UpgradeExceptions(models.Model):
     _inherit = ['mail.thread', 'mail.activity.mixin']
 
     active = fields.Boolean('Active', default=True, tracking=True)
-    elements = fields.Text('Elements', required=True)
+    elements = fields.Text('Elements', required=True, tracking=True)
     bundle_id = fields.Many2one('runbot.bundle', index=True)
     create_build_id = fields.Many2one('runbot.build', 'Build')
     pr_ids = fields.Many2many('runbot.branch', string='Pull requests', default=lambda self: self.default_pr_ids())
@@ -26,7 +26,7 @@ class UpgradeExceptions(models.Model):
     def action_auto_rebuild(self):
         builds = self.create_build_id.parent_id.children_ids if self.create_build_id.parent_id else self.create_build_id
         for build in builds:
-            if not build.orphan_result and build.local_result == 'ko':
+            if not build.orphan_result and build.local_result != 'ok':
                 build._rebuild()
 
     @api.depends('create_date')
