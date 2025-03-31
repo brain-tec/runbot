@@ -3,8 +3,7 @@ import logging
 import os
 import re
 import docker
-from odoo import api, fields, models
-from odoo.addons.base.models.ir_qweb import QWebException
+from odoo import api, fields, models, exceptions
 
 from ..container import docker_build
 from ..fields import JsonDictField
@@ -122,17 +121,21 @@ class Dockerfile(models.Model):
     _inherit = [ 'mail.thread' ]
     _description = "Dockerfile"
 
-    name = fields.Char('Dockerfile name', required=True, help="Name of Dockerfile")
+    name = fields.Char('Dockerfile name', required=False, help="Name of Dockerfile")
+    parent_id = fields.Many2one(
+        'runbot.dockerfile', 'Parent Dockerfile',
+        help='This field is used to define variants of docker images. Variants implicitly inherit from the parent and have an implicit reference_file layer.'
+    )
     active = fields.Boolean('Active', default=True, tracking=True)
     image_identifier = fields.Char('Identifier', tracking=True)
     image_future_identifier = fields.Char('Future Identifier', tracking=True)
     image_previous_identifier = fields.Char('Previous Identifier', tracking=True)
-    image_tag = fields.Char(compute='_compute_image_tag', store=True)
+    image_tag = fields.Char(compute='_compute_image_tag', recursive=True, store=True)
     image_future_tag = fields.Char(compute='_compute_image_helper_tags')
     image_previous_tag = fields.Char(compute='_compute_image_helper_tags')
     template_id = fields.Many2one('ir.ui.view', string='Docker Template', domain=[('type', '=', 'qweb')], context={'default_type': 'qweb', 'default_arch_base': '<t></t>'})
     arch_base = fields.Text(related='template_id.arch_base', readonly=False, related_sudo=True)
-    dockerfile = fields.Text(compute='_compute_dockerfile', tracking=True)
+    dockerfile = fields.Text(compute='_compute_dockerfile', recursive=True, tracking=True)
     in_error = fields.Boolean('In error', help='The last build failed.', default=False)
     to_build = fields.Boolean('To Build', help='Build Dockerfile. Check this when the Dockerfile is ready.', default=False)
     always_pull = fields.Boolean('Always pull', help='Always Pull on the hosts, not only at the use time', default=False, tracking=True, copy=False)
@@ -151,14 +154,38 @@ class Dockerfile(models.Model):
 
     public_visibility = fields.Boolean('Public', default=lambda self: self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_dockerfile_public_by_default'), help="Dockerfile is public and can be accessed by anyone with /runbot/dockerfile route")
 
-    _sql_constraints = [('runbot_dockerfile_name_unique', 'unique(name)', 'A Dockerfile with this name already exists')]
+    _sql_constraints = [
+        ('runbot_dockerfile_image_tag_unique', 'unique(image_tag)', 'A Dockerfile with this tag already exists.'),
+    ]
+
+    @api.constrains('name')
+    def _constrains_name(self):
+        if not re.match(r'^\w+$', self.name):
+            raise exceptions.ValidationError('Name can only contain alphanumeric characters and underscore.')
+        if any(r.name.lower() in ('future', 'previous') for r in self):
+            raise exceptions.ValidationError('Variant name cannot be "future".')
+
+    @api.constrains('parent_id')
+    def _constrains_parent_count(self):
+        if self.parent_id.parent_id:
+            raise exceptions.ValidationError('Variants cannot be variants of other variants.')
 
     @api.returns('self', lambda value: value.id)
     def copy(self, default=None):
-        copied_record = super().copy(default={'name': '%s (copy)' % self.name, 'to_build': False})
+        if not default:
+            default = {}
+        copied_record = super().copy(default={'name': '%s_copy' % self.name, 'to_build': False, **default})
         #copied_record.template_id = self.template_id.copy()
         copied_record.template_id.name = '%s (copy)' % copied_record.template_id.name
         copied_record.template_id.key = '%s (copy)' % copied_record.template_id.key
+        if 'copy_docker_variants' in self.env.context:
+            old_to_new = dict(zip(self, copied_record))
+            variants = self.env['runbot.dockerfile'].search([('parent_id', 'in', self.ids)])
+            for variant in variants:
+                variant.copy(default={
+                    'parent_id': old_to_new[variant.parent_id].id,
+                    'name': variant.name,
+                })
         return copied_record
 
     def _compute_last_successful_result(self):
@@ -182,6 +209,7 @@ class Dockerfile(models.Model):
         for rec in self:
             content = ''
             if rec.template_id:
+                # Template do not support parent_id
                 try:
                     res = rec.template_id._render_template(rec.template_id.id) if rec.template_id else ''
                     dockerfile = re.sub(r'^\s*$', '', res, flags=re.M).strip()
@@ -190,7 +218,14 @@ class Dockerfile(models.Model):
                 except QWebException:
                     content = ''
             else:
-                content = rec.layer_ids.render_layers()
+                layers = rec.layer_ids
+                if rec.parent_id:
+                    layers = self.env['runbot.docker_layer'].new({
+                        'name': 'TEMP LAYER',
+                        'layer_type': 'reference_file',
+                        'reference_dockerfile_id': rec.parent_id.id
+                    }) + layers
+                content = layers.render_layers()
 
             switch_user = f"\nUSER {USERNAME}\n"
             if not content.endswith(switch_user):
@@ -202,11 +237,13 @@ class Dockerfile(models.Model):
     def onchange_dockerfile(self):
         self.in_error = False
 
-    @api.depends('name')
+    @api.depends('name', 'parent_id.image_tag')
     def _compute_image_tag(self):
         for rec in self:
-            if rec.name:
-                rec.image_tag = 'odoo:%s' % re.sub(r'[ /:\(\)\[\]]', '', rec.name)
+            if rec.parent_id:
+                rec.image_tag = f'{rec.parent_id.image_tag}.{rec.name.lower()}'
+            elif rec.name:
+                rec.image_tag = f'odoo:{rec.name}'
 
     @api.depends('image_tag')
     def _compute_image_helper_tags(self):
