@@ -1,5 +1,10 @@
+import logging
+
 from odoo import models, fields, api
 from odoo.osv import expression
+
+
+_logger = logging.getLogger(__name__)
 
 
 class BuildErrorMerge(models.Model):
@@ -19,6 +24,7 @@ class BuildErrorMerge(models.Model):
         return super(BuildErrorMerge, self.with_context(error_merge_ids=self.ids)).web_read(*arg, **kwargs)
 
     def _compute_matching_contents_ids(self):
+        self.matching_contents_ids = False
         for record in self:
             all_ids = []
             for result in record._get_matching_groups():
@@ -57,7 +63,7 @@ class BuildErrorMerge(models.Model):
         )
 
     def _get_similar_domain(self, error_content):
-        result = [expression.FALSE_LEAF]
+        result = [('fingerprint', '=', error_content.fingerprint)]
         for record in self:
             if all(error_content[f.field_name] for f in record.merge_filter_ids):
                 merge_domain = [(f.field_name, '=', error_content[f.field_name]) for f in record.merge_filter_ids]
@@ -85,6 +91,8 @@ class BuildErrorMerge(models.Model):
             'res_model': 'runbot.build.error.content',
             'domain': [('id', 'in', all_ids)],
             'context': {'group_by': groups},
+            'id': self.env.ref('runbot.open_view_build_error_content_tree').id,
+            'name': 'Error merge groups',
         }
 
     def action_auto_merge(self):
@@ -92,7 +100,8 @@ class BuildErrorMerge(models.Model):
             for result in merge_rule._get_matching_groups():
                 error_content_ids = result[-1]
                 error_content = self.env['runbot.build.error.content'].browse(error_content_ids)
-                error_content.matching_contents_ids.merge()
+                _logger.info('Auto merge %s', error_content_ids)
+                error_content.action_link_errors_contents()
 
 
 class BuildErrorMergeFilter(models.Model):

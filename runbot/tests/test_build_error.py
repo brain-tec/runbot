@@ -320,7 +320,7 @@ class TestBuildError(TestBuildErrorCommon):
 
         error_team = self.RunbotTeam.create({
             'name': 'test-error-team',
-            'path_glob': '*/test_ui.py'
+            'path_glob': '*/test_ui.py',
         })
 
         # Test the build parse and ensure that an 'ok' build is not parsed
@@ -734,15 +734,23 @@ class TestErrorMerge(TestBuildErrorCommon):
         })
         self.env.flush_all()
 
+    def test_error_merge_performance_one(self):
+        error_contents = self.env['runbot.build.error.content']
+        self._prepare_perfs_tests()
+        with self.profile(collectors=['sql']), self.assertQueryCount(6):
+            error_contents |= self.env['runbot.build.error.content'].create({
+                'content': f'Tour foobar_tour failed at step click_here in mode mode_one',
+            })
+
     def test_error_merge_performance_multi(self):
         error_contents = self.env['runbot.build.error.content']
         self._prepare_perfs_tests()
-        with self.profile(collectors=['sql']), self.assertQueryCount(44):  # TODO improve me
+        with self.profile(collectors=['sql']), self.assertQueryCount(33):  # TODO improve me
             # +2 flush: 2 query for build count (on error and on content)
             # +4*10 for each error_content, 4 query
             #   search the error matching the content
             #   insert
-            #   post message create
+            #   --- (rmoved) post message create
             #   search error history (could be computed)
             # +2 to create the first error
 
@@ -757,14 +765,14 @@ class TestErrorMerge(TestBuildErrorCommon):
     def test_error_merge_performance_multi_no_auto_merge(self):
         error_contents = self.env['runbot.build.error.content']
         self._prepare_perfs_tests()
-        with self.profile(collectors=['sql']), self.assertQueryCount(62):  # TODO improve me
+        with self.profile(collectors=['sql']), self.assertQueryCount(42):  # TODO improve me
             # +2 flush: 2 query for build count (on error and on content)
             # +6*10 for each error_content, 4 query
             #   search the error matching the content (only i enough qualifiers match a rule)
             #   create the error
-            #   post message on error
+            #   -- (removed) post message on error
             #   insert
-            #   post message create
+            #   -- (removed) post message create
             #   search error history (could be computed)
             for i in range(10):
                 step = chr(97 + i)
@@ -773,6 +781,21 @@ class TestErrorMerge(TestBuildErrorCommon):
                 })
             self.assertEqual(len(error_contents), 10)
             self.assertEqual(len(error_contents.error_id), 10)
+
+    def test_error_content_multiple_canonical_tags(self):
+        error_content_1 = self.env['runbot.build.error.content'].create({
+            'content': f'Tour foobar_tour failed at step step_14 in mode mode',
+            'metadata': {'test': {'canonical_tag': '/base/tests/test_file.py:TestUi.TestUi'}}
+        })
+        self.assertEqual(error_content_1.canonical_tag, '/base/tests/test_file.py:TestUi.TestUi')
+        error_content_2 = self.env['runbot.build.error.content'].create({
+            'content': f'Tour foobar_tour failed at step step_14 in mode mode',
+            'metadata': {'test': {'canonical_tag': '/web/tests/test_file.py:TestUi.TestUi'}}
+        })
+        self.assertEqual(error_content_2.canonical_tag, '/web/tests/test_file.py:TestUi.TestUi')
+        self.assertNotEqual(error_content_1, error_content_2)
+        self.assertEqual(error_content_1.error_id, error_content_2.error_id)
+        self.assertEqual(error_content_1.error_id.canonical_tags, '/base/tests/test_file.py:TestUi.TestUi,/web/tests/test_file.py:TestUi.TestUi')
 
 
 class TestCodeOwner(RunbotCase):
