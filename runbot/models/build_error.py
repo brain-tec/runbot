@@ -176,14 +176,14 @@ class BuildError(models.Model):
 
     @api.depends('build_error_link_ids')
     def _compute_unique_build_error_link_ids(self):
+        # this method is maily made for view form, no need to optimize for api multi
         for record in self:
-            seen = set()
-            id_list = []
-            for error_link in record.build_error_link_ids:
-                if error_link.build_id.id not in seen:
-                    seen.add(error_link.build_id.id)
-                    id_list.append(error_link.id)
-            record.unique_build_error_link_ids = record.env['runbot.build.error.link'].browse(id_list)
+            groups = self.env['runbot.build.error.link']._read_group(
+                domain=[('error_content_id', 'in', record.error_content_ids.ids)],
+                groupby=['build_id'],
+                aggregates=['id:min'])
+            link_ids = [group[1] for group in groups]
+            record.unique_build_error_link_ids = record.env['runbot.build.error.link'].browse(link_ids)
 
     @api.depends('name', 'error_content_ids')
     def _compute_description(self):
@@ -539,7 +539,7 @@ class BuildError(models.Model):
     @api.model
     def _parse_logs(self, ir_logs):
         if not ir_logs:
-            return
+            return None
         regexes = self.env['runbot.error.regex'].search([])
         search_regs = regexes.filtered(lambda r: r.re_type == 'filter')
         cleaning_regs = regexes.filtered(lambda r: r.re_type == 'cleaning')
@@ -575,10 +575,18 @@ class BuildError(models.Model):
             build_error_contents |= new_build_error_content
             existing_fingerprints[fingerprint] = new_build_error_content
 
+        existing_links = self.env['runbot.build.error.link'].search([
+            ('build_id', 'in', ir_logs.build_id.ids),
+            ('error_content_id', 'in', build_error_contents.ids),
+        ])
+        # using prefetching of error_content_id.builds_ids is quite slow because some errors mays have thousands of linked builds leading to bad performances
+        existing_links_tuples = {(link.build_id.id, link.error_content_id.id) for link in existing_links}
+
         for build_error_content in build_error_contents:
             logs = hash_dict[build_error_content.fingerprint]
             for rec in logs:
-                if rec.build_id not in build_error_content.build_ids:
+                if (rec.build_id.id, build_error_content.id) not in existing_links_tuples:
+                    existing_links_tuples.add((rec.build_id.id, build_error_content.id))
                     self.env['runbot.build.error.link'].create({
                         'build_id': rec.build_id.id,
                         'error_content_id': build_error_content.id,
@@ -596,6 +604,7 @@ class BuildError(models.Model):
                 window_action["views"] = [[False, "form"]]
                 window_action["res_id"] = build_error_contents.id
             return window_action
+        return None
 
     def action_link_errors(self):
         if len(self) < 2:
@@ -692,7 +701,7 @@ class BuildErrorContent(models.Model):
                 if not previous_error.error_content_ids:
                     build_error.error_id._merge(previous_error)
         return result
-    
+
     @api.depends('metadata')
     def _compute_canonical_tag(self):
         for record in self:
@@ -701,7 +710,7 @@ class BuildErrorContent(models.Model):
     @api.depends('build_error_link_ids')
     def _compute_build_ids(self):
         for record in self:
-            record.build_ids = record.build_error_link_ids.mapped('build_id').sorted('id')
+            record.build_ids = record.build_error_link_ids.build_id.sorted('id')
 
     @api.depends('build_ids')
     def _compute_bundle_ids(self):
@@ -711,13 +720,31 @@ class BuildErrorContent(models.Model):
 
     @api.depends('build_ids')
     def _compute_version_ids(self):
-        for build_error in self:
-            build_error.version_ids = build_error.build_ids.version_id
+        self.env.cr.execute('''
+            SELECT l.error_content_id, array_agg(DISTINCT b.version_id)
+            FROM runbot_build_error_link l
+            JOIN runbot_build b on b.id = l.build_id
+            WHERE l.error_content_id IN %s
+            GROUP BY l.error_content_id
+        ''', (tuple(self.ids),))
+        triggers_per_build = dict(self.env.cr.fetchall())
+        # this is slow when flushing build errors during nightly scan
+        for build_error_content in self:
+            build_error_content.version_ids = self.env['runbot.version'].browse(triggers_per_build.get(build_error_content.id, []))
 
     @api.depends('build_ids')
     def _compute_trigger_ids(self):
-        for build_error in self:
-            build_error.trigger_ids = build_error.build_ids.trigger_id
+        self.env.cr.execute('''
+            SELECT l.error_content_id, array_agg(DISTINCT b.trigger_id)
+            FROM runbot_build_error_link l
+            JOIN runbot_build b on b.id = l.build_id
+            WHERE l.error_content_id IN %s
+            GROUP BY l.error_content_id
+        ''', (tuple(self.ids),))
+        triggers_per_build = dict(self.env.cr.fetchall())
+        # this is slow when flushing build errors during nightly scan
+        for build_error_content in self:
+            build_error_content.trigger_ids = self.env['runbot.trigger'].browse(triggers_per_build.get(build_error_content.id, []))
 
     @api.depends('content')
     def _compute_summary(self):
