@@ -10,21 +10,35 @@ import { useDynamicPlaceholder } from "@web/views/fields/dynamic_placeholder_hoo
 import { standardFieldProps } from "@web/views/fields/standard_field_props";
 import { useInputField } from "@web/views/fields/input_field_hook";
 
-import { useRef, xml, Component } from "@odoo/owl";
+import { useRef, xml, Component, markup } from "@odoo/owl";
 import { useAutoresize } from "@web/core/utils/autoresize";
 import { getFormattedValue } from "@web/views/utils";
 
 import { UrlField } from "@web/views/fields/url/url_field";
 
-function stringify(obj) {
-    return JSON.stringify(obj, null, '\t')
+// https://stackoverflow.com/questions/4810841/pretty-print-json-using-javascript
+function colorizeJson(json) {
+    json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+        var cls = '';
+        if (/^"/.test(match)) {
+            if (/:$/.test(match)) {
+                cls = 'o_runbot_json_key';
+            } else {
+                cls = 'o_runbot_json_value';
+            }
+        }
+        return '<span class="' + cls + '">' + match + '</span>';
+    });
 }
 
-
+function stringify(obj) {
+        return JSON.stringify(obj, null, '\t');
+    }
 export class JsonField extends TextField {
     static template = xml`
     <t t-if="props.readonly">
-            <span t-out="value"/>
+            <span t-out="colorizedValue"/>
         </t>
         <t t-else="">
             <div t-ref="div">
@@ -53,8 +67,13 @@ export class JsonField extends TextField {
         });
         useAutoresize(this.textareaRef, { minimumHeight: 50 });
     }
+
     get value() {
         return stringify(this.props.record.data[this.props.name] || "");
+    }
+
+    get colorizedValue() {
+        return markup(colorizeJson(stringify(this.props.record.data[this.props.name] || "")));
     }
 }
 
