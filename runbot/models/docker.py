@@ -3,8 +3,7 @@ import logging
 import os
 import re
 import docker
-from odoo import api, fields, models
-from odoo.addons.base.models.ir_qweb import QWebException
+from odoo import api, fields, models, exceptions
 
 from ..container import docker_build
 from ..fields import JsonDictField
@@ -41,6 +40,7 @@ class DockerLayer(models.Model):
     all_referencing_dockerlayer_ids = fields.One2many('runbot.docker_layer', compute="_compute_references", string='Layers referencing this one', readonly=True)
     reference_count = fields.Integer('Number of references', compute='_compute_references')
     has_xml_id = fields.Boolean(compute='_compute_has_xml_id')
+
 
     @api.depends('referencing_dockerlayer_ids', 'dockerfile_id.referencing_dockerlayer_ids')
     def _compute_references(self):
@@ -123,45 +123,109 @@ class Dockerfile(models.Model):
     _description = "Dockerfile"
 
     name = fields.Char('Dockerfile name', required=True, help="Name of Dockerfile")
+    parent_id = fields.Many2one(
+        'runbot.dockerfile', 'Parent Dockerfile',
+        help='This field is used to define variants of docker images. Variants implicitly inherit from the parent and have an implicit reference_file layer.'
+    )
     active = fields.Boolean('Active', default=True, tracking=True)
     auto_sync = fields.Boolean('Auto sync', help='Automatically sync the identifier with the future identifier', default=False, tracking=True)
     pull_on_build = fields.Boolean('Pull on build ', help='Add pull option when building to get the latest version of the FROM', default=False, tracking=True)
     image_identifier = fields.Char('Identifier', tracking=True)
     image_future_identifier = fields.Char('Future Identifier', tracking=True)
     image_previous_identifier = fields.Char('Previous Identifier', tracking=True)
-    image_tag = fields.Char(compute='_compute_image_tag', store=True)
+    image_tag = fields.Char(compute='_compute_image_tag', recursive=True, store=True)
     image_future_tag = fields.Char(compute='_compute_image_helper_tags')
     image_previous_tag = fields.Char(compute='_compute_image_helper_tags')
-    template_id = fields.Many2one('ir.ui.view', string='Docker Template', domain=[('type', '=', 'qweb')], context={'default_type': 'qweb', 'default_arch_base': '<t></t>'})
-    arch_base = fields.Text(related='template_id.arch_base', readonly=False, related_sudo=True)
-    dockerfile = fields.Text(compute='_compute_dockerfile', tracking=True)
+    dockerfile = fields.Text(compute='_compute_dockerfile', recursive=True, tracking=True)
     in_error = fields.Boolean('In error', help='The last build failed.', default=False)
     to_build = fields.Boolean('To Build', help='Build Dockerfile. Check this when the Dockerfile is ready.', default=False)
     always_pull = fields.Boolean('Always pull', help='Always Pull on the hosts, not only at the use time', default=False, tracking=True, copy=False)
     version_ids = fields.One2many('runbot.version', 'dockerfile_id', string='Versions')
     description = fields.Text('Description')
-    view_ids = fields.Many2many('ir.ui.view', compute='_compute_view_ids', groups="runbot.group_runbot_admin")
     project_ids = fields.One2many('runbot.project', 'dockerfile_id', string='Default for Projects')
     bundle_ids = fields.One2many('runbot.bundle', 'dockerfile_id', string='Used in Bundles')
     build_results = fields.One2many('runbot.docker_build_result', 'dockerfile_id', string='Build results')
     last_successful_result = fields.Many2one('runbot.docker_build_result', compute='_compute_last_successful_result')
     layer_ids = fields.One2many('runbot.docker_layer', 'dockerfile_id', string='Layers', copy=True)
+    default_values = JsonDictField()
+
     referencing_dockerlayer_ids = fields.One2many('runbot.docker_layer', 'reference_dockerfile_id', string='Layers referencing this one')
     use_count = fields.Integer('Used count', compute="_compute_use_count", store=True)
     # maybe we should have global values here? branch version, chrome version, ... then use a os layer when possible (jammy, ...)
     # we could also have a variant param, to use the version image in a specific trigger? Add a layer or change a param?
 
     public_visibility = fields.Boolean('Public', default=lambda self: self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_dockerfile_public_by_default'), help="Dockerfile is public and can be accessed by anyone with /runbot/dockerfile route")
+    variant_ids = fields.One2many('runbot.dockerfile', 'parent_id', string='Variants', help="Variants of this dockerfile, they inherit the parent dockerfile layers and can add their own layers.")
+    message = fields.Text('Message', compute='_compute_message')
 
-    _sql_constraints = [('runbot_dockerfile_name_unique', 'unique(name)', 'A Dockerfile with this name already exists')]
+    _sql_constraints = [
+        ('runbot_dockerfile_image_tag_unique', 'unique(image_tag)', 'A Dockerfile with this tag already exists.'),
+    ]
+
+    @api.constrains('name')
+    def _constrains_name(self):
+        if not re.match(r'^\w+$', self.name):
+            raise exceptions.ValidationError('Name can only contain alphanumeric characters and underscore.')
+        if any(r.name.lower() in ('future', 'previous') for r in self):
+            raise exceptions.ValidationError('Variant name cannot be "future".')
+
+    @api.constrains('parent_id')
+    def _constrains_parent_count(self):
+        if self.parent_id.parent_id:
+            raise exceptions.ValidationError('Variants cannot be variants of other variants.')
 
     @api.returns('self', lambda value: value.id)
     def copy(self, default=None):
-        copied_record = super().copy(default={'name': '%s (copy)' % self.name, 'to_build': False})
-        #copied_record.template_id = self.template_id.copy()
-        copied_record.template_id.name = '%s (copy)' % copied_record.template_id.name
-        copied_record.template_id.key = '%s (copy)' % copied_record.template_id.key
+        if not default:
+            default = {}
+        copied_record = super().copy(default={'name': '%s_copy' % self.name, 'to_build': False, **default})
+        if 'copy_docker_variants' in self.env.context:
+            old_to_new = dict(zip(self, copied_record))
+            variants = self.env['runbot.dockerfile'].search([('parent_id', 'in', self.ids)])
+            for variant in variants:
+                variant.copy(default={
+                    'parent_id': old_to_new[variant.parent_id].id,
+                    'name': variant.name,
+                })
         return copied_record
+
+    def _compute_message(self):
+        for record in self:
+            messages = []
+            if record.in_error:
+                messages.append("The last build failed and this docker image won't be build anymore, remove the in_error flag to reenable.")
+            elif not record.to_build:
+                messages.append("The docker won't be build automatically")
+            if missing_variants := record.get_missing_variants():
+                messages.append(f'This variants is missing on the following docker files: {", ".join(missing_variants.mapped("name"))}')
+            record.message = '\n'.join(messages)
+
+    def get_missing_variants(self):
+        if self.parent_id:
+            docker_file_with_variant = self.env['runbot.version'].search([]).mapped('dockerfile_id').filtered('active')
+            similar_variants = self.search([('name', '=', self.name), ('parent_id', '!=', False)])
+            missing_variants = docker_file_with_variant - similar_variants.parent_id
+            return missing_variants
+        return None
+
+    def action_create_missing_variants(self):
+        """Create missing variants for this dockerfile"""
+        if not self.parent_id:
+            msg = 'This dockerfile is not a variant, cannot create missing variants.'
+            raise exceptions.UserError(msg)
+        missing_variants = self.get_missing_variants()
+        if not missing_variants:
+            msg = 'No missing variants to create.'
+            raise exceptions.UserError(msg)
+
+        for missing_variant in missing_variants:
+            variant = self.copy(default={
+                'parent_id': missing_variant.id,
+                'name': self.name,
+                'to_build': self.to_build,
+                'always_pull': self.always_pull,
+            })
+            _logger.info('Created missing variant %s(%s) for dockerfile %s', variant.image_tag, variant.id, self.name)
 
     def _compute_last_successful_result(self):
         rg = self.env['runbot.docker_build_result']._read_group(
@@ -182,21 +246,20 @@ class Dockerfile(models.Model):
         for record in self:
             record.use_count = len(record.bundle_ids) + len(record.referencing_dockerlayer_ids) + len(record.project_ids) + len(record.version_ids)
 
-    @api.depends('template_id.arch_base', 'layer_ids.rendered', 'layer_ids.sequence')
+    @api.depends('layer_ids.rendered', 'layer_ids.sequence')
     def _compute_dockerfile(self):
         for rec in self:
             content = ''
-            if rec.template_id:
-                try:
-                    res = rec.template_id._render_template(rec.template_id.id) if rec.template_id else ''
-                    dockerfile = re.sub(r'^\s*$', '', res, flags=re.M).strip()
-                    create_user = f"""\nRUN groupadd -g {USERGID} {USERNAME} && useradd --create-home -u {USERUID} -g {USERNAME} -G audio,video {USERNAME}\n"""
-                    content = dockerfile + create_user
-                except QWebException:
-                    content = ''
-            else:
-                content = rec.layer_ids.render_layers()
-
+            layers = rec.layer_ids
+            values = dict(rec.default_values)
+            if rec.parent_id:
+                layers = self.env['runbot.docker_layer'].new({
+                    'name': 'TEMP LAYER',
+                    'layer_type': 'reference_file',
+                    'reference_dockerfile_id': rec.parent_id.id,
+                }) + layers
+                values.update(rec.parent_id.default_values)
+            content = layers.render_layers(values)
             switch_user = f"\nUSER {USERNAME}\n"
             if not content.endswith(switch_user):
                 content = content + switch_user
@@ -207,23 +270,19 @@ class Dockerfile(models.Model):
     def onchange_dockerfile(self):
         self.in_error = False
 
-    @api.depends('name')
+    @api.depends('name', 'parent_id.image_tag')
     def _compute_image_tag(self):
         for rec in self:
-            if rec.name:
-                rec.image_tag = 'odoo:%s' % re.sub(r'[ /:\(\)\[\]]', '', rec.name)
+            if rec.parent_id:
+                rec.image_tag = f'{rec.parent_id.image_tag}.{(rec.name or "<undefined>").lower()}'
+            elif rec.name:
+                rec.image_tag = f'odoo:{rec.name}'
 
     @api.depends('image_tag')
     def _compute_image_helper_tags(self):
         for rec in self:
             rec.image_future_tag = f'{rec.image_tag}.future'
             rec.image_previous_tag = f'{rec.image_tag}.previous'
-
-    @api.depends('template_id')
-    def _compute_view_ids(self):
-        for rec in self:
-            keys = re.findall(r'<t.+t-call="(.+)".+', rec.arch_base or '')
-            rec.view_ids = self.env['ir.ui.view'].search([('type', '=', 'qweb'), ('key', 'in', keys)]).ids
 
     def write(self, values):
         if 'image_identifier' in values and not 'image_previous_identifier' in values and self.image_identifier != values['image_identifier']:
@@ -235,97 +294,6 @@ class Dockerfile(models.Model):
         for dockerfile in self:
             if dockerfile.image_future_identifier and dockerfile.image_future_identifier != dockerfile.image_identifier:
                 dockerfile.image_identifier = dockerfile.image_future_identifier
-
-    def _template_to_layers(self):
-
-        ##
-        # Notes: This is working fine, but missing
-        # - debian packages layer (multiline),
-        # - setup tools and wheel pip (not usefull anymore? )
-        # - args goole chrome (maybe we should introduce that in the layers management instead of values?)
-        # - doc requirements
-        # - geo
-        ##
-        def clean_comments(text):
-            result = '\n'.join([line.strip() for line in text.split('\n') if not line.startswith('#')])
-            result = result.replace('\\\n', '')
-            return result
-
-        env = self.env
-        base_layers = env['runbot.docker_layer'].browse(env['ir.model.data'].search([('model', '=', 'runbot.docker_layer')]).mapped('res_id'))
-        create_user_layer_id = env.ref('runbot.docker_layer_create_user_template').id
-        for rec in self:
-            if rec.template_id and not rec.layer_ids:
-                _logger.info('Converting %s in layers', rec.name)
-                layers = []
-                comments = []
-                previous_directive_add = False
-                content = rec.template_id._render_template(rec.template_id.id) 
-                for line in content.split('\n'):
-                    # should we consider all layers instead of base_layersbase_layers ?
-                    if not line.strip():
-                        continue
-
-                    if line.startswith('#'):
-                        comments.append(line)
-                        continue
-
-                    if any(line.startswith(directive) for directive in ['FROM', 'ENV', 'USER', 'SET', 'ADD', 'RUN', 'COPY', 'ARG']):
-                        if (previous_directive_add and line.startswith('RUN')):
-                            _logger.info('Keeping ADD in same layer than RUN')
-                        else:
-                            layers.append([])
-                        previous_directive_add = line.startswith('ADD')
-
-                    layers[-1] += comments
-                    comments = []
-                    layers[-1].append(line)
-
-                for layer in layers:
-                    content = '\n'.join(layer)
-                    values = {
-                            'dockerfile_id': rec.id,
-                            'name': f'{rec.name}: Migrated layer',
-                    }
-
-                    for base_layer in base_layers:
-                        if clean_comments(base_layer.rendered) == clean_comments(content):
-                            values['reference_docker_layer_id'] = base_layer.id
-                            values['layer_type'] = 'reference_layer'
-                            _logger.info('Matched existing layer')
-                            break
-                        if base_layer.layer_type == 'template':
-                            regex = re.escape(clean_comments(base_layer.content)).replace('"', r'\"')  # for astrange reason, re.escape does not escape "
-                            for key in base_layer.values:
-                                regex = regex.replace(r'\{%s\}' % key, fr'(?P<{key}>.*)', 1)
-                                regex = regex.replace(r'\{%s\}' % key, fr'.*')
-                            if match := re.match(regex, clean_comments(content)):
-                                new_values = {}
-                                _logger.info('Matched existing template')
-                                for key in base_layer.values:
-                                    new_values[key] = match.group(key)
-                                values['reference_docker_layer_id'] = base_layer.id
-                                values['values'] = new_values
-                                values['layer_type'] = 'reference_layer'
-                                break
-                    else:
-                        values['content'] = content
-                        values['layer_type'] = 'raw'
-                    self.env['runbot.docker_layer'].create(values)
-
-            # add finals user managementlayers
-            self.env['runbot.docker_layer'].create({
-                'dockerfile_id': rec.id,
-                'name': f'Create user for [{rec.name}]',
-                'layer_type': 'reference_layer',
-                'reference_docker_layer_id': create_user_layer_id,
-            })
-            self.env['runbot.docker_layer'].create({
-                'dockerfile_id': rec.id,
-                'name': f'Switch user for [{rec.name}]',
-                'layer_type': 'template',
-                'content': 'USER {USERNAME}',
-            })
 
     def _get_docker_metadata(self, image_id):
         _logger.info(f'Fetching metadata for image {image_id}')
