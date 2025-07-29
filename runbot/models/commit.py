@@ -172,10 +172,6 @@ class Commit(models.Model):
             export_name = '%s_%s' % (self.name, self.rebase_on_id.name)
         return self.repo_id._source_path(export_name, *paths)
 
-    def _old_source_path(self):
-        # TODO remove this method when all code will be migrated to _source_path
-        return self.repo_id._source_path(self.name)
-
     @api.depends('name', 'repo_id.name')
     def _compute_dname(self):
         for commit in self:
@@ -197,6 +193,15 @@ class Commit(models.Model):
             'description': description or context,
             'to_process': True,
         })
+
+    def _get_last_statuses(self):
+        status_list = self.env['runbot.commit.status'].search([('commit_id', '=', self.id)], order='id desc')
+        last_status_by_context = {}
+        for status in status_list:
+            if status.context in last_status_by_context:
+                continue
+            last_status_by_context[status.context] = status
+        return status_list, last_status_by_context
 
 
 class CommitLink(models.Model):
