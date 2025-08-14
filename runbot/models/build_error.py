@@ -189,6 +189,7 @@ class BuildError(models.Model):
     _description = "Build error"
     # An object to manage a group of errors log that fit together and assign them to a team
     _inherit = ('mail.thread', 'mail.activity.mixin', 'runbot.build.error.seen.mixin')
+    _mail_post_access = 'read'
 
 
     name = fields.Char("Name")
