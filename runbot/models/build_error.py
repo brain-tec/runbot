@@ -31,35 +31,6 @@ def get_color(value: int, opacity='1'):
     return f'rgba(0, 170, 0, {opacity})'  # green
 
 
-def draw_svg(daily_version_freq, y_labels=None, max_value: int = 10, error_id: int = 0, category_id=1, project_id=1):
-    rects = []
-    x_keys = sorted(daily_version_freq.keys())
-    height = 40
-    for idx, (x_key) in enumerate(x_keys):
-        batch_date = x_key.strftime("%Y-%m-%d")
-        for idy, (y_key, y_label) in enumerate(y_labels.items()):
-            value = daily_version_freq[x_key].get(y_key, 0)
-            if not value:
-                cell_color = "white"
-                cell_opacity = 0
-            else:
-                value = min(value, max_value)
-                cell_opacity = ((max_value * 0.3 + value) / (max_value * 0.3 + max_value))
-                cell_color = get_color(value, cell_opacity)
-            href = f'/runbot/batches/{project_id}/{category_id}/{batch_date}/{error_id or ""}'
-            pos_y = idy * 10 + 0.5
-            pos_x = idx * 10 + 0.5
-            rects.append(
-                f'''
-                <a href="{href}">
-                <title>{batch_date} {y_label} ({value})</title>
-                <rect fill="{cell_color}" width="9" height="9" x="{pos_x}" y="{pos_y}"/>
-                </a>''',
-            )
-    rects = ''.join(rects)
-    return f'<div style="height: {height}px"><svg xmlns="https://www.w3.org/2000/svg" viewbox="0 0 {len(x_keys) * 10} {len(y_labels) * 10}" style="border: 1px solid black; height: 100%; width: 100%;" preserveAspectRatio="none" shape-rendering="cripsEdges">{rects}</svg></div>'
-
-
 class BuildErrorLink(models.Model):
     _name = 'runbot.build.error.link'
     _description = 'Build Build Error Extended Relation'
@@ -149,20 +120,34 @@ class BuildErrorSeenMixin(models.AbstractModel):
         start_date = end_date - relativedelta(days=30)
         log_date_per_error = self._get_log_dates(start_date, end_date)
         for error in self:
+
+            fixing_prs = {pr.bundle_id.version_id.id: pr for pr in (error.fixing_pr_id | error.fixing_pr_id.forwardport_ids).filtered('close_date')}
+            breaking_prs = {pr.bundle_id.version_id.id: pr for pr in (error.breaking_pr_id | error.breaking_pr_id.forwardport_ids).filtered('close_date')}
+            fixing_pr_close_dates = {pr.bundle_id.version_id.id: pr.close_date.strftime("%Y-%m-%d") for pr in fixing_prs.values()}
+            breaking_pr_close_dates = {pr.bundle_id.version_id.id: pr.close_date.strftime("%Y-%m-%d") for pr in breaking_prs.values()}
             project_id = error.first_seen_build_id.params_id.project_id.id
             dates = log_date_per_error[error]
             versions = self.env['runbot.bundle'].search([('project_id', '=', project_id), ('sticky', '=', True)]).version_id.sorted(lambda v: (v.sequence, v.number), reverse=True)
             versions_ids = versions.ids
-            x_labels = [date.strftime("%Y-%m-%d") for date in rrule.rrule(rrule.DAILY, dtstart=start_date, until=end_date)]
-            y_labels = [version.number for version in versions]
-            x_indexes = {date: idx for idx, date in enumerate(x_labels)}
+            date_labels = [date.strftime("%Y-%m-%d") for date in rrule.rrule(rrule.DAILY, dtstart=start_date, until=end_date)]
+            version_labels = [version.number for version in versions]
+            x_indexes = {date: idx for idx, date in enumerate(date_labels)}
             y_indexes = {version_id: idx for idx, version_id in enumerate(versions_ids)}
             daily_version_freq = []
-            for date in x_labels:
-                daily_version_freq.append([0] * len(y_labels))
+            for date in date_labels:
+                daily_version_freq.append([0] * len(version_labels))
             max_count = 0
-            for (date, version_id), count in dates.items():
-                date_str = date.date().strftime("%Y-%m-%d")
+            for (bundle_create_date, version_id), count in dates.items():
+                date_str = bundle_create_date.strftime("%Y-%m-%d")
+                # check if the pr close time is after the batch date and move it one day if needed
+                # this should be replaced by checking if the pr is in the batch a more reliable way in, the future
+                if fixing_pr_close_dates.get(version_id) == date_str and bundle_create_date < fixing_prs[version_id].close_date:
+                    fixing_pr_close_dates[version_id] = (fixing_prs[version_id].close_date + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+                if breaking_pr_close_dates.get(version_id):
+                    breaking_pr = breaking_prs[version_id]
+                    breaking_next_day = (breaking_pr.close_date + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+                    if breaking_next_day == date_str and bundle_create_date < (breaking_pr.close_date + datetime.timedelta(days=1)):
+                        breaking_pr_close_dates['version_id'] = (breaking_pr.close_date + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
                 x_index = x_indexes.get(date_str)
                 y_index = y_indexes.get(version_id)
                 if x_index is not None and y_index is not None:
@@ -171,9 +156,11 @@ class BuildErrorSeenMixin(models.AbstractModel):
                     max_count = max(max_count, c)
 
             error.history_data = {
+                'breaking_pr_close_dates': breaking_pr_close_dates,
+                'fixing_pr_close_dates': fixing_pr_close_dates,
                 'versions_ids': versions_ids,
-                'x_labels': x_labels,
-                'y_labels': y_labels,
+                'date_labels': date_labels,
+                'version_labels': version_labels,
                 'start_date': start_date.strftime("%Y-%m-%d"),
                 'end_date': end_date.strftime("%Y-%m-%d"),
                 'daily_version_freq': daily_version_freq,
@@ -195,7 +182,7 @@ class BuildErrorSeenMixin(models.AbstractModel):
             return result
         from_clause, content_table = self.get_log_dates_from_clause()
         self.env.cr.execute(f"""
-            SELECT record.id as record_id, date_trunc('day', batch.create_date) as time, build.version_id as version_id, count(*) as count
+            SELECT record.id as record_id, max(batch.create_date) as bundle_create_date, build.version_id as version_id, count(*) as count
               {from_clause}
               JOIN runbot_build_error_link AS link ON link.error_content_id = {content_table}.id
               JOIN runbot_build AS build ON link.build_id = build.id
@@ -205,7 +192,7 @@ class BuildErrorSeenMixin(models.AbstractModel):
         """, (tuple(self.ids), start_date, end_date))
         data = self.env.cr.dictfetchall()
         for d in data:
-            result[self.browse(d['record_id'])][d['time'], d['version_id']] = d['count']
+            result[self.browse(d['record_id'])][d['bundle_create_date'], d['version_id']] = d['count']
         return result
 
 def _compute_related_error_content_ids(field_name):
@@ -815,12 +802,12 @@ class BuildErrorContent(models.Model):
     tag_ids = fields.Many2many('runbot.build.error.tag', string='Tags')
     qualifiers = JsonDictField('Qualifiers', index=True)
     similar_ids = fields.One2many('runbot.build.error.content', compute='_compute_similar_ids')
-
     responsible = fields.Many2one(related='error_id.responsible')
     customer = fields.Many2one(related='error_id.customer')
     team_id = fields.Many2one(related='error_id.team_id')
     fixing_commit = fields.Char(related='error_id.fixing_commit')
     fixing_pr_id = fields.Many2one(related='error_id.fixing_pr_id')
+    breaking_pr_id = fields.Many2one(related='error_id.breaking_pr_id')
     fixing_pr_alive = fields.Boolean(related='error_id.fixing_pr_alive')
     fixing_pr_url = fields.Char(related='error_id.fixing_pr_url')
     test_tags = fields.Char(related='error_id.test_tags')

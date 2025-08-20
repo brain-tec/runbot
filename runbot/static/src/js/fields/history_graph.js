@@ -11,25 +11,29 @@ export class HistoryGraph extends Component {
     `;
     setup() {
         this.canvasRef = useRef("canvas");
-        this.data = this.props.record.data[this.props.name] || {};
-        this.errorId = this.data.error_id;
-        this.projectId = this.data.project_id;
-        this.categoryId = this.data.category_id;
         useEffect(() => this.renderErrorGraph());
     }
 
     renderErrorGraph(activeCell) {
+
+        const data = this.props.record.data[this.props.name] || {};
+        const errorId = data.error_id;
+        const projectId = data.project_id;
+        const categoryId = data.category_id;
+        const breaking_pr_close_dates = data.breaking_pr_close_dates;
+        const fixing_pr_close_dates = data.fixing_pr_close_dates;
+
         const canvas = this.canvasRef.el
         const ctx = canvas.getContext("2d");
-        const maxValue = this.data.max_count;
+        const maxValue = data.max_count;
         const canvasBorder = 1;
         const cellBorder = 0.5;
         const cellSize = this.props.cellSize;
         const mouseActions = this.props.mouseActions;
         const cellWidth = cellSize - cellBorder * 2;
         const cellHeight = cellSize - cellBorder * 2;
-        const canvasWidth = this.data.x_labels.length * cellSize + canvasBorder * 2;
-        const canvasHeight = this.data.y_labels.length * cellSize + canvasBorder * 2;
+        const canvasWidth = data.date_labels.length * cellSize + canvasBorder * 2;
+        const canvasHeight = data.version_labels.length * cellSize + canvasBorder * 2;
         canvas.width = canvasWidth;
         canvas.height = canvasHeight;
 
@@ -50,9 +54,10 @@ export class HistoryGraph extends Component {
         ctx.lineWidth = canvasBorder * 2; // * 2 to account for each side, not only inner width 
         ctx.strokeRect(0, 0, canvasWidth, canvasHeight,);
 
-        this.data.x_labels.forEach((xLabel, idx) => {
-            this.data.y_labels.forEach((yLabel, idy) => {
-                let value = this.data.daily_version_freq[idx][idy] || 0;
+        data.date_labels.forEach((dateLabel, idx) => {
+            data.version_labels.forEach((versionLabel, idy) => {
+                let version_id = data.versions_ids[idy]
+                let value = data.daily_version_freq[idx][idy] || 0;
                 let cellColor = "white";
                 let cellOpacity = 0;
                 if (value) {
@@ -70,9 +75,22 @@ export class HistoryGraph extends Component {
                     ctx.lineWidth = 2;
                     ctx.strokeRect(posX, posY, cellWidth, cellHeight);
                 }
+
+
+                if (fixing_pr_close_dates[version_id] == dateLabel) {
+                    ctx.fillStyle = "black";
+                    ctx.font = "12px Arial";
+                    ctx.fillText("✓", posX + cellWidth / 2 - 4, posY + cellHeight / 2 + 4);
+                }
+                if (breaking_pr_close_dates[version_id] == dateLabel) {
+                    ctx.fillStyle = "black";
+                    ctx.font = "12px Arial";
+                    ctx.fillText("✗", posX + cellWidth / 2 - 4, posY + cellHeight / 2 + 4);
+                }
+
+
             });
         });
-        console.log(mouseActions)
         if (mouseActions) {
             canvas.onmousemove = (event) => {
                 let tooltip = canvas.parentElement.querySelector('.history-graph-tooltip');
@@ -80,7 +98,7 @@ export class HistoryGraph extends Component {
                     tooltip.remove();
                 }
 
-                const { col, row, value, xLabel, yLabel } = this.getCellFromEvent(event);
+                const { col, row, value, dateLabel, versionLabel } = this.getCellFromEvent(event);
 
                 if ( col >= 0 && row >= 0) {
                     tooltip = document.createElement('div');
@@ -95,8 +113,8 @@ export class HistoryGraph extends Component {
                     tooltip.style.pointerEvents = 'none';
                     tooltip.style.zIndex = 1000;
                     tooltip.innerHTML = `
-                        Date: ${xLabel}
-                        Version: ${yLabel}
+                        Date: ${dateLabel}
+                        Version: ${versionLabel}
                         Value: ${value}
                     `;
                     canvas.parentElement.appendChild(tooltip);
@@ -115,9 +133,9 @@ export class HistoryGraph extends Component {
             };
 
             canvas.onclick = (event) => {
-                const { col, row, value, xLabel, yLabel } = this.getCellFromEvent(event);
+                const { col, row, value, dateLabel, versionLabel } = this.getCellFromEvent(event);
                 if (col >= 0 && row >= 0) {
-                    const url = `/runbot/batches/${this.projectId}/${this.categoryId}/${xLabel}/${this.errorId}`;
+                    const url = `/runbot/batches/${projectId}/${categoryId}/${dateLabel}/${errorId}`;
                     window.open(url, '_blank');
                 }
             }
@@ -125,18 +143,19 @@ export class HistoryGraph extends Component {
 
     }
     getCellFromEvent(event) {
+        const data = this.props.record.data[this.props.name] || {};
         const rect = this.canvasRef.el.getBoundingClientRect();
         const x = event.clientX - rect.left - 1; // Adjust for canvas border
         const y = event.clientY - rect.top - 1; // Adjust for canvas border
         const col = Math.floor(x / this.props.cellSize);
         const row = Math.floor(y / this.props.cellSize);
-         if ( col >= 0 && col < this.data.x_labels.length && row >= 0 && row < this.data.y_labels.length) {
-            const value = this.data.daily_version_freq[col][row] || 0;
-            const xLabel = this.data.x_labels[col];
-            const yLabel = this.data.y_labels[row];
-            return { col, row, value, xLabel, yLabel };
+         if ( col >= 0 && col < data.date_labels.length && row >= 0 && row < data.version_labels.length) {
+            const value = data.daily_version_freq[col][row] || 0;
+            const dateLabel = data.date_labels[col];
+            const versionLabel = data.version_labels[row];
+            return { col, row, value, dateLabel, versionLabel };
         } else {
-            return { col: -1, row: -1, value: 0, xLabel: '', yLabel: '' };
+            return { col: -1, row: -1, value: 0, dateLabel: '', versionLabel: '' };
         }
     }
 }
