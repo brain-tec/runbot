@@ -168,6 +168,14 @@ RUN deluser ubuntu</field>
         <field name="content">USER {USERNAME}</field>
     </record>
 
+    <record id="runbot.docker_layer_odoo_runbot" model="runbot.docker_layer">
+        <field name="sequence" eval="1030"/>
+        <field name="dockerfile_id" ref="runbot.docker_default"/>
+        <field name="layer_type">raw</field>
+        <field name="name">ENV ODOO_RUNBOT 1</field>
+        <field name="content">ENV ODOO_RUNBOT 1</field>
+    </record>
+
     <record id="runbot.docker_pip_break_system_packages" model="runbot.docker_layer">
         <field name="sequence" eval="1100"/>
         <field name="dockerfile_id" ref="runbot.docker_default"/>

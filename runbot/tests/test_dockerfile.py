@@ -72,7 +72,8 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1
 RUN python3 -m pip install --no-cache-dir ebaysdk==2.1.5 pdf417gen==0.7.1
 ADD --chown=TestUser https://raw.githubusercontent.com/odoo/odoo/master/requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/requirements.txt
-USER TestUser""", docker_render)
+USER TestUser
+ENV ODOO_RUNBOT 1""", docker_render)
 
     def test_dockerfile_base_fields(self):
         dockerfile = self.env['runbot.dockerfile'].create({
