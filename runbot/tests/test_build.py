@@ -695,8 +695,8 @@ class TestBuildResult(RunbotCase):
 
         # let's ensure that a time offset is added to a child build
         build.build_start = datetime.datetime(2025, 1, 1, 12, 00)
+        build.build_end = datetime.datetime(2025, 1, 1, 13, 00)  # ensures that build_time is set
         child_build = build._add_child({})
-        child_build.create_date = datetime.datetime(2025, 1, 1, 13, 00)
         child_cmd = child_build._cmd(py_version=3)
         self.assertIn('faketime "2024-02-04 03:42 UTC" python3 odoo/server.py', str(child_cmd))
 

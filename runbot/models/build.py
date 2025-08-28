@@ -482,7 +482,7 @@ class BuildResult(models.Model):
 
         for init_local_state, build in zip(init_local_states, self):
             if init_local_state not in ('done', 'running') and build.local_state in ('done', 'running'):
-                build.build_end = now()
+                build.build_end = self.env.cr.now()
 
         for init_global_state, build in zip(init_global_states, self):
             if init_global_state not in ('done', 'running') and build.global_state in ('done', 'running'):
@@ -502,6 +502,13 @@ class BuildResult(models.Model):
             commit_link_ids = self.params_id.commit_link_ids
             commit_link_ids |= additionnal_commit_links
             param_values['commit_link_ids'] = commit_link_ids
+
+        config_data = param_values.get('config_data', self.params_id.config_data)
+        if "faketime" in config_data:
+            current_offset = config_data.get('faketime_offset', 0)
+            new_offest = current_offset + self.build_time
+            new_config_data = {**param_values.get('config_data', {}), 'faketime_offset': new_offest, 'faketime': config_data['faketime']}
+            param_values['config_data'] = new_config_data
 
         return self.create({
             'params_id': self.params_id.copy(param_values).id,
@@ -565,7 +572,7 @@ class BuildResult(models.Model):
             if build.build_end and build.build_start:
                 build.build_time = int(dt2time(build.build_end) - dt2time(build.build_start))
             elif build.build_start:
-                build.build_time = int(time.time() - dt2time(build.build_start))
+                build.build_time = int(dt2time(self.env.cr.now()) - dt2time(build.build_start))
             else:
                 build.build_time = 0
 
@@ -783,8 +790,8 @@ class BuildResult(models.Model):
         self.ensure_one()
         build = self
         build.port = self._find_port()
-        build.job_start = now()
-        build.build_start = now()
+        build.job_start = self.env.cr.now()
+        build.build_start = self.env.cr.now()
         build.job_end = False
         build._log('_schedule', 'Init build environment with config %s ' % build.params_id.config_id.name)
         try:
@@ -818,7 +825,7 @@ class BuildResult(models.Model):
                 try:
                     port = self._find_port()
                     build.write({
-                        'job_start': now(),
+                        'job_start': self.env.cr.now(),
                         'job_end': False,
                         'active_step': False,
                         'requested_action': False,
@@ -875,7 +882,7 @@ class BuildResult(models.Model):
                 return True  # avoid to make results with remaining logs
             # No job running, make result and select next job
 
-            build.job_end = now()
+            build.job_end = self.env.cr.now()
             build.docker_start = False
             # make result of previous job
             try:
@@ -1165,9 +1172,9 @@ class BuildResult(models.Model):
             return
         build._log('kill', 'Kill build %s' % build.dest)
         docker_stop(build._get_docker_name(), build._path())
-        v = {'local_state': 'done', 'requested_action': False, 'active_step': False, 'job_end': now()}
+        v = {'local_state': 'done', 'requested_action': False, 'active_step': False, 'job_end': self.env.cr.now()}
         if not build.build_end:
-            v['build_end'] = now()
+            v['build_end'] = self.env.cr.now()
         if result:
             v['local_result'] = result
         build.write(v)
@@ -1281,9 +1288,9 @@ class BuildResult(models.Model):
 
         faketime = []
         if faketime_params := self.params_id.config_data.get('faketime'):
-            if self.parent_id:
-                parent_time_offset = (self.parent_id.build_end or self.create_date) - self.parent_id.build_start
-                faketime_params = (parser.parse(faketime_params) + parent_time_offset).strftime('%Y-%m-%d %H:%M %Z')
+            faketime_offset = self.params_id.config_data.get('faketime_offset') or self.build_time
+            time_offset = datetime.timedelta(seconds=faketime_offset)
+            faketime_params = (parser.parse(faketime_params) + time_offset).strftime('%Y-%m-%d %H:%M %Z')
             faketime = ['faketime', faketime_params]
 
         addons_paths = self._get_addons_path()
