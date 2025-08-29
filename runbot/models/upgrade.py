@@ -7,6 +7,7 @@ class UpgradeExceptions(models.Model):
     _name = 'runbot.upgrade.exception'
     _description = 'Upgrade exception'
     _inherit = ['mail.thread', 'mail.activity.mixin']
+    _mail_post_access = 'read'
 
     active = fields.Boolean('Active', default=True, tracking=True)
     elements = fields.Text('Elements', required=True, tracking=True)
