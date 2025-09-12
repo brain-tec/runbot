@@ -58,6 +58,9 @@ class Branch(models.Model):
 
     def _search_dname(self, operator, value):
         # Match format (owner?, repo, branch)
+        if operator == 'in' and len(value) == 1:
+            value = list(value)[0]
+            operator = '='
         owner = repo = branch = None
         if (m := re.match(r'(?:([\w-]+)/)?([\w-]+)[:#]([\w\.-]+)', value)):
             owner, repo, branch = m.groups()
