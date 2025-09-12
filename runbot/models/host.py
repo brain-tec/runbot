@@ -9,8 +9,6 @@ from ..common import fqdn, local_pgadmin_cursor, os, list_local_dbs, local_pg_cu
 from ..container import docker_push, docker_pull, docker_prune, docker_images, docker_remove, docker_tag
 
 _logger = logging.getLogger(__name__)
-
-
 class Host(models.Model):
     _name = 'runbot.host'
     _description = "Host"
