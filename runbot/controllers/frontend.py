@@ -14,7 +14,7 @@ from werkzeug.exceptions import Forbidden, NotFound
 from odoo import fields
 from odoo.http import Controller, Response, request
 from odoo.http import route as o_route
-from odoo.osv import expression
+from odoo.fields import Domain
 
 from odoo.addons.website.controllers.main import QueryURL
 
@@ -63,7 +63,6 @@ def route(routes, **kw):
         return response_wrap
     return decorator
 
-
 class Runbot(Controller):
 
     def _pending(self):
@@ -80,10 +79,11 @@ class Runbot(Controller):
             '/runbot',
             '/runbot/<model("runbot.project"):project>',
             '/runbot/<model("runbot.project"):project>/search/<search>'], website=True, auth='public', type='http')
-    def bundles(self, project=None, search='', projects=False, refresh=False, for_next_freeze=False, limit=40, has_pr=None, **kwargs):
+    def bundles(self, project=None, search='', refresh=False, for_next_freeze=False, limit=40, has_pr=None, **kwargs):
         search = search if len(search) < 60 else search[:60]
         env = request.env
         categories = env['runbot.category'].search([])
+        projects = self.env['runbot.project'].search([('hidden', '=', False)])
         if not project and projects:
             project = projects[0]
 
@@ -129,11 +129,10 @@ class Runbot(Controller):
                     res = request.env['runbot.branch'].search([('name', 'in', pr_numbers)])
                     if res:
                         search_domains.append([('id', 'in', res.mapped('bundle_id').ids)])
-                search_domain = expression.OR(search_domains)
-                domain = expression.AND([domain, search_domain])
+                search_domain = Domain.OR(search_domains)
+                domain = Domain.AND([domain, search_domain])
 
-            e = expression.expression(domain, request.env['runbot.bundle'])
-            query = e.query
+            query = request.env['runbot.bundle']._search(domain)
             query.order = """
              (case when "runbot_bundle".sticky then 1 when "runbot_bundle".sticky is null then 2 else 2 end),
                     case when "runbot_bundle".sticky then "runbot_bundle".version_number end collate "C" desc,
@@ -151,6 +150,7 @@ class Runbot(Controller):
 
             triggers = env['runbot.trigger'].search([('project_id', '=', project.id)])
             context.update({
+                'projects': projects,
                 'active_category_id': category_id,
                 'bundles': bundles,
                 'project': project,
@@ -197,7 +197,7 @@ class Runbot(Controller):
 
         return request.render('runbot.bundle', context)
 
-    @o_route([
+    @route([
         '/runbot/bundle/<model("runbot.bundle"):bundle>/force',
         '/runbot/bundle/<model("runbot.bundle"):bundle>/force/<int:auto_rebase>',
     ], type='http', auth="user", methods=['GET', 'POST'], csrf=False)
@@ -223,7 +223,7 @@ class Runbot(Controller):
         }
         return request.render('runbot.batch', context)
 
-    @o_route(['/runbot/batch/slot/<model("runbot.batch.slot"):slot>/build'], auth='user', type='http')
+    @route(['/runbot/batch/slot/<model("runbot.batch.slot"):slot>/build'], auth='user', type='http')
     def slot_create_build(self, slot=None, **kwargs):
         build = slot.sudo()._create_missing_build()
         return werkzeug.utils.redirect('/runbot/build/%s' % build.id)
@@ -250,7 +250,7 @@ class Runbot(Controller):
         }
         return request.render('runbot.commit', context)
 
-    @o_route(['/runbot/commit/resend/<int:status_id>'], website=True, auth='user', type='http')
+    @route(['/runbot/commit/resend/<int:status_id>'], website=True, auth='user', type='http')
     def resend_status(self, status_id=None, **kwargs):
         CommitStatus = request.env['runbot.commit.status']
         status = CommitStatus.browse(status_id)
@@ -267,7 +267,7 @@ class Runbot(Controller):
             _logger.info('github status %s resent by %s', status_id, request.env.user.name)
         return werkzeug.utils.redirect('/runbot/commit/%s' % status.commit_id.id)
 
-    @o_route([
+    @route([
         '/runbot/build/<int:build_id>/<operation>',
     ], type='http', auth="user", methods=['POST'], csrf=False)
     def build_operations(self, build_id, operation, **post):
@@ -402,7 +402,7 @@ class Runbot(Controller):
         }
         return request.render(view_id if view_id else "runbot.monitoring", qctx)
 
-    @o_route([
+    @route([
         '/runbot/submit',
     ], type='http', auth="public", methods=['GET', 'POST'], csrf=False)
     def submit(self, more=False, redirect='/', update_triggers=False, **kwargs):
@@ -506,7 +506,7 @@ class Runbot(Controller):
         filterby = kwargs.get('filterby', 'not_one')
         if filterby not in searchbar_filters:
             filterby = 'not_one'
-        domain = expression.AND([domain, searchbar_filters[filterby]['domain']])
+        domain = Domain.AND([domain, searchbar_filters[filterby]['domain']])
 
         qctx = {
             'team': team,
@@ -552,9 +552,9 @@ class Runbot(Controller):
         builds = request.env['runbot.build'].with_context(active_test=False)
         if center_build_id:
             builds = builds.search(
-                expression.AND([builds_domain, [('id', '>=', center_build_id)]]),
+                Domain.AND([builds_domain, [('id', '>=', center_build_id)]]),
                 order='id', limit=limit / 2)
-            builds_domain = expression.AND([builds_domain, [('id', '<=', center_build_id)]])
+            builds_domain = Domain.AND([builds_domain, [('id', '<=', center_build_id)]])
             limit -= len(builds)
 
         builds |= builds.search(builds_domain, order='id desc', limit=limit)
