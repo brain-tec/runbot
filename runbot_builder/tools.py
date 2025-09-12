@@ -158,24 +158,28 @@ def run(client_class):
         logging.getLogger().addHandler(handler)
 
     # configure odoo
-    sys.path.append(args.odoo_path)
-    import odoo
-    _logger.info("Starting scheduler on database %s", args.database)
-    odoo.tools.config['db_host'] = args.db_host
-    odoo.tools.config['db_port'] = args.db_port
-    odoo.tools.config['db_user'] = args.db_user
-    odoo.tools.config['db_password'] = args.db_password
-    addon_path = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..'))
-    config_addons_path = args.addons_path or odoo.tools.config['addons_path']
-    if addon_path not in config_addons_path:
-        config_addons_path = ','.join([config_addons_path, addon_path])
-    odoo.tools.config['addons_path'] = config_addons_path
-    odoo.tools.config['forced_host_name'] = args.forced_host_name
-    import odoo.modules
 
-    # create environment
-    registry = odoo.modules.registry.Registry(args.database)
     try:
+        sys.path.append(args.odoo_path)
+        import odoo
+        from odoo import tools
+        _logger.info("Starting scheduler on database %s", args.database)
+        tools.config['db_host'] = args.db_host
+        tools.config['db_port'] = args.db_port
+        tools.config['db_user'] = args.db_user
+        tools.config['db_password'] = args.db_password
+        addon_path = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..'))
+        config_addons_path = args.addons_path or tools.config['addons_path']
+        if isinstance(config_addons_path, list):
+            config_addons_path = ','.join(config_addons_path)
+        if addon_path not in config_addons_path:
+            config_addons_path = ','.join([config_addons_path, addon_path])
+        tools.config['addons_path'] = config_addons_path
+        tools.config['forced_host_name'] = args.forced_host_name
+        import odoo.modules
+
+        # create environment
+        registry = odoo.modules.registry.Registry(args.database)
         with registry.cursor() as cr:
             env = odoo.api.Environment(cr, odoo.SUPERUSER_ID, {})
             client = client_class(env)
