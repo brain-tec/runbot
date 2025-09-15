@@ -46,8 +46,12 @@
                 </header>
                 <sheet>
                     <group>
+                        <field name="name" widget="char_frontend_url"/>
+                        <field name="description"/>
+                        <field name="tag_ids" widget="many2many_tags" options="{'not_delete': True}"/>
+                    </group>
+                    <group>
                         <group string="Base options">
-                            <field name="name" widget="char_frontend_url"/>
                             <field name="project_id"/>
                             <field name="sticky" readonly="0"/>
                             <field name="to_upgrade" readonly="0"/>

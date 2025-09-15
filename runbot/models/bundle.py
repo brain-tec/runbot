@@ -5,6 +5,7 @@ import subprocess
 
 from collections import defaultdict
 from odoo import models, fields, api, tools
+from odoo.exceptions import ValidationError
 from ..common import dt2time, s2human_long
 
 
@@ -16,6 +17,8 @@ class Bundle(models.Model):
     name = fields.Char('Bundle name', required=True, help="Name of the base branch")
     project_id = fields.Many2one('runbot.project', required=True, index=True)
     branch_ids = fields.One2many('runbot.branch', 'bundle_id')
+    description = fields.Char('Description')
+    tag_ids = fields.Many2many('runbot.bundle.tag', string='Tags')
 
     # custom behaviour
     no_build = fields.Boolean('No build')
@@ -310,3 +313,20 @@ class Bundle(models.Model):
             'default_number_build': 0,
         }
         return self._generate_custom_trigger_action(context)
+
+
+class BundleTag(models.Model):
+
+    _name = "runbot.bundle.tag"
+    _description = "Bundle tag"
+
+    name = fields.Char(string='Bundle Tag')
+    bundle_ids = fields.Many2many('runbot.bundle', string='Bundles')
+
+    @api.constrains('name')
+    def _validate_tag_name(self):
+        icp = self.env['ir.config_parameter'].sudo()
+        allowed_tag_names = icp.get_param('runbot.allowed_bundle_tags', '').split(',')
+        for record in self:
+            if self.name not in allowed_tag_names:
+                raise ValidationError(f"Tag {record.name} is not valid. Should be one of '{','.join(allowed_tag_names)}'")
