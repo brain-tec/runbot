@@ -23,6 +23,7 @@ class Project(models.Model):
     staging_prefix = fields.Char('staging branches prefix', default="staging.")
     hidden = fields.Boolean('Hidden', help='Hide this project from the main page')
     active = fields.Boolean("Active", default=True)
+    public = fields.Boolean("Public", default=False, help="If not public, only internal users of the required groups can see this project.")
     process_delay = fields.Integer('Process delay', default=60, required=True, help="Delay between a push and a batch starting its process.")
 
     @api.constrains('process_delay')

@@ -30,9 +30,9 @@ def route(routes, **kw):
             more = request.httprequest.cookies.get('more', False) == '1'
             filter_mode = request.httprequest.cookies.get('filter_mode', 'default')
             refresh = kwargs.get('refresh', False)
-            nb_build_errors = request.env['runbot.build.error'].search_count([])
-            nb_assigned_errors = request.env['runbot.build.error'].search_count([('responsible', '=', request.env.user.id)])
-            nb_team_errors = request.env['runbot.build.error'].search_count([('responsible', '=', False), ('team_id', 'in', request.env.user.runbot_team_ids.ids)])
+            nb_build_errors = request.env['runbot.build.error'].sudo().search_count([])
+            nb_assigned_errors = request.env['runbot.build.error'].sudo().search_count([('responsible', '=', request.env.user.id)])
+            nb_team_errors = request.env['runbot.build.error'].sudo().search_count([('responsible', '=', False), ('team_id', 'in', request.env.user.runbot_team_ids.ids)])
             kwargs['more'] = more
             kwargs['projects'] = projects
 
@@ -132,8 +132,7 @@ class Runbot(Controller):
                 search_domain = Domain.OR(search_domains)
                 domain = Domain.AND([domain, search_domain])
 
-            e = Domain.expression(domain, request.env['runbot.bundle'])
-            query = e.query
+            query = request.env['runbot.bundle']._search(domain)
             query.order = """
              (case when "runbot_bundle".sticky then 1 when "runbot_bundle".sticky is null then 2 else 2 end),
                     case when "runbot_bundle".sticky then "runbot_bundle".version_number end collate "C" desc,
