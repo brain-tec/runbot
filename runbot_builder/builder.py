@@ -2,6 +2,7 @@
 import logging
 import threading
 
+from datetime import datetime
 from pathlib import Path
 
 from tools import RunbotClient, run, docker_monitoring_loop
@@ -46,7 +47,9 @@ class BuilderClient(RunbotClient):
                 self.git_gc()
                 self.env.cr.commit()
             return self.env['runbot.runbot']._scheduler_loop_turn(self.host)
-        return 10
+        else:
+            self.host.last_success = datetime.now()
+            return 10
 
 
 if __name__ == '__main__':
