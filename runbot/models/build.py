@@ -43,6 +43,30 @@ COPY_WHITELIST = [
 USERUID = os.getuid()
 USERNAME = getpass.getuser()
 
+
+def rmforest(top_dir):
+    """Rewrite of rmtree that tries to handle permission errors (e.g.: when a directory that the user own is u-w)
+    :param top_dir: diretory to remove
+    :type top_dir: str or Path
+    """
+    top = Path(top_dir)
+    for root, dirs, files in top.walk(top_down=False):
+        for name in files:
+            f = root / name
+            try:
+                f.unlink()
+            except PermissionError:
+                perm = f.stat().st_mode | 0o00600
+                f.chmod(perm)
+                pperm = f.parent.stat().st_mode | 0o00700
+                f.parent.chmod(pperm)
+                f.unlink()
+        for name in dirs:
+            d = root / name
+            d.rmdir()
+    top.rmdir()
+
+
 def make_selection(array):
     return [(elem, elem.replace('_', ' ').capitalize()) if isinstance(elem, str) else elem for elem in array]
 
@@ -646,7 +670,7 @@ class BuildResult(models.Model):
                 for bdir_file in build_dir.iterdir():
                     if bdir_file.is_dir() and bdir_file.name not in ('logs', 'tests'):
                         try:
-                            shutil.rmtree(bdir_file)
+                            rmforest(bdir_file)
                         except Exception:
                             _logger.exception('Failed to remove %s', bdir_file)
                     elif bdir_file.name == 'logs':
@@ -654,7 +678,7 @@ class BuildResult(models.Model):
                             if log_file_path.is_dir():
 
                                 try:
-                                    shutil.rmtree(log_file_path)
+                                    rmforest(log_file_path)
                                 except Exception:
                                     _logger.exception('Failed to remove %s', log_file_path)
                             elif log_file_path.name in ('run.txt', 'wake_up.txt') or not log_file_path.name.endswith('.txt'):
