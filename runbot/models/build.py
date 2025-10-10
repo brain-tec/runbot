@@ -644,11 +644,18 @@ class BuildResult(models.Model):
                 gcstamp = build_dir / '.gcstamp'
                 for bdir_file in build_dir.iterdir():
                     if bdir_file.is_dir() and bdir_file.name not in ('logs', 'tests'):
-                        shutil.rmtree(bdir_file)
+                        try:
+                            shutil.rmtree(bdir_file)
+                        except Exception:
+                            _logger.exception('Failed to remove %s', bdir_file)
                     elif bdir_file.name == 'logs':
                         for log_file_path in bdir_file.iterdir():
                             if log_file_path.is_dir():
-                                shutil.rmtree(log_file_path)
+
+                                try:
+                                    shutil.rmtree(log_file_path)
+                                except Exception:
+                                    _logger.exception('Failed to remove %s', log_file_path)
                             elif log_file_path.name in ('run.txt', 'wake_up.txt') or not log_file_path.name.endswith('.txt'):
                                 log_file_path.unlink()
                     gcstamp.write_text(f'gc date: {datetime.datetime.now()}')
