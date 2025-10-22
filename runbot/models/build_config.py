@@ -35,7 +35,7 @@ _SAFE_OPCODES |= set(to_opcodes(['LOAD_DEREF', 'STORE_DEREF', 'LOAD_CLOSURE', 'M
 
 _logger = logging.getLogger(__name__)
 
-_re_warning = r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ WARNING '
+_re_warning = r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ WARNING .*'
 
 PYTHON_DEFAULT = "# type python code here\n\n\n\n\n\n"
 
@@ -350,7 +350,7 @@ class ConfigStep(models.Model):
         eval_ctx = self._make_python_ctx(build)
         eval_ctx['force'] = force
         try:
-            safe_eval(self.python_code.strip(), eval_ctx, mode="exec", nocopy=True)
+            safe_eval(self.python_code.strip(), eval_ctx, mode="exec")
             run = eval_ctx.get('run')
             if run and callable(run):
                 return run()
@@ -1044,7 +1044,7 @@ class ConfigStep(models.Model):
 
     def _make_python_results(self, build):
         eval_ctx = self._make_python_ctx(build)
-        safe_eval(self.python_result_code.strip(), eval_ctx, mode="exec", nocopy=True)
+        safe_eval(self.python_result_code.strip(), eval_ctx, mode="exec")
         return_value = eval_ctx.get('return_value', {})
         # todo check return_value or write in try except. Example: local result setted to wrong value
         if not isinstance(return_value, dict):
@@ -1100,10 +1100,12 @@ class ConfigStep(models.Model):
             return 'ko'
         return 'ok'
 
+
     def _check_module_loaded(self, build):
         log_path = build._path('logs', '%s.txt' % self.name)
         if not grep(log_path, ".modules.loading: Modules loaded."):
-            build._log('_make_tests_results', "Modules loaded not found in logs", level="ERROR")
+            details = build._get_error_tail_message(log_path)
+            build._log('_make_tests_results', f"Modules loaded not found in logs{details}", level="ERROR")
             return 'ko'
         return 'ok'
 
@@ -1127,15 +1129,16 @@ class ConfigStep(models.Model):
     def _check_warning(self, build, regex=None):
         log_path = build._path('logs', '%s.txt' % self.name)
         regex = regex or _re_warning
-        if rfind(log_path, regex):
-            build._log('_make_tests_results', 'Warning found in logs', level="WARNING")
+        if result := rfind(log_path, regex):
+            build._log('_make_tests_results', 'Warning found in logs:\n%s' % '\n'.join(result), level="WARNING")
             return 'warn'
         return 'ok'
 
     def _check_build_ended(self, build):
         log_path = build._path('logs', '%s.txt' % self.name)
         if not grep(log_path, "Initiating shutdown"):
-            build._log('_make_tests_results', 'No "Initiating shutdown" found in logs, maybe because of cpu limit.', level="ERROR")
+            details = build._get_error_tail_message(log_path)
+            build._log('_make_tests_results', f'No "Initiating shutdown" found in logs.{details}', level="ERROR")
             return 'ko'
         return 'ok'
 

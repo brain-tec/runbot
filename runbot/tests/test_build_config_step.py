@@ -780,35 +780,35 @@ def run():
         self.assertIn('--without-demo', cmd)
 
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
-    def test_network_can_be_disabled(self, mock_checkout):
+    def test_network_can_be_enable(self, mock_checkout):
         """ test that network can be disabled with config_data """
         config_step = self.ConfigStep.create({
             'name': 'default',
             'job_type': 'install_odoo',
         })
 
-        # by default, network is enabled (will be changed in a near future)
+        # by default, network is disabled
         def first_docker_run(cmd, log_path, *args, **kwargs):
-            self.assertTrue(kwargs['network_enabled'])
+            self.assertFalse(kwargs['network_enabled'])
 
         self.patchers['docker_run'].side_effect = first_docker_run
         config_step._run_step(self.parent_build)()
 
         def second_docker_run(cmd, log_path, *args, **kwargs):
-            self.assertFalse(kwargs['network_enabled'])
+            self.assertTrue(kwargs['network_enabled'])
 
         self.patchers['docker_run'].side_effect = second_docker_run
 
-        parent_build_params = self.parent_build.params_id.copy({'config_data': {'network_enabled': False}})
+        parent_build_params = self.parent_build.params_id.copy({'config_data': {'network_enabled': True}})
         parent_build = self.parent_build.copy({'params_id': parent_build_params.id})
         config_step._run_step(parent_build)()
 
 
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
     def test_run_python_networkcan_be_disabled(self, mock_checkout):
-        """test that docker network can be disabled from python step"""
+        """test that docker network can be enabled from python step"""
         test_code = """cmd = build._cmd()
-docker_params = dict(cmd=cmd, network_enabled=False)
+docker_params = dict(cmd=cmd, network_enabled=True)
         """
         config_step = self.ConfigStep.create({
             'name': 'default',
@@ -817,7 +817,7 @@ docker_params = dict(cmd=cmd, network_enabled=False)
         })
 
         def docker_run(cmd, *args, **kwargs):
-            self.assertFalse(kwargs['network_enabled'])
+            self.assertTrue(kwargs['network_enabled'])
 
         self.patchers['docker_run'].side_effect = docker_run
         config_step._run_step(self.parent_build)()
@@ -892,8 +892,12 @@ Some post install stuff
         self.assertEqual(self.build.local_result, 'ko')
         self.assertEqual(self.logs, [
             ('INFO', 'Getting results for build %s' % self.build.dest),
-            ('ERROR', 'No "Initiating shutdown" found in logs, maybe because of cpu limit.'),
-        ])
+            ('ERROR', 'No "Initiating shutdown" found in logs.\n'
+   '\n'
+   'Loading stuff\n'
+   'odoo.stuff.modules.loading: Modules loaded.\n'
+   'Some post install stuff\n'
+   '        ')])
 
     def test_make_result_no_loaded(self):
         file_content = """
@@ -905,7 +909,7 @@ Loading stuff
         self.assertEqual(self.build.local_result, 'ko')
         self.assertEqual(self.logs, [
             ('INFO', 'Getting results for build %s' % self.build.dest),
-            ('ERROR', 'Modules loaded not found in logs'),
+            ('ERROR', 'Modules loaded not found in logs\n\nLoading stuff\n'),
         ])
 
     def test_make_result_traceback(self):
@@ -986,7 +990,7 @@ Initiating shutdown
         self.assertEqual(self.build.local_result, 'warn')
         self.assertEqual(self.logs, [
             ('INFO', 'Getting results for build %s' % self.build.dest),
-            ('WARNING', 'Warning found in logs')
+            ('WARNING', 'Warning found in logs:\n2019-12-17 17:34:37,692 17 WARNING dbname path.to.test: timeout exceded')
         ])
 
         # no log file

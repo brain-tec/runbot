@@ -7,6 +7,7 @@ class UpgradeExceptions(models.Model):
     _name = 'runbot.upgrade.exception'
     _description = 'Upgrade exception'
     _inherit = ['mail.thread', 'mail.activity.mixin']
+    _mail_post_access = 'read'
 
     active = fields.Boolean('Active', default=True, tracking=True)
     elements = fields.Text('Elements', required=True, tracking=True)
@@ -22,7 +23,7 @@ class UpgradeExceptions(models.Model):
             raise UserError('You are not allowed to send messages')
         for pr in self.pr_ids:
             pr.remote_id._github('/repos/:owner/:repo/issues/%s/comments' % pr.name, {'body': self.message})
-    
+
     def action_auto_rebuild(self):
         builds = self.create_build_id.parent_id.children_ids if self.create_build_id.parent_id else self.create_build_id
         for build in builds:
@@ -40,7 +41,7 @@ class UpgradeExceptions(models.Model):
         if exceptions:
             return 'suppress_upgrade_warnings=%s' % (','.join(exceptions.mapped('elements'))).replace(' ', '').replace('\n', ',')
         return False
-    
+
     def default_pr_ids(self):
         bundle_id = self.env.context.get('default_bundle_id')
         if bundle_id:

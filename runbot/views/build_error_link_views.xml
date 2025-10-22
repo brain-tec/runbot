@@ -4,7 +4,7 @@
       <field name="model">runbot.build.error.link</field>
       <field name="arch" type="xml">
           <list default_order="log_date desc,id desc" create="false" delete="false" edit="false">
-            <field name="log_date"/>
+            <field name="log_date" options="{'numeric': true}"/>
             <field name="host" groups="base.group_no_one" optional="hide"/>
             <field name="dest" optional="hide"/>
             <field name="version_id"/>
@@ -25,19 +25,18 @@
               <field name="version_id"/>
               <field name="trigger_id"/>
 
-              <filter string="Today" name="filter_today" domain="[('log_date', '&gt;', (context_today() - datetime.timedelta(days=1)).strftime('%Y-%m-%d'))]"/>
-              <filter string="Last 7 days" name="filter_week" domain="[('log_date', '&gt;', (context_today() - datetime.timedelta(days=7)).strftime('%Y-%m-%d'))]"/>
-              <filter string="Last 15 days" name="filter_2weeks" domain="[('log_date', '&gt;', (context_today() - datetime.timedelta(days=15)).strftime('%Y-%m-%d'))]"/>
+              <filter string="Today" name="filter_today" domain="[('log_date', '&gt;', 'today -1d')]"/>
+              <filter string="Last 7 days" name="filter_week" domain="[('log_date', '&gt;', 'today -7d')]"/>
+              <filter string="Last 15 days" name="filter_2weeks" domain="[('log_date', '&gt;', 'today -15d')]"/>
               <separator/>
               <filter string="Single App builds" name="filter_single_app" domain="[('description', '=like', 'Testing module %')]"/>
 
-              <group expand="0" string="Group By">
-                  <filter string="Description" name="group_by_description" context="{'group_by': 'description'}"/>
-                  <filter string="Version" name="group_by_version_id" context="{'group_by': 'version_id'}"/>
-                  <filter string="Trigger" name="group_by_trigger_id" context="{'group_by': 'trigger_id'}"/>
-                  <separator/>
-                  <filter string="Log Date" name="group_by_log_date" context="{'group_by': 'log_date'}"/>
-              </group>
+              <filter string="Description" name="group_by_description" context="{'group_by': 'description'}"/>
+              <filter string="Version" name="group_by_version_id" context="{'group_by': 'version_id'}"/>
+              <filter string="Trigger" name="group_by_trigger_id" context="{'group_by': 'trigger_id'}"/>
+              <separator/>
+              <filter string="Log Date" name="group_by_log_date" context="{'group_by': 'log_date'}"/>
+
           </search>
       </field>
   </record>

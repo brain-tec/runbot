@@ -6,10 +6,14 @@
     'author': "Odoo SA",
     'website': "http://runbot.odoo.com",
     'category': 'Website',
-    'version': '5.11',
+    'version': '5.13',
     'application': True,
     'depends': ['base', 'base_automation', 'website'],
     'data': [
+        'security/runbot_security.xml',
+        'security/ir.model.access.csv',
+        'security/ir.rule.csv',
+
         'data/dockerfile_data.xml',
         'data/build_parse.xml',
         'data/error_link.xml',
@@ -18,9 +22,6 @@
         'data/runbot_error_regex_data.xml',
         'data/website_data.xml',
 
-        'security/runbot_security.xml',
-        'security/ir.model.access.csv',
-        'security/ir.rule.csv',
 
         'templates/utils.xml',
         'templates/badge.xml',
@@ -37,6 +38,7 @@
         'templates/nginx.xml',
         'templates/build_error.xml',
         'templates/batches_by_date.xml',
+        'templates/commit_link_details.xml',
 
         'views/branch_views.xml',
         'views/build_error_link_views.xml',
@@ -49,7 +51,6 @@
         'views/config_views.xml',
         'views/dashboard_views.xml',
         'views/dockerfile_views.xml',
-        'views/error_log_views.xml',
         'views/host_views.xml',
         'views/repo_views.xml',
         'views/res_config_settings_views.xml',

@@ -16,7 +16,7 @@ from pathlib import Path
 from psycopg2 import sql
 from psycopg2.extensions import TransactionRollbackError
 
-from ..common import dt2time, now, grep, local_pgadmin_cursor, s2human, dest_reg, os, list_local_dbs, pseudo_markdown, RunbotException, findall, sanitize, markdown_escape
+from ..common import dt2time, now, grep, local_pgadmin_cursor, dest_reg, os, list_local_dbs, pseudo_markdown, RunbotException, findall, sanitize, markdown_escape, tail
 from ..container import docker_stop, docker_state, Command, docker_run, docker_pull
 from ..fields import JsonDictField
 
@@ -49,7 +49,7 @@ def make_selection(array):
 
 class BuildParameters(models.Model):
     _name = 'runbot.build.params'
-    _description = "All information used by a build to run, should be unique and set on create only"
+    _description = "Build parameters"
 
     # on param or on build?
     # execution parametter
@@ -81,9 +81,10 @@ class BuildParameters(models.Model):
 
     slot_ids = fields.One2many('runbot.batch.slot', 'params_id')
 
-    _sql_constraints = [
-        ('unique_fingerprint', 'unique (fingerprint)', 'avoid duplicate params'),
-    ]
+    _unique_fingerprint = models.Constraint(
+        'unique (fingerprint)',
+        "avoid duplicate params",
+    )
 
     # @api.depends('version_id', 'project_id', 'extra_params', 'config_id', 'config_data', 'modules', 'commit_link_ids', 'builds_reference_ids')
     def _compute_fingerprint(self):
@@ -168,7 +169,7 @@ class BuildResult(models.Model):
     # -> commit corresponding to repo of trigger_id5
     # -> display all?
 
-    params_id = fields.Many2one('runbot.build.params', required=True, index=True, auto_join=True)
+    params_id = fields.Many2one('runbot.build.params', required=True, index=True)
     no_auto_run = fields.Boolean('No run')
     # could be a default value, but possible to change it to allow duplicate accros branches
 
@@ -291,7 +292,7 @@ class BuildResult(models.Model):
         max_days_main = int(icp.get_param('runbot.db_gc_days', default=30))
         max_days_child = int(icp.get_param('runbot.db_gc_days_child', default=15))
         for build in self:
-            ref_date = fields.Datetime.from_string(build.job_end or build.create_date or fields.Datetime.now())
+            ref_date = fields.Datetime.from_string(build.job_end or build.create_date or datetime.datetime.now())
             max_days = max_days_main if not build.parent_id else max_days_child
             max_days += int(build.gc_delay if build.gc_delay else 0)
             build.gc_date = ref_date + datetime.timedelta(days=(max_days))
@@ -581,7 +582,7 @@ class BuildResult(models.Model):
             dest_list = [dest for sublist in [dest_by_builds_ids[rem_id] for rem_id in remaining.ids] for dest in sublist]
             _logger.info('(%s) (%s) not deleted because no corresponding build found', label, " ".join(dest_list))
         for build in existing:
-            if build.gc_date < fields.datetime.now():
+            if build.gc_date < datetime.datetime.now():
                 if build.local_state == 'done':
                     for db in dest_by_builds_ids[build.id]:
                         yield db
@@ -678,6 +679,12 @@ class BuildResult(models.Model):
         self.ensure_one()
         return '%s_%s' % (self.dest, self.active_step.name)
 
+    def _get_error_tail_message(self, log_path):
+        lines = tail(log_path)
+        if not lines:
+            return ''
+        return '\n' + ''.join(lines)
+
     def _init_pendings(self):
         self.ensure_one()
         build = self
@@ -767,7 +774,11 @@ class BuildResult(models.Model):
                     _logger.info('container "%s" seems too take a while to start :%s' % (build._get_docker_name(), build.job_time))
                     return False
                 else:
-                    build._log('_schedule', 'Docker with state %s not started after 60 seconds, skipping' % _docker_state, level='ERROR')
+                    details = build._get_error_tail_message(build._path('logs', '%s.txt' % build.active_step.name))
+                    if not details:
+                        build._log('_schedule', 'Docker with state %s not started after 60 seconds, skipping' % _docker_state, level='ERROR')
+                    else:
+                        build._log('_schedule', 'Docker was likely killed, skipping%s' % details, level='ERROR')
             if self.env['runbot.host']._fetch_local_logs(build_ids=build.ids):
                 return True  # avoid to make results with remaining logs
             # No job running, make result and select next job
@@ -892,9 +903,8 @@ class BuildResult(models.Model):
 
         self._log('Preparing', 'Using Dockerfile Tag [%s](/runbot/dockerfile_result/%s/%s)', kwargs['image_tag'], kwargs['image_tag'], image_id, log_type='markdown')
 
-        if not kwargs.get('network_enabled', False):
-            # we don't check config data if we explicitely enable the network (e.g.: restore step)
-            kwargs['network_enabled'] = self.params_id.config_data.get('network_enabled', kwargs.get('network_enabled', True))
+        # network is disabled by default, can be enabled via kwargs['network_enabled'] (run, restore) or config_data['network_enabled'] (external, nightly,...)
+        kwargs['network_enabled'] = kwargs.get('network_enabled') or self.params_id.config_data.get('network_enabled') or self.params_id.trigger_id.network_enabled or False
 
         containers_memory_limit = self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_containers_memory', 0)
         if containers_memory_limit and 'memory' not in kwargs:
@@ -1182,6 +1192,9 @@ class BuildResult(models.Model):
                 command.add_config_tuple("http_interface", "127.0.0.1")
             elif grep(config_path, "--xmlrpc-interface"):
                 command.add_config_tuple("xmlrpc_interface", "127.0.0.1")
+        else:
+            if grep(config_path, "--http-interface"):
+                command.add_config_tuple("http_interface", "0.0.0.0")
 
         if enable_log_db:
             log_db = self.env['ir.config_parameter'].get_param('runbot.logdb_name')
