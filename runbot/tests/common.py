@@ -12,23 +12,21 @@ _logger = logging.getLogger(__name__)
 
 class RunbotCase(TransactionCase):
 
-    def mock_git_helper(self):
+    def mock_git_helper(self, repo, cmd):
         """Helper that returns a mock for repo._git()"""
-        def mock_git(repo, cmd):
-            if cmd[:2] == ['show', '-s'] or cmd[:3] == ['show', '--pretty="%H -- %s"', '-s']:
-                return 'commit message for %s' % cmd[-1]
-            if cmd[:2] == ['cat-file', '-e']:
-                return True
-            if cmd[0] == 'for-each-ref':
-                if self.commit_list.get(repo.id):
-                    return '\n'.join(['\0'.join(commit_fields) for commit_fields in self.commit_list[repo.id]])
-                else:
-                    return ''
-            if cmd[0] == 'diff':
-                return self.diff
+        if cmd[:2] == ['show', '-s'] or cmd[:3] == ['show', '--pretty="%H -- %s"', '-s']:
+            return 'commit message for %s' % cmd[-1]
+        if cmd[:2] == ['cat-file', '-e']:
+            return True
+        if cmd[0] == 'for-each-ref':
+            if self.commit_list.get(repo.id):
+                return '\n'.join(['\0'.join(commit_fields) for commit_fields in self.commit_list[repo.id]])
             else:
-                _logger.warning('Unsupported mock command %s' % cmd)
-        return mock_git
+                return ''
+        if cmd[0] == 'diff':
+            return self.diff
+        else:
+            _logger.warning('Unsupported mock command %s' % cmd)
 
     def docker_run_patch(self, cmd, log_path, *args, **kwargs):
         self.docker_run_calls.append((cmd, log_path, args, kwargs))
@@ -194,7 +192,11 @@ class RunbotCase(TransactionCase):
         self.commit_list = {}
         self.docker_run_calls = []
         self.diff = ''
-        self.start_patcher('git_patcher', 'odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper())
+
+        def mock_git(repo, cmd):
+            return self.mock_git_helper(repo, cmd)
+
+        self.start_patcher('git_patcher', 'odoo.addons.runbot.models.repo.Repo._git', new=mock_git)
         self.start_patcher('hostname_patcher', 'odoo.addons.runbot.common.socket.gethostname', 'host.runbot.com')
         self.start_patcher('github_patcher', 'odoo.addons.runbot.models.repo.Remote._github', {})
         self.start_patcher('makedirs', 'odoo.addons.runbot.common.os.makedirs', True)

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import datetime
+import subprocess
 from unittest.mock import patch, mock_open
 from odoo import Command, fields
 from odoo.tests import Like
@@ -8,6 +8,7 @@ from odoo.exceptions import UserError
 from odoo.addons.runbot.common import RunbotException
 from .common import RunbotCase
 from ..common import markdown_unescape
+
 
 class TestBuildConfigStepCommon(RunbotCase):
     def setUp(self):
@@ -384,18 +385,17 @@ class TestBuildConfigStepDynamic(TestBuildConfigStepCommon):
 
     def setUp(self):
         super().setUp()
-        self.config = self.Config.create({'name': 'test_config'})
         self.config_step = self.ConfigStep.create({
             'name': 'test_step',
             'job_type': 'dynamic',
             'number_builds': 2,
-            'dynamic_config_file_path': 'odoo/tests/.runbot/parallel_testing.json',
         })
         self.config = self.Config.create({
             'name': 'Dynamic parallel testing',
             'step_order_ids': [
                 (0, 0, {'sequence': 10, 'step_id': self.config_step.id}),
             ],
+            'dynamic_config_file_path': 'odoo/tests/.runbot/parallel_testing.json',
         })
         self.commit_server = self.Commit.create({
             'name': 'dfdfcfcf0000ffffffffffffffffffffffffffff',
@@ -414,6 +414,13 @@ class TestBuildConfigStepDynamic(TestBuildConfigStepCommon):
                 }).id,
             'local_result': 'ok',
         })
+
+    def mock_git_helper(self, repo, cmd):
+        if repo == self.repo_server and cmd == ['show', 'dfdfcfcf0000ffffffffffffffffffffffffffff:odoo/tests/.runbot/parallel_testing.json']:
+            return self.config_file
+        elif 'show' in cmd:
+            raise subprocess.CalledProcessError(128)
+        return super().mock_git_helper(repo, cmd)
 
     def test_dynamic_step(self):
         def check_server_cmd(cmd, install, test_enable, test_tags):
@@ -436,13 +443,12 @@ class TestBuildConfigStepDynamic(TestBuildConfigStepCommon):
                 self.assertNotIn('--test-tags', cmd)
 
         with open(__file__[:-25] + 'test_build_config_step_dynamic.json') as f:
-            config = f.read()
+            self.config_file = f.read()
 
         # 0.1. create at install builds
-        with patch('builtins.open', mock_open(read_data=config)):
-            self.build._schedule()
+        self.build._schedule()
         self.assertEqual(self.build.active_step.id, self.config_step.id)
-        self.assertEqual(self.build.execution_context['dynamic_active_step_index'], 0)
+        self.assertEqual(self.build.dynamic_active_step_index, 0)
         self.assertEqual(len(self.build.children_ids), 2, 'Two sub-builds should have been generated')
         self.assertEqual(self.build.children_ids[0].config_id.id, self.config.id)
         self.assertEqual(self.build.children_ids[1].config_id.id, self.config.id)
@@ -455,7 +461,7 @@ class TestBuildConfigStepDynamic(TestBuildConfigStepCommon):
         self.assertFalse(self.docker_run_calls, "No docker run should have been called yet")
         self.build._schedule()()
         self.assertEqual(self.build.active_step.id, self.config_step.id)
-        self.assertEqual(self.build.execution_context['dynamic_active_step_index'], 1)
+        self.assertEqual(self.build.dynamic_active_step_index, 1)
 
         step_logs = self.build.log_ids[-2:]
         self.assertEqual(step_logs[0].message, Like('Starting step **install_all** from config **Dynamic parallel testing**...'))
@@ -472,7 +478,7 @@ class TestBuildConfigStepDynamic(TestBuildConfigStepCommon):
         # 0.3. create post install builds
         self.build._schedule()
         self.assertEqual(self.build.active_step.id, self.config_step.id)
-        self.assertEqual(self.build.execution_context['dynamic_active_step_index'], 2)
+        self.assertEqual(self.build.dynamic_active_step_index, 2)
         step_logs = self.build.log_ids[-6:]
         self.assertEqual(step_logs[0].message, Like('Step install_all finished in ...'))
         self.assertEqual(step_logs[1].message, 'Starting step **create_post_install** from config **Dynamic parallel testing**')
@@ -484,7 +490,7 @@ class TestBuildConfigStepDynamic(TestBuildConfigStepCommon):
         # 0.4. parent done
         self.build._schedule()
         self.assertEqual(self.build.active_step.id, False)
-        self.assertEqual(self.build.execution_context['dynamic_active_step_index'], 3)
+        self.assertEqual(self.build.dynamic_active_step_index, 3)
         self.assertEqual(self.build.local_state, 'done')
 
         ### Check children
@@ -493,7 +499,9 @@ class TestBuildConfigStepDynamic(TestBuildConfigStepCommon):
 
         # 2.1 at install builds
         self.docker_run_calls = []
+
         at_install._schedule()()
+
         cmd = self.docker_run_calls[0][0]
         odoo_cmd = cmd.cmd
         check_server_cmd(odoo_cmd,

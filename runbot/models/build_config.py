@@ -53,6 +53,9 @@ class Config(models.Model):
     group_name = fields.Char('Group name', related='group.name')
     step_ids = fields.Many2many('runbot.build.config.step', compute='_compute_step_ids')
 
+    dynamic_config_file_path = fields.Char('Dynamic Config File Path', tracking=True)
+    default_dynamic_config = fields.Text('Default Dynamic Config File', tracking=True)
+
     @api.model_create_multi
     def create(self, vals_list):
         res = super(Config, self).create(vals_list)
@@ -205,8 +208,6 @@ class ConfigStep(models.Model):
     break_before_if_ko = fields.Boolean('Break before this step if build is ko')
     break_after_if_ko = fields.Boolean('Break after this step if build is ko')
 
-    # dynamic
-    dynamic_config_file_path = fields.Char('Dynamic Config File Path', tracking=True)
 
     @api.constrains('python_code')
     def _check_python_code(self):
@@ -261,8 +262,8 @@ class ConfigStep(models.Model):
 
     def _get_display_name(self, build):
         if self.job_type == 'dynamic':
-            steps = build.execution_context.get(self._dynamic_config_key(), {}).get('steps', [])
-            index = build.execution_context.get('dynamic_active_step_index', 0)
+            steps = build.dynamic_config.get('steps', [])
+            index = build.dynamic_active_step_index
             if index < len(steps):
                 return steps[index].get('name', '<unnamed>')
         return self.name
@@ -285,8 +286,6 @@ class ConfigStep(models.Model):
 
     def _run(self, build):
         build.write({'job_start': now(), 'job_end': False})  # state, ...
-        if self.job_type == 'dynamic':
-            self._load_dynamic_config(build)
         log = build._log('run', f'Starting step **{self._get_display_name(build)}** from config **{build.params_id.config_id.name}**', log_type='markdown', level='SEPARATOR')
         result = self._run_step(build)
         if callable(result):  # docker step, should have text logs
@@ -327,7 +326,7 @@ class ConfigStep(models.Model):
             child_data_list = [child_data_list]
 
         for child_data in child_data_list:
-            execution_context = child_data.pop('execution_context', {})
+            config_description = child_data.pop('config_description', {})
             for create_config in self.env['runbot.build.config'].browse(child_data.get('config_id', config_ids.ids)):
                 _child_data = {'config_data': {}, **child_data, 'config_id': create_config}
                 for _ in range(config_data.get('number_build', self.number_builds)):
@@ -335,8 +334,8 @@ class ConfigStep(models.Model):
                     if count > 200:
                         build._logger('Too much build created')
                         break
-                    child = build._add_child(_child_data, orphan=self.make_orphan, execution_context=execution_context)
-                    config_name = execution_context.get(self._dynamic_config_key(), {}).get('name', create_config.name)
+                    config_name = config_description or create_config.name
+                    child = build._add_child(_child_data, orphan=self.make_orphan, description=config_name)
                     build._log('create_build', 'created with config %s' % config_name, log_type='subbuild', path=str(child.id))
 
     def _make_python_ctx(self, build):
@@ -1198,7 +1197,7 @@ class ConfigStep(models.Model):
         if build.local_result != 'warn':
             checkers = [
                 self._check_log,
-                self._check_restore_ended
+                self._check_restore_ended,
             ]
             build.local_result = self._get_checkers_result(build, checkers)
 
@@ -1266,30 +1265,31 @@ class ConfigStep(models.Model):
         return modified_files
 
     def _run_dynamic(self, build):
-        dynamic_config = build.execution_context[self._dynamic_config_key()]
-        dynamic_active_step_index = build.execution_context['dynamic_active_step_index']
+        self._check_dynamic_config(build)
+        dynamic_config = build.dynamic_config
+        dynamic_active_step_index = build.dynamic_active_step_index
         if not dynamic_config:
-            build._log('', 'No dynamic config found, skipping', level="ERROR")
+            build._log('', 'No dynamic config found, skipping', level="WARNING")
             return
         steps = dynamic_config.get("steps", [])
         if not steps:
-            build._log('', 'Dynamic config has no steps, skipping', level="ERROR")
+            build._log('', 'Dynamic config has no steps, skipping', level="WARNING")
             return
         current_step = steps[dynamic_active_step_index]
         if current_step['job_type'] == 'create_build':
             per_child_params_list = current_step.get('per_child_params', [{}])
-            parent_params = dynamic_config.get('params', {})
+            parent_params = {**dynamic_config.get('params', {}), **build.params_id.config_data.get('dynamic_params', {})}
             child_data_list = []
-            for child in current_step.get('children', []):
+            for child_index, child in enumerate(current_step.get('children', [])):
                 child_params = child.get('params', {})
                 for per_child_params in per_child_params_list:
                     child_data = {
                         # todo pass config_data in child_data (not needed here yet)
+                        'config_data': {"dynamic_params": {**parent_params, **child_params, **per_child_params}},
                         'config_id': build.params_id.config_id.id,
-                        'execution_context': {
-                            self._dynamic_config_key(): {**child, 'params': {**parent_params, **child_params, **per_child_params}},
-                            'dynamic_active_step_index': 0,
-                        },
+                        'dynamic_active_step_index': 0,
+                        'dynamic_config_position': f'{build.dynamic_config_position or ""}/{build.dynamic_active_step_index}.{child_index}',
+                        'config_description': child.get('name', build.params_id.config_id.name),
                     }
                     child_data_list.append(child_data)
             return self._run_create_build(build, {'child_data': child_data_list, 'number_build': current_step.get('number_builds', 1)})
@@ -1325,7 +1325,7 @@ class ConfigStep(models.Model):
         """
         transforms a module/test-tags entry dynamically
         """
-        dynamic_config = build.execution_context[self._dynamic_config_key()]
+        dynamic_config = build.dynamic_config
 
         def filter_all_modules(selector):
             if selector.split(',', 1)[0] != '*':
@@ -1344,7 +1344,7 @@ class ConfigStep(models.Model):
             'filter_default_modules': filter_default_modules,
             'make_module_test_tags': make_module_test_tags,
         }
-        params = dynamic_config.get('params', {})
+        params = {**dynamic_config.get('params', {}), **build.params_id.config_data.get('dynamic_params', {})}
 
         result = ''
         for i, elem in enumerate(entry.split('{')):
@@ -1370,38 +1370,17 @@ class ConfigStep(models.Model):
             result += rest
         return result
 
-    def _dynamic_config_key(self):
-        return f'dynamic_config_{self.id}'
-
-    def _load_dynamic_config(self, build):
-        if self._dynamic_config_key() not in build.execution_context:
-            build._checkout()
-            dynamic_config = {}
-            for commit in build.params_id.commit_ids:
-                if content := commit._read_source(self.dynamic_config_file_path):
-                    try:
-                        _logger.info(
-                            'Loading dynamic steps from %s in commit %s',
-                            self.dynamic_config_file_path,
-                            commit.repo_id.name,
-                        )
-                        dynamic_config = json.loads(content)
-                    except json.JSONDecodeError as e:
-                        build._log('', f'Failed to parse dynamic config from {self.dynamic_config_file_path} in commit {commit.repo_id.name}: {e}', level='ERROR')
-                    break
-            else:
-                build._log('', f'Failed to load dynamic config from {self.dynamic_config_file_path}', level='ERROR')
-            build.execution_context = {
-                **build.execution_context,
-                self._dynamic_config_key(): dynamic_config,
-                'dynamic_active_step_index': 0,
-            }
+    def _check_dynamic_config(self, build):
+        if len(build.ancestors) > 6:
+            raise RunbotException('Too many ancestors builds, possible cyclic dynamic build creation')
+        if build.parent_id and build.dynamic_config == build.parent_id.dynamic_config:
+            raise RunbotException('A child build cannot load the same dynamic config if parent, recursion detected')
 
     def consume_remaining_tasks(self, build):
         if self.job_type == 'dynamic':
-            next_index = build.execution_context.get('dynamic_active_step_index', 0) + 1
-            build.execution_context = {**build.execution_context, 'dynamic_active_step_index': next_index}
-            steps = build.execution_context.get(self._dynamic_config_key(), {}).get('steps', [])
+            next_index = build.dynamic_active_step_index + 1
+            build.dynamic_active_step_index = next_index
+            steps = build.dynamic_config.get('steps', [])
             return next_index < len(steps)
         return False
 

@@ -3,6 +3,7 @@
 import datetime
 import getpass
 import hashlib
+import json
 import logging
 import pwd
 import re
@@ -207,7 +208,7 @@ class BuildResult(models.Model):
 
     active_step = fields.Many2one('runbot.build.config.step', 'Active step')
     job = fields.Char('Active step display name', compute='_compute_job')
-    execution_context = JsonDictField('Execution Data')  # can be modified at runtime, passed from step to step
+    dynamic_active_step_index = fields.Integer('Dynamic active step index')
     job_start = fields.Datetime('Job start')
     job_end = fields.Datetime('Job end')
     build_start = fields.Datetime('Build start')
@@ -261,6 +262,10 @@ class BuildResult(models.Model):
     static_run = fields.Char('Static run URL')
 
     access_token = fields.Char('Token', default=lambda self: uuid.uuid4().hex)
+
+    dynamic_active_step_index = fields.Integer('Dynamic active step index')
+    dynamic_config_position = fields.Char('Position of this build in the dynamic config')
+    dynamic_config = JsonDictField('Dynamic Config', compute='_compute_dynamic_config')
 
     @api.depends('description', 'params_id.config_id')
     def _compute_display_name(self):
@@ -339,6 +344,33 @@ class BuildResult(models.Model):
         for record in self:
             record.build_error_ids = record.build_error_link_ids.error_content_id.error_id
 
+    @api.depends('config_id')
+    def _compute_dynamic_config(self):
+        for build in self:
+            dynamic_config = {}
+            file_path = build.params_id.config_data.get('dynamic_config_file_path', build.config_id.dynamic_config_file_path)
+            if file_path:
+                for commit in build.params_id.commit_ids:
+                    try:
+                        if content := commit._git_show_file(file_path):
+                            dynamic_config = json.loads(content)
+                            break
+                    except Exception as e:
+                        build._log('', f'Failed to load dynamic config from {file_path} in commit {commit.repo_id.name}: {e}', level='ERROR')
+                        break
+            if not dynamic_config and build.config_id.default_dynamic_config:
+                dynamic_config = json.loads(build.config_id.default_dynamic_config)
+            if build.dynamic_config_position:
+                positions = build.dynamic_config_position.strip('/').split('/')
+                try:
+                    for pos in positions:
+                        step, child = pos.split('.')
+                        dynamic_config = dynamic_config['steps'][int(step)]['children'][int(child)]
+                except (KeyError, IndexError):
+                    _logger.warning('Failed to get dynamic config at position %s for build %s', build.dynamic_config_position, build.id)
+                    dynamic_config = {}
+            build.dynamic_config = dynamic_config
+
     def _get_worst_result(self, results, max_res=False):
         results = [result for result in results if result]  # filter Falsy values
         index = max([self._get_result_score(result) for result in results]) if results else 0
@@ -411,7 +443,9 @@ class BuildResult(models.Model):
 
         return res
 
-    def _add_child(self, param_values, orphan=False, description=False, additionnal_commit_links=False, execution_context=False):
+    def _add_child(self, param_values, orphan=False, description=False, additionnal_commit_links=False):
+        build_values = {key: value for key, value in param_values.items() if key not in self.params_id._fields}
+        param_values = {key: value for key, value in param_values.items() if key in self.params_id._fields}
 
         if len(self.parent_path.split('/')) > 8:
             self._log('_run_create_build', 'This is too deep, skipping create')
@@ -430,7 +464,7 @@ class BuildResult(models.Model):
             'orphan_result': orphan,
             'keep_host': self.keep_host,
             'host': self.host if self.keep_host else False,
-            'execution_context': execution_context,
+            **build_values,
         })
 
     def _result_multi(self):
