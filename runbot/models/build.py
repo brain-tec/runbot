@@ -207,6 +207,7 @@ class BuildResult(models.Model):
 
     active_step = fields.Many2one('runbot.build.config.step', 'Active step')
     job = fields.Char('Active step display name', compute='_compute_job')
+    execution_context = JsonDictField('Execution Data')  # can be modified at runtime, passed from step to step
     job_start = fields.Datetime('Job start')
     job_end = fields.Datetime('Job end')
     build_start = fields.Datetime('Build start')
@@ -410,7 +411,7 @@ class BuildResult(models.Model):
 
         return res
 
-    def _add_child(self, param_values, orphan=False, description=False, additionnal_commit_links=False):
+    def _add_child(self, param_values, orphan=False, description=False, additionnal_commit_links=False, execution_context=False):
 
         if len(self.parent_path.split('/')) > 8:
             self._log('_run_create_build', 'This is too deep, skipping create')
@@ -429,6 +430,7 @@ class BuildResult(models.Model):
             'orphan_result': orphan,
             'keep_host': self.keep_host,
             'host': self.host if self.keep_host else False,
+            'execution_context': execution_context,
         })
 
     def _result_multi(self):
@@ -722,8 +724,6 @@ class BuildResult(models.Model):
                 build._log('wake_up', 'Waking up failed, **docker is already running**', log_type='markdown', level='SEPARATOR')
             else:
                 try:
-                    log_path = build._path('logs', 'wake_up.txt')
-
                     port = self._find_port()
                     build.write({
                         'job_start': now(),
@@ -823,7 +823,11 @@ class BuildResult(models.Model):
                 self.local_state = 'done'
                 self.local_result = 'ko'
                 return False
-            next_index = list(step_ids).index(self.active_step) + 1
+            current_index = list(step_ids).index(self.active_step)
+            if self.active_step.consume_remaining_tasks(build):
+                next_index = current_index
+            else:
+                next_index = current_index + 1
 
         while True:
             if next_index >= len(step_ids):  # final job, build is done
@@ -988,7 +992,7 @@ class BuildResult(models.Model):
                             module,
                             commit._source_path(addons_path, module, manifest_file_name),
                             all_modules[module]._source_path(addons_path, module, manifest_file_name)),
-                        level='WARNING'
+                        level='WARNING',
                     )
                 else:
                     available_modules[commit.repo_id].append(module)

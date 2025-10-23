@@ -30,6 +30,9 @@ class RunbotCase(TransactionCase):
                 _logger.warning('Unsupported mock command %s' % cmd)
         return mock_git
 
+    def docker_run_patch(self, cmd, log_path, *args, **kwargs):
+        self.docker_run_calls.append((cmd, log_path, args, kwargs))
+
     def push_commit(self, remote, branch_name, subject, sha=None, tstamp=None, committer=None, author=None):
         """Helper to simulate a commit pushed"""
 
@@ -69,12 +72,32 @@ class RunbotCase(TransactionCase):
             'name': 'server',
             'project_id': self.project.id,
             'server_files': 'server.py',
-            'addons_paths': 'addons,core/addons'
+            'addons_paths': 'addons,core/addons',
+            'modules': '-hw_*',
         })
         self.repo_addons = self.Repo.create({
             'name': 'addons',
             'project_id': self.project.id,
+            'modules': '-l10n_*',
         })
+        self.addons_per_repo = {
+            self.repo_server: [
+                ('odoo/addons', 'base', '__manifest__.py'),
+                ('odoo/addons', 'test_lint', '__manifest__.py'),
+                ('addons', 'mail', '__manifest__.py'),
+                ('addons', 'web', '__manifest__.py'),
+                ('addons', 'crm', '__manifest__.py'),
+                ('addons', 'project', '__manifest__.py'),
+                ('addons', 'hw_drivers', '__manifest__.py'),
+
+            ],
+            self.repo_addons: [
+                ('', 'documents', '__manifest__.py'),
+                ('', 'web_enterprise', '__manifest__.py'),
+                ('', 'l10n_be', '__manifest__.py'),
+                ('', 'l10n_in', '__manifest__.py'),
+            ],
+        }
 
         self.remote_server = self.Remote.create({
             'name': 'bla@example.com:base/server',
@@ -169,6 +192,7 @@ class RunbotCase(TransactionCase):
         self.patchers = {}
         self.patcher_objects = {}
         self.commit_list = {}
+        self.docker_run_calls = []
         self.diff = ''
         self.start_patcher('git_patcher', 'odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper())
         self.start_patcher('hostname_patcher', 'odoo.addons.runbot.common.socket.gethostname', 'host.runbot.com')
@@ -179,7 +203,7 @@ class RunbotCase(TransactionCase):
         self.start_patcher('host_local_pg_cursor', 'odoo.addons.runbot.models.host.local_pg_cursor')
         self.start_patcher('isdir', 'odoo.addons.runbot.common.os.path.isdir', True)
         self.start_patcher('isfile', 'odoo.addons.runbot.common.os.path.isfile', True)
-        self.start_patcher('docker_run', 'odoo.addons.runbot.container._docker_run')
+        self.start_patcher('docker_run', 'odoo.addons.runbot.container._docker_run', new=self.docker_run_patch)
         self.start_patcher('docker_build', 'odoo.addons.runbot.container._docker_build')
         self.start_patcher('docker_push', 'odoo.addons.runbot.container._docker_push')
         self.start_patcher('docker_prune', 'odoo.addons.runbot.container._docker_prune')
@@ -201,8 +225,14 @@ class RunbotCase(TransactionCase):
         self.start_patcher('_local_pg_createdb', 'odoo.addons.runbot.models.build.BuildResult._local_pg_createdb', True)
         self.start_patcher('getmtime', 'odoo.addons.runbot.common.os.path.getmtime', datetime.datetime.now().timestamp())
         self.start_patcher('file_exist', 'odoo.tools.misc.os.path.exists', True)
-
         self.start_patcher('_get_py_version', 'odoo.addons.runbot.models.build.BuildResult._get_py_version', 3)
+        self.start_patcher('_write_file', 'odoo.addons.runbot.models.build.BuildResult._write_file', None)
+        self.start_patcher('_parse_config', 'odoo.addons.runbot.models.build.BuildResult._parse_config', {'--test-enable', '--test-tags', '--with-demo'})
+
+        def get_available_modules(self_commit):
+            return self.addons_per_repo.get(self_commit.repo_id, [])
+
+        self.start_patcher('_get_available_modules', 'odoo.addons.runbot.models.commit.Commit._get_available_modules', new=get_available_modules)
 
         def no_commit(*_args, **_kwargs):
             _logger.info('Skipping commit')

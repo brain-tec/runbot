@@ -1,0 +1,60 @@
+{
+    "name": "Parallel testing",
+    "params": {
+        "module_blacklist": "-hw_*,-l10n_*"
+    },
+    "steps": [
+        {
+            "name": "create_at_install",
+            "job_type": "create_build",
+            "children": [
+                {
+                    "name": "Test at install",
+                    "steps":[{
+                        "job_type": "odoo",
+                        "install_modules": "*,{module_blacklist}",
+                        "test-tags": "-post_install"
+                    }]
+                },
+                {
+                    "name": "Test pylint",
+                    "steps":[{
+                        "name": "test_pylint",
+                        "job_type": "odoo",
+                        "install_modules": "test_lint",
+                        "test-tags": "/test_lint",
+                        "enable_auto_tags": false
+                    }]
+                }
+            ]
+        },
+        {
+            "name": "install_all",
+            "db_name": "all",
+            "job_type": "odoo",
+            "install_modules": "*,{module_blacklist}"
+        },
+        {
+            "name": "create_post_install",
+            "job_type": "create_build",
+            "per_child_params": [
+                {"split_test_module_selector": "%module% < mail"},
+                {"split_test_module_selector": "mail <= %module% < web"},
+                {"split_test_module_selector": "%module% == web"},
+                {"split_test_module_selector": "web < %module%"}
+            ],
+            "children": [{
+                "name": "Test Post Install",
+                "steps": [
+                    {"name": "restore", "job_type": "restore", "db_name": "all"},
+                    {
+                        "name": "test_post_install",
+                        "job_type": "odoo",
+                        "test-tags": "-at_install,{split_test_module_selector|filter_all_modules|make_module_test_tags}",
+                        "db_name": "all"
+                    }
+                ]
+            }]
+        }
+    ]
+}

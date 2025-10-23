@@ -140,11 +140,45 @@ class Trigger(models.Model):
         return []
 
     def _filter_modules_to_test(self, modules, module_patterns=None):
+        if module_patterns == '-*':
+            return []
         repo_module_patterns = {}
         for module_filter in self.module_filters:
             repo_module_patterns.setdefault(module_filter.repo_id, [])
             repo_module_patterns[module_filter.repo_id] += module_filter.modules.split(',')
         module_patterns = module_patterns or []
+
+        def _parse_filter(elems):
+            if len(elems) == 5:
+                f1 = _parse_filter(elems[:3])
+                f2 = _parse_filter(elems[2:])
+                return lambda mod: f1(mod) and f2(mod)
+            if len(elems) == 3:
+                mod, op, compare = elems
+                if compare == '%module%':
+                    compare = mod
+                    mod = '%module%'
+                    if '<' in op:
+                        op = op.replace('<', '>')
+                    elif '>' in op:
+                        op = op.replace('>', '<')
+                if mod != '%module%':
+                    raise UserError('Invalid module filter pattern, one of the element must be %%module%%: %s' % ' '.join(elems))
+                if op == '<':
+                    return lambda mod: mod < compare
+                elif op == '<=':
+                    return lambda mod: mod <= compare
+                elif op == '==':
+                    return lambda mod: mod == compare
+                elif op == '!=':
+                    return lambda mod: mod != compare
+                elif op == '>':
+                    return lambda mod: mod > compare
+                elif op == '>=':
+                    return lambda mod: mod >= compare
+                else:
+                    raise UserError('Invalid module filter operator: %s' % op)
+            raise UserError('Invalid module filter pattern: %s' % ' '.join(elems))
 
         def _filter_patterns(patterns_list, default, all):
             current = set(default)
@@ -152,7 +186,14 @@ class Trigger(models.Model):
                 pat = pat.strip()
                 if not pat:
                     continue
-                if pat.startswith('-'):
+                if pat == '-*':
+                    current = set()
+                elif pat == '*':
+                    current = set(all)
+                elif '%module%' in pat:
+                    mod_filter = _parse_filter(pat.split(' '))
+                    current = {mod for mod in current if mod_filter(mod)}
+                elif pat.startswith('-'):
                     pat = pat.strip('- ')
                     current -= {mod for mod in current if fnmatch.fnmatch(mod, pat)}
                 elif pat:
