@@ -317,8 +317,11 @@ class ConfigStep(models.Model):
         return True
 
     def _run_create_build(self, build, config_data=None):
+        if config_data:
+            config_data = {**config_data, **build.params_id.config_data}
+        else:
+            config_data = build.params_id.config_data
         count = 0
-        config_data = {**config_data, **build.params_id.config_data}
         config_ids = config_data.get('create_config_ids', self.create_config_ids)
 
         child_data_list = config_data.get('child_data', [{}])
@@ -445,7 +448,11 @@ class ConfigStep(models.Model):
         return dict(cmd=cmd, exposed_ports=[build_port, build_port + 1], ro_volumes=exports, env_variables=env_variables, cpu_limit=None, network_enabled=True)
 
     def _run_install_odoo(self, build, config_data=None):
-        config_data = {**config_data, **build.params_id.config_data}
+
+        if config_data:
+            config_data = {**config_data, **build.params_id.config_data}
+        else:
+            config_data = build.params_id.config_data
         exports = build._checkout()
         install_module_pattern = config_data.get('install_module_pattern', self.install_modules)
         modules_to_install = build._get_modules_to_test(install_module_pattern)
@@ -491,7 +498,7 @@ class ConfigStep(models.Model):
         test_tags_in_extra = '--test-tags' in extra_params
 
         if (test_enable or test_tags) and "--test-tags" in available_options and not test_tags_in_extra:
-            test_tags = [t.strip() for t in test_tags.split(',')]
+            test_tags = [t.strip() for t in (test_tags or '').split(',')]
             if enable_auto_tags and not config_data.get('disable_auto_tags', False):
                 if grep(config_path, "[/module][:class]"):
                     auto_tags = self.env['runbot.build.error']._disabling_tags(build)
@@ -827,10 +834,13 @@ class ConfigStep(models.Model):
             env_variables += config_env_variables.split(';')
         return dict(cmd=migrate_cmd, ro_volumes=exports, env_variables=env_variables, image_tag=target.params_id.dockerfile_id.image_tag)
 
-    def _run_restore(self, build, config_data):
+    def _run_restore(self, build, config_data=None):
         # exports = build._checkout()
         params = build.params_id
-        config_data = {**config_data, **params.config_data}
+        if config_data:
+            config_data = {**config_data, **params.config_data}
+        else:
+            config_data = params.config_data
         dump_db = params.dump_db
         default_target_suffix = 'all'
         if 'dump_url' in config_data:
@@ -851,6 +861,7 @@ class ConfigStep(models.Model):
                     reference_batch = build.params_id.create_batch_id
                 else:
                     reference_batch = build.params_id.create_batch_id.base_reference_batch_id
+                reference_build = reference_batch.slot_ids.filtered(lambda s: s.trigger_id == dump_trigger).mapped('build_id')
             if reference_build:
                 dump_suffix = config_data.get('dump_suffix', 'all')
                 reference_build = reference_batch.slot_ids.filtered(lambda s: s.trigger_id == dump_trigger).mapped('build_id')
@@ -1039,7 +1050,7 @@ class ConfigStep(models.Model):
                     # we want to omit docker_source_folder/[addons/path/]module/*
                     module_path_in_docker = os.sep.join([docker_source_folder, addons_path, module])
                     pattern_to_omit.add('%s/*' % (module_path_in_docker))
-        return ['--omit', ','.join(pattern_to_omit)]
+        return ['--omit', ','.join(sorted(pattern_to_omit))]
 
     def _make_results(self, build):
         log_time = self._get_log_last_write(build)
