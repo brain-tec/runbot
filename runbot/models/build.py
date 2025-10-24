@@ -366,7 +366,7 @@ class BuildResult(models.Model):
     @api.depends('active_step')
     def _compute_job(self):
         for build in self:
-            build.job = build.active_step.name
+            build.job = build.active_step.sudo().name
 
     def copy_data(self, default=None):
         values = super().copy_data(default)[0] or {}
