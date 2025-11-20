@@ -240,6 +240,7 @@ class Config(models.Model):
             'job_type': 'create_build',
             'children': REQUIRED(LIST(CONFIG)),
             'for_each_vars': OPTIONAL(LIST(VARS)),
+            'for_each_module': OPTIONAL(DYNAMIC_VALUE),
         }
         valid_steps['restore'] = {
             'name': REQUIRED(NAME),
@@ -1602,6 +1603,15 @@ class ConfigStep(models.Model):
             return
         if current_step['job_type'] == 'create_build':
             for_each_vars_list = current_step.get('for_each_vars', [{}])
+            if 'for_each_module' in current_step:
+                modules_vars = []
+                for for_each_vars in for_each_vars_list:
+                    modules_entry = self._parse_dynamic_entry(current_step['for_each_module'], build, additional_dynamic_vars=for_each_vars)
+                    modules = [m.strip() for m in modules_entry.split(',') if m.strip()]
+                    for module in modules:
+                        module_vars = {**for_each_vars, 'module': module}
+                        modules_vars.append(module_vars)
+                for_each_vars_list = modules_vars
             parent_vars = {**build.dynamic_config.get('vars', {}), **build.params_id.config_data.get('dynamic_vars', {})}
             child_data_list = []
             for child_index, child in enumerate(current_step.get('children', [])):

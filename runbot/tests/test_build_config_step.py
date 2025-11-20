@@ -696,6 +696,37 @@ class TestBuildConfigStepDynamic(TestBuildConfigStepCommon):
                 test_module_filter = post_install.params_id.config_data['dynamic_vars']['test_module_filter']
                 self.assertEqual(post_install.description, f'Post install tests for **{test_module_filter}**')
 
+    def test_foreach_module(self):
+        dynamic_config = '''{
+            "name": "Foreach module testing",
+            "steps": [{
+                "name": "Create module builds",
+                "job_type": "create_build",
+                "for_each_module": "{{-test_*|filter_default_modules}}",
+                "children": [{
+                    "name": "Test single module",
+                    "description": "Post install tests for **{{module}}**",
+                    "steps": [{
+                        "name": "Start single module test",
+                        "job_type": "odoo",
+                        "install_modules": "{{module}}",
+                        "test_tags": "{{module|make_module_test_tags}}"
+                    }]
+                }]
+            }]
+        }'''
+        self.config.default_dynamic_config = dynamic_config
+        self.config.step_ids[0]._run_dynamic(self.build)
+        self.assertEqual(self.build.children_ids.mapped('description'),
+            [
+                'Post install tests for **base**',
+                'Post install tests for **crm**',
+                'Post install tests for **documents**',
+                'Post install tests for **mail**',
+                'Post install tests for **project**',
+                'Post install tests for **web**',
+                'Post install tests for **web_enterprise**',
+        ])
 
 
 class TestBuildConfigStep(TestBuildConfigStepCommon):

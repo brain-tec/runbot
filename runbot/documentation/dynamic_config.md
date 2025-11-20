@@ -109,6 +109,7 @@ test_tags is also a dynamic value and can use variables, as well as [filter](#fi
     'job_type': 'create_build',
     'children': REQUIRED(LIST(CONFIG)),
     'for_each_vars': OPTIONAL(LIST(VARS)),
+    'for_each_module': OPTIONAL(DYNAMIC_VALUE),
 }
 ```
 
@@ -198,6 +199,10 @@ This is how the runbot post install builds are created, using [filters](#filters
     }]
 }
 ```
+
+`for_each_module` allow to create one child per selected module (comma separated list, can be a dynamic value)
+``` "for_each_module": "base,web,mail",```
+``` "for_each_module": "{{*|filter_all_modules}}",```
 
 ### Restore steps
 
