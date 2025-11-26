@@ -1,0 +1,41 @@
+{
+    "extends": ["eslint:recommended"],
+    "parserOptions": {
+        "sourceType": "module",
+        "ecmaVersion": 2022
+    },
+    "env": {
+        "browser": true,
+        "es6": true
+    },
+    "rules": {
+        "no-undef": "error",
+        "no-restricted-globals": ["error", "event", "self"],
+        "no-const-assign": ["error"],
+        "no-debugger": ["error"],
+        "no-dupe-class-members": ["error"],
+        "no-dupe-keys": ["error"],
+        "no-dupe-args": ["error"],
+        "no-dupe-else-if": ["error"],
+        "no-unsafe-negation": ["error"],
+        "no-duplicate-imports": ["error"],
+        "valid-typeof": ["error"],
+        "no-unused-vars": ["error", { "vars": "all", "args": "none", "ignoreRestSiblings": false, "caughtErrors": "all" }],
+        "curly": ["error", "all"],
+        "no-restricted-syntax": ["error", "PrivateIdentifier"],
+        "prefer-const": ["error", {
+            "destructuring": "all",
+            "ignoreReadBeforeAssign": true
+        }],
+        "arrow-body-style": ["error", "as-needed"],
+        "comma-dangle": ["error", "always-multiline"],
+        "no-trailing-spaces": ["error"],
+        "semi": ["error", "always"]
+    },
+    "globals": {
+        "diff_match_patch": "readonly",
+        "$": "readonly",
+        "jQuery": "readonly",
+        "Chart": "readonly"
+    }
+}
