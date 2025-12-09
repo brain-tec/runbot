@@ -55,7 +55,11 @@ class Bundle(models.Model):
     # extra_info
     description = fields.Char('Description', compute='_compute_description', store=True, readonly=False)
     tag_ids = fields.Many2many('runbot.bundle.tag', string='Tags')
-    team_id = fields.Many2one('runbot.team', compute='_compute_team_id', store=True, readonly=False)
+    author_ids = fields.Many2many('res.users', string='Involved Users', compute='_compute_author_ids', domain=[('share', '=', False)])
+    team_ids = fields.Many2many('runbot.team', string='Involved Teams', compute='_compute_team_ids')
+    team_id = fields.Many2one('runbot.team', string='Owning Team', compute='_compute_team_id', inverse='_inverse_team_id', store=True, tracking=True)
+    manual_team_id = fields.Many2one('runbot.team', 'Manually set team')
+    auto_team_id = fields.Many2one('runbot.team', 'Automatically set team', compute='_compute_auto_team_id', readonly=True)
 
     def _compute_frontend_url(self):
         for bundle in self:
@@ -199,19 +203,58 @@ class Bundle(models.Model):
                 parent_bundle = self.env['runbot.bundle'].search([('name', '=', targets.pop())])
                 bundle.all_trigger_custom_ids = parent_bundle.all_trigger_custom_ids
 
-    @api.depends('name')
-    def _compute_team_id(self):
-        ngram_re = re.compile(r'.+\((?P<ngram>[a-z]{2,4})\)$')
-        team_by_ngram_project = dict()
-        for team in self.env['runbot.team'].search([('module_ownership_ids', '!=', False)]):
-            for user in team.user_ids:
-                if m := ngram_re.match(user.name.lower()):
-                    team_by_ngram_project[m.group('ngram'), team.project_id] = team
-        for bundle in self:
-            if bundle.is_base or not bundle.name:
+    @api.depends('name', 'branch_ids.head', 'branch_ids.pr_author')
+    def _compute_author_ids(self):
+        valid_bundle_name_re = re.compile(r'^.{3,6}-.*-.{2,5}$')
+        self.author_ids = self.env['res.users'].browse()
+        bundles = self.filtered(lambda b: not b.sticky and not b.is_base and not b.is_staging and valid_bundle_name_re.match(b.name))
+        github_logins_by_bundle = {bundle: set(bundle.branch_ids.filtered('is_pr').mapped('pr_author')) for bundle in bundles}
+        all_github_logins = set()
+        for gl in github_logins_by_bundle.values():
+            all_github_logins |= gl
+        user_ids_by_github_login = {u.github_login: u.id for u in self.env['res.users'].search([('share', '=', False), ('github_login', 'in', all_github_logins)])}
+        for bundle, github_logins in github_logins_by_bundle.items():
+            if users_ids := list(filter(None, {user_ids_by_github_login.get(gl) for gl in github_logins})):
+                bundle.author_ids = users_ids
+
+        user_ids_by_email = {u.email: u.id for u in self.env['res.users'].search([('share', '=', False)])}
+        for bundle in bundles:
+            emails = set()
+            emails.update(bundle.branch_ids.head.mapped(lambda rec: rec.committer_email and rec.committer_email.strip('<>')))
+            emails.update(bundle.branch_ids.head.mapped(lambda rec: rec.author_email and rec.author_email.strip('<>')))
+            if users_ids := list(filter(None, {user_ids_by_email.get(e) for e in emails})):
+                bundle.author_ids |= self.env['res.users'].browse(users_ids)
+                bundles -= bundle
+
+        if not bundles:
+            return
+
+        ngram_re = re.compile(r'.+\(([a-z]{2,5})\)$')
+        user_ids_by_ngram = {u[1][0]: u[0] for u in self.env['res.users'].search([('share', '=', False)]).mapped(lambda rec: (rec.id, ngram_re.findall(rec.complete_name))) if u[1]}
+        for bundle in bundles:
+            if not bundle.name:
                 continue
             bundle_ngram = bundle.name.split('-')[-1].lower()
-            bundle.team_id = team_by_ngram_project.get((bundle_ngram, bundle.project_id))
+            bundle.author_ids = list(filter(None, [user_ids_by_ngram.get(bundle_ngram)]))
+
+    @api.depends('author_ids')
+    def _compute_team_ids(self):
+        for bundle in self:
+            bundle.team_ids = bundle.author_ids.runbot_team_ids.filtered(lambda rec: rec.module_ownership_ids)
+
+    @api.depends('manual_team_id', 'auto_team_id')
+    def _compute_team_id(self):
+        for bundle in self:
+            bundle.team_id = bundle.manual_team_id or bundle.auto_team_id
+
+    @api.depends('name')
+    def _compute_auto_team_id(self):
+        for bundle in self:
+            bundle.auto_team_id = bundle.team_ids and bundle.team_ids[0]
+
+    def _inverse_team_id(self):
+        self.manual_team_id = self.team_id
+
 
     @api.depends('branch_ids')
     def _compute_description(self):
@@ -346,6 +389,7 @@ class BundleTag(models.Model):
 
     _name = "runbot.bundle.tag"
     _description = "Bundle tag"
+    _order = "id desc, name"
 
     name = fields.Char(string='Bundle Tag')
     bundle_ids = fields.Many2many('runbot.bundle', string='Bundles')
