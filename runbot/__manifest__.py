@@ -8,7 +8,7 @@
     'category': 'Website',
     'version': '5.14',
     'application': True,
-    'depends': ['base', 'base_automation', 'website'],
+    'depends': ['base', 'base_automation', 'website', 'auth_oauth'],
     'data': [
         'security/runbot_security.xml',
         'security/ir.model.access.csv',
@@ -39,6 +39,8 @@
         'templates/build_error.xml',
         'templates/batches_by_date.xml',
         'templates/commit_link_details.xml',
+        'templates/bundles_by_tag.xml',
+        'templates/versions.xml',
 
         'views/branch_views.xml',
         'views/build_error_link_views.xml',
@@ -52,6 +54,7 @@
         'views/dashboard_views.xml',
         'views/dockerfile_views.xml',
         'views/host_views.xml',
+        'views/oauth_provider_views.xml',
         'views/repo_views.xml',
         'views/res_config_settings_views.xml',
         'views/stat_views.xml',

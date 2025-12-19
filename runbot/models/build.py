@@ -44,6 +44,20 @@ COPY_WHITELIST = [
 USERUID = os.getuid()
 USERNAME = getpass.getuser()
 
+
+def remove_readonly(func, path_str, exinfo):
+    if isinstance(exinfo, PermissionError):
+        f = Path(path_str)
+        perm = f.stat().st_mode | 0o00600
+        f.chmod(perm)
+        try:
+            pperm = f.parent.stat().st_mode | 0o00700
+            f.parent.chmod(pperm)
+        except PermissionError:
+            _logger.warning("Cannot change permission on parent dir: %s", f.parent)
+        func(path_str)
+
+
 def make_selection(array):
     return [(elem, elem.replace('_', ' ').capitalize()) if isinstance(elem, str) else elem for elem in array]
 
@@ -712,11 +726,17 @@ class BuildResult(models.Model):
                 gcstamp = build_dir / '.gcstamp'
                 for bdir_file in build_dir.iterdir():
                     if bdir_file.is_dir() and bdir_file.name not in ('logs', 'tests'):
-                        shutil.rmtree(bdir_file)
+                        try:
+                            shutil.rmtree(bdir_file, onexc=remove_readonly)
+                        except Exception:
+                            _logger.exception('Failed to remove %s', bdir_file)
                     elif bdir_file.name == 'logs':
                         for log_file_path in bdir_file.iterdir():
                             if log_file_path.is_dir():
-                                shutil.rmtree(log_file_path)
+                                try:
+                                    shutil.rmtree(log_file_path, onexc=remove_readonly)
+                                except Exception:
+                                    _logger.exception('Failed to remove %s', log_file_path)
                             elif log_file_path.name in ('run.txt', 'wake_up.txt'):
                                 log_file_path.unlink()
                             elif log_file_path.name.endswith('.zip'):
@@ -1193,6 +1213,27 @@ class BuildResult(models.Model):
             for addons_path in (commit.repo_id.addons_paths or '').split(','):
                 if os.path.isdir(commit._source_path(addons_path)):
                     yield os.sep.join([repo_folder, addons_path]).strip(os.sep)
+
+    def _modified_files(self, commit_link_links=None):
+        modified_files = {}
+        if commit_link_links is None:
+            commit_link_links = self.params_id.commit_link_ids
+        for commit_link in commit_link_links:
+            commit = commit_link.commit_id
+            modified = commit.repo_id._git(['diff', '--name-only', '%s..%s' % (commit_link.merge_base_commit_id.name, commit.name)])
+            if modified:
+                files = [os.sep.join([self._docker_source_folder(commit), file]) for file in modified.split('\n') if file]
+                modified_files[commit_link] = files
+        return modified_files
+
+    def _modified_modules(self, commit_link_links=None):
+        modified_files = self._modified_files(commit_link_links)
+        modified_modules = set()
+        for commit_link, files in modified_files.items():
+            commit = commit_link.commit_id
+            for file in files:
+                modified_modules.add(commit.repo_id._get_module(file))
+        return modified_modules
 
     def _get_upgrade_path(self):
         for commit in (self.env.context.get('defined_commit_ids') or self.params_id.commit_ids):
