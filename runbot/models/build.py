@@ -148,16 +148,18 @@ class BuildParameters(models.Model):
                 extensions = []
                 for commit in build_param.commit_ids.sorted(key=lambda c: (c.repo_id.sequence, c.repo_id.id)):
                     for path in file_path.split(','):
-                        try:
-                            if content := commit._git_show_file(path):
-                                file_dynamic_config = json.loads(content)
-                                if file_dynamic_config.get('extension'):
-                                    extensions.append(file_dynamic_config)
-                                else:
-                                    base_config = file_dynamic_config
-                                break
-                        except Exception as e:
-                            build_param.create_batch_id._log(f'Failed to load dynamic config from {file_path} in commit {commit.repo_id.name}: {e}', level='ERROR')
+                        repo, path = path.split(':', 1) if ':' in path else (None, path)
+                        if not repo or commit.repo_id.name == repo:
+                            try:
+                                if content := commit._git_show_file(path):
+                                    file_dynamic_config = json.loads(content)
+                                    if file_dynamic_config.get('extension'):
+                                        extensions.append(file_dynamic_config)
+                                    else:
+                                        base_config = file_dynamic_config
+                                    break
+                            except Exception as e:
+                                build_param.create_batch_id._log(f'Failed to load dynamic config from {file_path} in commit {commit.repo_id.name}: {e}', level='ERROR')
                 extensions.append(default_config_extension)
                 config = base_config
                 for extension in extensions:
@@ -968,7 +970,7 @@ class BuildResult(models.Model):
                 build._log("run", message, level='ERROR')
                 build._kill(result='ko')
 
-    def _docker_run(self, step, cmd=None, ro_volumes=None, **kwargs):
+    def _docker_run(self, step, cmd=None, ro_volumes=None, env_variables=None, **kwargs):
         self.ensure_one()
         _ro_volumes = ro_volumes or {}
         ro_volumes = {}
@@ -1024,12 +1026,15 @@ class BuildResult(models.Model):
         build_dir = self._path()
         container_name = self._get_docker_name()
         self.env.flush_all()
+        env_variables = env_variables or []
+        env_variables.append('ODOO_RUNBOT=1')
         def start_docker():
             docker_run(
                 cmd=cmd,
                 container_name=container_name,
                 build_dir=build_dir,
                 log_path=log_path,
+                env_variables=env_variables,
                 ro_volumes=ro_volumes, **kwargs)
         return start_docker
 

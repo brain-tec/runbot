@@ -79,6 +79,9 @@ class Trigger(models.Model):
     ci_context = fields.Char("CI context", tracking=True)
     category_id = fields.Many2one('runbot.category', default=lambda self: self.env.ref('runbot.default_category', raise_if_not_found=False))
     version_domain = fields.Char(string="Version domain")
+    on_staging = fields.Boolean('Run on staging', default=True)
+    on_base = fields.Boolean('Run on base', default=True)
+    on_dev = fields.Boolean('Run on dev', default=True)
     hide = fields.Boolean('Hide trigger on main page')
     manual = fields.Boolean('Only start trigger manually', default=False)
     restore_trigger_id = fields.Many2one('runbot.trigger', string='Restore Trigger ID for custom triggers', help="Mainly usefull to automatically define where to find a reference database when creating a custom trigger", tracking=True)
@@ -520,9 +523,10 @@ class Repo(models.Model):
         cmd = ['git', '-C', self.path] + config_args + cmd
         return cmd
 
-    def _git(self, cmd, errors='strict'):
+    def _git(self, cmd, errors='strict', quiet=False):
         cmd = self._get_git_command(cmd, errors)
-        _logger.info("git command: %s", shlex.join(cmd))
+        if not quiet:
+            _logger.info("git command: %s", shlex.join(cmd))
         return subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode(errors=errors)
 
     def _fetch(self, sha):
@@ -543,7 +547,7 @@ class Repo(models.Model):
         """ Verify that a commit hash exists in the repo """
         self.ensure_one()
         try:
-            self._git(['cat-file', '-e', commit_hash])
+            self._git(['cat-file', '-e', commit_hash], quiet=True)
         except subprocess.CalledProcessError:
             return False
         return True
@@ -759,11 +763,6 @@ class Repo(models.Model):
                     message = 'Failed to fetch repo %s: %s' % (self.name, e.output.decode())
                     host = self.env['runbot.host']._get_current()
                     host.message_post(body=message)
-                    icp = self.env['ir.config_parameter'].sudo()
-                    if icp.get_param('runbot.runbot_disable_host_on_fetch_failure'):
-                        self.env['runbot.runbot']._warning('Host %s got reserved because of fetch failure' % host.name)
-                        _logger.exception(message)
-                        host._disable()
         return success
 
     def _update(self, force=False, poll_delay=5*60):
