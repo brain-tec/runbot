@@ -128,17 +128,18 @@ class Dockerfile(models.Model):
         help='This field is used to define variants of docker images. Variants implicitly inherit from the parent and have an implicit reference_file layer.'
     )
     active = fields.Boolean('Active', default=True, tracking=True)
-    auto_sync = fields.Boolean('Auto sync', help='Automatically sync the identifier with the future identifier', default=False, tracking=True)
+    auto_sync = fields.Boolean('Auto sync', help='Automatically sync the identifier with the future identifier', default=lambda self: not self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_dockerfile_disable_auto_sync_by_default', False), tracking=True)
     pull_on_build = fields.Boolean('Pull on build ', help='Add pull option when building to get the latest version of the FROM', default=False, tracking=True)
     image_identifier = fields.Char('Identifier', tracking=True)
     image_future_identifier = fields.Char('Future Identifier', tracking=True)
     image_previous_identifier = fields.Char('Previous Identifier', tracking=True)
+    has_future = fields.Boolean(compute='_compute_has_future', store=True)
     image_tag = fields.Char(compute='_compute_image_tag', recursive=True, store=True)
     image_future_tag = fields.Char(compute='_compute_image_helper_tags')
     image_previous_tag = fields.Char(compute='_compute_image_helper_tags')
     dockerfile = fields.Text(compute='_compute_dockerfile', recursive=True, tracking=True)
     in_error = fields.Boolean('In error', help='The last build failed.', default=False)
-    to_build = fields.Boolean('To Build', help='Build Dockerfile. Check this when the Dockerfile is ready.', default=False)
+    to_build = fields.Boolean('To Build', help='Build Dockerfile. Check this when the Dockerfile is ready.', default=True)
     always_pull = fields.Boolean('Always pull', help='Always Pull on the hosts, not only at the use time', default=False, tracking=True, copy=False)
     version_ids = fields.One2many('runbot.version', 'dockerfile_id', string='Versions')
     description = fields.Text('Description')
@@ -158,9 +159,10 @@ class Dockerfile(models.Model):
     variant_ids = fields.One2many('runbot.dockerfile', 'parent_id', string='Variants', help="Variants of this dockerfile, they inherit the parent dockerfile layers and can add their own layers.")
     message = fields.Text('Message', compute='_compute_message')
 
-    _sql_constraints = [
-        ('runbot_dockerfile_image_tag_unique', 'unique(image_tag)', 'A Dockerfile with this tag already exists.'),
-    ]
+    _runbot_dockerfile_image_tag_unique = models.Constraint(
+        'unique(image_tag)',
+        "A Dockerfile with this tag already exists.",
+    )
 
     @api.constrains('name')
     def _constrains_name(self):
@@ -174,7 +176,6 @@ class Dockerfile(models.Model):
         if self.parent_id.parent_id:
             raise exceptions.ValidationError('Variants cannot be variants of other variants.')
 
-    @api.returns('self', lambda value: value.id)
     def copy(self, default=None):
         if not default:
             default = {}
@@ -284,6 +285,11 @@ class Dockerfile(models.Model):
             rec.image_future_tag = f'{rec.image_tag}.future'
             rec.image_previous_tag = f'{rec.image_tag}.previous'
 
+    @api.depends('image_identifier', 'image_future_identifier')
+    def _compute_has_future(self):
+        for record in self:
+            record.has_future = record.image_identifier != record.image_future_identifier
+
     def write(self, values):
         if 'image_identifier' in values and not 'image_previous_identifier' in values and self.image_identifier != values['image_identifier']:
             self.ensure_one()
@@ -325,12 +331,11 @@ class Dockerfile(models.Model):
         return metadata
 
     def _build(self, host=None):
-        docker_build_path = self.env['runbot.runbot']._path('docker', self.image_tag)
+        tag_dir = re.sub(r'[^\w]', '_', self.image_tag)
+        docker_build_path = self.env['runbot.runbot']._path('docker', tag_dir)
         os.makedirs(docker_build_path, exist_ok=True)
-
         content = self.dockerfile
-
-        with open(self.env['runbot.runbot']._path('docker', self.image_tag, 'Dockerfile'), 'w') as Dockerfile:
+        with open(self.env['runbot.runbot']._path('docker', tag_dir, 'Dockerfile'), 'w') as Dockerfile:
             Dockerfile.write(content)
         result = docker_build(docker_build_path, self.image_future_tag, self.pull_on_build)
         duration = result['duration']
@@ -399,3 +404,20 @@ class DockerBuildOutput(models.Model):
                     summary = line
                     break
             record.summary = summary
+
+    def _getdocker_metadata_diff(self, other_build_result_id):
+        build_result_b = self.env['runbot.docker_build_result'].browse(other_build_result_id)
+        diff_dict = {}
+        if build_result_b:
+            meta_a = self.metadata
+            meta_b = build_result_b.metadata
+            for k, va in meta_a.items():
+                if isinstance(va, str) and (vb := meta_b.get(k, '')) != va:
+                    diff_dict[k] = f'{va} --> {vb}'
+                elif isinstance(va, list):
+                    vb = meta_b.get(k, [])
+                    negativ_diff = set(va) - set(vb)
+                    positiv_diff = set(vb) - set(va)
+                    if negativ_diff or positiv_diff:
+                        diff_dict[k] = [f'- {s}' for s in negativ_diff] + [f'+ {s}' for s in positiv_diff]
+        return diff_dict

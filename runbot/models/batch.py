@@ -76,7 +76,7 @@ class Batch(models.Model):
     def _new_commit(self, branch, match_type='new'):
         # if not the same hash for repo:
         commit = branch.head
-        self.last_update = fields.Datetime.now()
+        self.last_update = datetime.datetime.now()
         for commit_link in self.commit_link_ids:
             # case 1: a commit already exists for the repo (pr+branch, or fast push)
             if commit_link.commit_id.repo_id == commit.repo_id:
@@ -124,7 +124,7 @@ class Batch(models.Model):
             process_delay = batch.bundle_id.project_id.process_delay
             if batch.state == 'preparing' and (
                 process_delay == 0 or
-                batch.last_update <= fields.Datetime.now() - datetime.timedelta(seconds=process_delay)
+                batch.last_update <= datetime.datetime.now() - datetime.timedelta(seconds=process_delay)
             ):
                 batch._prepare()
                 processed |= batch
@@ -201,7 +201,6 @@ class Batch(models.Model):
         dockerfile_id = bundle.dockerfile_id or bundle.base_id.dockerfile_id or bundle.project_id.dockerfile_id or bundle.version_id.dockerfile_id
         if not dockerfile_id:
             _logger.error('No dockerfile found !')
-
         triggers = self.env['runbot.trigger'].search([  # could be optimised for multiple batches. Ormcached method?
             ('project_id', '=', project.id),
             ('category_id', '=', self.category_id.id)
@@ -209,7 +208,6 @@ class Batch(models.Model):
             lambda t: not t.version_domain or \
             self.bundle_id.version_id.filtered_domain(t._get_version_domain())
         )
-
         pushed_repo = self.commit_link_ids.mapped('commit_id.repo_id')
         dependency_repos = triggers.mapped('dependency_ids')
         all_repos = triggers.mapped('repo_ids') | dependency_repos
@@ -302,7 +300,7 @@ class Batch(models.Model):
                 if batches:
                     self.base_reference_batch_id = batches[0]
 
-            if missing_repos and bundle.always_use_foreign and foreign_projects:
+            if missing_repos and (bundle.always_use_foreign or project.always_use_foreign) and foreign_projects:
                 self._log('Starting by filling foreign repo')
                 foreign_bundles = bundle.search([('name', '=', bundle.name), ('project_id', 'in', foreign_projects.ids)])
                 used_branches = _fill_missing({branch: branch.head for branch in foreign_bundles.mapped('branch_ids').sorted('is_pr', reverse=True)}, 'head')
@@ -445,10 +443,11 @@ class Batch(models.Model):
             trigger_custom = trigger_customs.get(trigger, self.env['runbot.bundle.trigger.custom'])
             force_trigger = trigger_custom and trigger_custom.start_mode == 'force'
             skip_trigger = (trigger_custom and trigger_custom.start_mode == 'disabled') or trigger.manual
-            should_start = ((trigger.repo_ids & bundle_repos) or bundle.build_all or bundle.sticky)
+            is_dev = not bundle.is_staging and not bundle.is_base
+            enable_on_bundle = (trigger.on_staging and bundle.is_staging) or (trigger.on_base and bundle.is_base) or (trigger.on_dev and is_dev)
+            should_start = ((trigger.repo_ids & bundle_repos) or bundle.build_all or bundle.sticky) and enable_on_bundle
             if force_trigger or (should_start and not skip_trigger):
                 self._create_build(slot.params_id, slot)
-
 
     def _update_commits_infos(self, base_head_per_repo):
         for link_commit in self.commit_link_ids:
@@ -504,7 +503,6 @@ class Batch(models.Model):
             'message': message,
             'level': level,
         })
-
 
 class BatchLog(models.Model):
     _name = 'runbot.batch.log'

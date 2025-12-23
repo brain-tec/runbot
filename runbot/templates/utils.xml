@@ -2,18 +2,14 @@
 <odoo>
     <data>
         <!-- base layout -->
-        <template id="runbot.base_page">
+        <template id="runbot.base_page">&lt;!DOCTYPE html&gt;
             <html t-att-data-bs-theme="theme">
                 <head>
+                    <meta charset="utf-8"/>
                     <title t-out="title or 'Runbot'"/>
-                    <link rel="stylesheet" type="text/css" href="/runbot/static/src/libs/bootstrap/css/bootstrap.css"/>
-                    <link rel="stylesheet" type="text/css" href="/runbot/static/src/libs/fontawesome/css/font-awesome.css"/>
-                    <link rel="stylesheet" type="text/css" href="/runbot/static/src/css/runbot.css"/>
 
-                    <script src="/runbot/static/src/libs/jquery/jquery.js" type="text/javascript"/>
-                    <script type="text/javascript" src="/runbot/static/src/libs/popper/popper.js"/>
-                    <script type="text/javascript" src="/runbot/static/src/libs/bootstrap/js/bootstrap.bundle.js"/>
-                    <script type="text/javascript" src="/runbot/static/src/js/runbot.js"/>
+                    <t t-call-assets="runbot.assets_frontend" t-js="False"/>
+                    <t t-call-assets="runbot.assets_frontend" t-css="False" defer_load="True"/>
 
                     <t t-if="refresh">
                         <meta http-equiv="refresh" t-att-content="refresh"/>
@@ -79,6 +75,22 @@
                                     </li>
                                     <li class="nav-item divider" t-ignore="true"/>
                                     <t t-if="not user_id._is_public()">
+                                        <t t-if="env.user.has_group('runbot.group_runbot_admin')">
+                                            <t t-set="docker_files" t-value="env['runbot.dockerfile'].search([])"/>
+                                            <t t-set="out_of_sync_docker_files" t-value="docker_files.filtered(lambda d: d.image_identifier != d.image_future_identifier)"/>
+                                            <t t-set="in_error_docker_files" t-value="docker_files.filtered(lambda d: d.to_build and d.in_error)"/>
+                                            <li class="nav-item" t-if="out_of_sync_docker_files or in_error_docker_files">
+                                                <a class="nav-link" href="/odoo/docker">
+                                                    <i class="fa fa-warning"/>
+                                                    <t t-if="in_error_docker_files">
+                                                        <span class="text-danger" t-esc="len(in_error_docker_files)" title="In error docker files"/>
+                                                    </t>
+                                                    <t t-if="out_of_sync_docker_files">
+                                                        <span class="text-warning" t-esc="len(out_of_sync_docker_files)" title="Out of sync docker files"/>
+                                                    </t>
+                                                </a>
+                                            </li>
+                                        </t>
                                         <t t-call="runbot.build_errors_link"/>
                                         <li class="nav-item dropdown" t-ignore="true">
                                             <a href="#" class="nav-link dropdown-toggle" data-bs-toggle="dropdown">
@@ -135,8 +147,8 @@
                             <input type="hidden" name="redirect" t-att-value="current_path"/>
                             <div>
                                 <div class="form-check form-switch">
+                                <label for="more" class="form-check-label" >More info</label>
                                 <input onclick="document.getElementById('preferences_form').submit()" class="form-check-input" type="checkbox" role="switch" id="more" name="more" t-att-checked="more"/>
-                                <label class="form-check-label" >More info</label>
                             </div></div>
                             <div> 
                                 <label for="theme_selection" style="min-width: 80px">Theme:</label>
@@ -397,7 +409,7 @@
         </template>
 
         <template id="runbot.branch_github_menu">
-          <button t-attf-class="btn btn-default btn-ssm dropdown-toggle" data-bs-toggle="dropdown" title="Github links" aria-label="Github links" aria-expanded="false">
+          <button t-attf-class="{{btn_classes or 'btn btn-default btn-ssm'}} dropdown-toggle" data-bs-toggle="dropdown" title="Github links" aria-label="Github links" aria-expanded="false">
             <i t-attf-class="fa fa-github {{'text-primary' if any(branch_id.is_pr and branch_id.alive for branch_id in bundle.branch_ids) else 'text-secondary' if all(not branch_id.alive for branch_id in bundle.branch_ids) else ''}}"/>
             <span class="caret"/>
           </button>
@@ -417,25 +429,5 @@
             </button>
         </template>
 
-
-        <template id="runbot.bundle_stats_dropdown">
-            <button t-attf-class="btn btn-default dropdown-toggle" data-bs-toggle="dropdown" title="Bundle Stats" aria-label="Bundle Stats" aria-expanded="false">
-                    <i t-attf-class="fa fa-bar-chart"/>
-                    <span class="caret"/>
-            </button>
-            <div class="dropdown-menu dropdown-menu-start" role="menu">
-                <t t-foreach="project.trigger_ids.sorted(lambda t: (t.category_id.id, t.sequence, t.id))" t-as="trigger">
-                    <t t-if="trigger.has_stats and not trigger.manual" >
-                        <t t-if="current_category != trigger.category_id">
-                            <span class="dropdown-item"><b><t t-out="trigger.category_id.name"/></b></span>
-                            <t t-set="current_category" t-value="trigger.category_id"/>
-                        </t>
-                        <a class="dropdown-item" t-attf-href="/runbot/stats/{{bundle.id}}/{{trigger.id}}">
-                            <t t-out="trigger.name" />
-                        </a>
-                    </t>
-                </t>
-            </div>
-        </template>
     </data>
 </odoo>

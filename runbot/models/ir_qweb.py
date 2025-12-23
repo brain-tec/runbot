@@ -1,10 +1,10 @@
 from ..common import s2human, s2human_long, precise_s2human
 from odoo import models
 from odoo.http import request
-
+from odoo.addons.website.controllers.main import QueryURL
 
 class IrQweb(models.AbstractModel):
-    _inherit = ["ir.qweb"]
+    _inherit = "ir.qweb"
 
     def _prepare_frontend_environment(self, values):
         response = super()._prepare_frontend_environment(values)

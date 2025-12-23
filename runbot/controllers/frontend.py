@@ -1,7 +1,7 @@
 import datetime
 import functools
 import logging
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from subprocess import CalledProcessError
 from urllib.parse import urlsplit
 
@@ -14,7 +14,7 @@ from werkzeug.exceptions import Forbidden, NotFound
 from odoo import fields
 from odoo.http import Controller, Response, request
 from odoo.http import route as o_route
-from odoo.osv import expression
+from odoo.fields import Domain
 
 from odoo.addons.website.controllers.main import QueryURL
 
@@ -30,9 +30,9 @@ def route(routes, **kw):
             more = request.httprequest.cookies.get('more', False) == '1'
             filter_mode = request.httprequest.cookies.get('filter_mode', 'default')
             refresh = kwargs.get('refresh', False)
-            nb_build_errors = request.env['runbot.build.error'].search_count([])
-            nb_assigned_errors = request.env['runbot.build.error'].search_count([('responsible', '=', request.env.user.id)])
-            nb_team_errors = request.env['runbot.build.error'].search_count([('responsible', '=', False), ('team_id', 'in', request.env.user.runbot_team_ids.ids)])
+            nb_build_errors = request.env['runbot.build.error'].sudo().search_count([])
+            nb_assigned_errors = request.env['runbot.build.error'].sudo().search_count([('responsible', '=', request.env.user.id)])
+            nb_team_errors = request.env['runbot.build.error'].sudo().search_count([('responsible', '=', False), ('team_id', 'in', request.env.user.runbot_team_ids.ids)])
             kwargs['more'] = more
             kwargs['projects'] = projects
 
@@ -63,7 +63,6 @@ def route(routes, **kw):
         return response_wrap
     return decorator
 
-
 class Runbot(Controller):
 
     def _pending(self):
@@ -80,10 +79,11 @@ class Runbot(Controller):
             '/runbot',
             '/runbot/<model("runbot.project"):project>',
             '/runbot/<model("runbot.project"):project>/search/<search>'], website=True, auth='public', type='http')
-    def bundles(self, project=None, search='', projects=False, refresh=False, for_next_freeze=False, limit=40, has_pr=None, **kwargs):
+    def bundles(self, project=None, search='', refresh=False, limit=40, has_pr=None, **kwargs):
         search = search if len(search) < 60 else search[:60]
         env = request.env
         categories = env['runbot.category'].search([])
+        projects = self.env['runbot.project'].search([('hidden', '=', False)])
         if not project and projects:
             project = projects[0]
 
@@ -114,9 +114,6 @@ class Runbot(Controller):
             elif filter_mode == 'default' and not search:
                 domain.append(('sticky', '=', True))
 
-            if for_next_freeze:
-                domain.append(('for_next_freeze', '=', True))
-
             if search:
                 search_domains = []
                 pr_numbers = []
@@ -129,11 +126,10 @@ class Runbot(Controller):
                     res = request.env['runbot.branch'].search([('name', 'in', pr_numbers)])
                     if res:
                         search_domains.append([('id', 'in', res.mapped('bundle_id').ids)])
-                search_domain = expression.OR(search_domains)
-                domain = expression.AND([domain, search_domain])
+                search_domain = Domain.OR(search_domains)
+                domain = Domain.AND([domain, search_domain])
 
-            e = expression.expression(domain, request.env['runbot.bundle'])
-            query = e.query
+            query = request.env['runbot.bundle']._search(domain)
             query.order = """
              (case when "runbot_bundle".sticky then 1 when "runbot_bundle".sticky is null then 2 else 2 end),
                     case when "runbot_bundle".sticky then "runbot_bundle".version_number end collate "C" desc,
@@ -151,6 +147,7 @@ class Runbot(Controller):
 
             triggers = env['runbot.trigger'].search([('project_id', '=', project.id)])
             context.update({
+                'projects': projects,
                 'active_category_id': category_id,
                 'bundles': bundles,
                 'project': project,
@@ -182,7 +179,7 @@ class Runbot(Controller):
             url='/runbot/bundle/%s' % bundle.id,
             total=batch_count,
             page=page,
-            step=50,
+            step=int(limit),
         )
         batchs = request.env['runbot.batch'].search(domain, limit=limit, offset=pager.get('offset', 0), order='id desc')
 
@@ -197,7 +194,7 @@ class Runbot(Controller):
 
         return request.render('runbot.bundle', context)
 
-    @o_route([
+    @route([
         '/runbot/bundle/<model("runbot.bundle"):bundle>/force',
         '/runbot/bundle/<model("runbot.bundle"):bundle>/force/<int:auto_rebase>',
     ], type='http', auth="user", methods=['GET', 'POST'], csrf=False)
@@ -223,7 +220,7 @@ class Runbot(Controller):
         }
         return request.render('runbot.batch', context)
 
-    @o_route(['/runbot/batch/slot/<model("runbot.batch.slot"):slot>/build'], auth='user', type='http')
+    @route(['/runbot/batch/slot/<model("runbot.batch.slot"):slot>/build'], auth='user', type='http')
     def slot_create_build(self, slot=None, **kwargs):
         build = slot.sudo()._create_missing_build()
         return werkzeug.utils.redirect('/runbot/build/%s' % build.id)
@@ -250,7 +247,7 @@ class Runbot(Controller):
         }
         return request.render('runbot.commit', context)
 
-    @o_route(['/runbot/commit/resend/<int:status_id>'], website=True, auth='user', type='http')
+    @route(['/runbot/commit/resend/<int:status_id>'], website=True, auth='user', type='http')
     def resend_status(self, status_id=None, **kwargs):
         CommitStatus = request.env['runbot.commit.status']
         status = CommitStatus.browse(status_id)
@@ -464,7 +461,7 @@ class Runbot(Controller):
         build_errors_count = request.env['runbot.build.error'].search_count(domain)
         url_args = {}
         url_args['sort'] = sort
-        pager = request.website.pager(url='/runbot/errors/', url_args=url_args, total=build_errors_count, page=page, step=limit)
+        pager = request.website.pager(url='/runbot/errors/', url_args=url_args, total=build_errors_count, page=page, step=int(limit))
 
         build_errors = request.env['runbot.build.error'].search(domain, order=sort_order, limit=limit, offset=pager.get('offset', 0))
 
@@ -506,7 +503,7 @@ class Runbot(Controller):
         filterby = kwargs.get('filterby', 'not_one')
         if filterby not in searchbar_filters:
             filterby = 'not_one'
-        domain = expression.AND([domain, searchbar_filters[filterby]['domain']])
+        domain = Domain.AND([domain, searchbar_filters[filterby]['domain']])
 
         qctx = {
             'team': team,
@@ -529,8 +526,8 @@ class Runbot(Controller):
         }
         return request.render('runbot.dashboard_page', qctx)
 
-    @route(['/runbot/stats/'], type='json', auth="public", website=False, sitemap=False)
-    def stats_json(self, bundle_id=False, trigger_id=False, key_category='', center_build_id=False, ok_only=False, limit=100, search=None, **post):
+    @route(['/runbot/stats/'], type='jsonrpc', auth="user", website=False, sitemap=False)
+    def stats_json(self, bundle_id=False, trigger_id=False, key_category='', key_step=None, center_build_id=False, limit=100, **post):
         """ Json stats """
         trigger_id = trigger_id and int(trigger_id)
         bundle_id = bundle_id and int(bundle_id)
@@ -542,61 +539,88 @@ class Runbot(Controller):
         if not trigger_id or not bundle_id or not trigger.exists() or not bundle.exists():
             return request.not_found()
 
-        builds_domain = [
-            ('global_state', 'in', ('running', 'done')),
-            ('slot_ids.batch_id.bundle_id', '=', bundle_id),
-            ('params_id.trigger_id', '=', trigger.id),
+        batch_domain = [
+            ('state', '=', 'done'),
+            ('bundle_id', '=', bundle_id),
         ]
-        if ok_only:
-            builds_domain += ('global_result', '=', 'ok')
-        builds = request.env['runbot.build'].with_context(active_test=False)
+        batches = request.env['runbot.batch'].with_context(category_id=trigger.category_id.id)
         if center_build_id:
-            builds = builds.search(
-                expression.AND([builds_domain, [('id', '>=', center_build_id)]]),
-                order='id', limit=limit / 2)
-            builds_domain = expression.AND([builds_domain, [('id', '<=', center_build_id)]])
-            limit -= len(builds)
-
-        builds |= builds.search(builds_domain, order='id desc', limit=limit)
+            center_batch = request.env['runbot.build'].browse(center_build_id).slot_ids.batch_id.filtered(lambda b: b.bundle_id == bundle)
+            if center_batch:
+                center_batch_id = center_batch[0].id
+                batches = batches.search(
+                    Domain.AND([batch_domain, [('id', '>=', center_batch_id)]]),
+                    order='id', limit=limit / 2)
+                batch_domain = Domain.AND([batch_domain, [('id', '<=', center_batch_id)]])
+                limit -= len(batches)
+        batches |= batches.search(batch_domain, order='id desc', limit=limit)
+        builds = batches.slot_ids.build_id.filtered(lambda b: b.params_id.trigger_id == trigger)
         if not builds:
             return {}
 
         builds = builds.search([('id', 'child_of', builds.ids)])
 
         parents = {b.id: b.top_parent.id for b in builds.with_context(prefetch_fields=False)}
-        request.env.cr.execute("SELECT build_id, values FROM runbot_build_stat WHERE build_id IN %s AND category = %s", [tuple(builds.ids), key_category])  # read manually is way faster than using orm
+        dates = {b.top_parent.id: b.create_date for b in builds.with_context(prefetch_fields=False)}
+        query = "SELECT build_id, values FROM runbot_build_stat WHERE build_id IN %s AND category = %s"
+        values = [tuple(builds.ids), key_category]
+        if key_step:
+            query += " AND dynamic_step_name LIKE %s"
+            values.append(key_step)
+            if config_steps := request.env['runbot.build.config.step'].search([('name', '=like', key_step)]):
+                query += " AND config_step_id in %s"
+                values.append(tuple(config_steps.ids))
+
+        request.env.cr.execute(query, values)  # read manually is way faster than using orm
         res = {}
+
         for (build_id, values) in request.env.cr.fetchall():
             if values:
-                res.setdefault(parents[build_id], {}).update(values)
+                current_values = res.get(parents[build_id], {})
+                for key, value in values.items():
+                    if key in current_values:
+                        current_values[key] += value
+                    else:
+                        current_values[key] = value
+                res[parents[build_id]] = current_values
             # we need to update here to manage the post install case: we want to combine stats from all post_install childrens.
-        return res
-
-    @route(['/runbot/stats/<model("runbot.bundle"):bundle>/<model("runbot.trigger"):trigger>'], type='http', auth="public", website=True, sitemap=False)
-    def modules_stats(self, bundle, trigger, search=None, **post):
-        """Modules statistics"""
-        categories = set()
-
-        def list_config_categories(config):
-            nonlocal categories
-            for config_step in config.step_ids:
-                regex_ids = config_step.build_stat_regex_ids
-                if not regex_ids:
-                    regex_ids = regex_ids.search([('generic', '=', True)])
-                categories |= set(regex_ids.mapped('name'))
-                for config in config_step.create_config_ids:
-                    list_config_categories(config)
-
-        list_config_categories(trigger.config_id)
-
-        categories = sorted(categories)
-
-        context = {
-            'stats_categories': categories,
-            'bundle': bundle,
-            'trigger': trigger,
+        return {
+            'stats': res,
+            'dates': dates,
         }
 
+    @route(['/runbot/stats/<model("runbot.bundle"):bundle>'], type='http', auth="public", website=True, sitemap=False)
+    def modules_stats(self, bundle, search=None, **post):
+        """Modules statistics"""
+        all_builds = bundle.last_done_batch.slot_ids.build_id
+        all_builds |= bundle.with_context(category_id=request.env.ref('runbot.nightly_category').id).last_done_batch.slot_ids.build_id
+        all_builds = request.env['runbot.build'].search([('id', 'child_of', all_builds.ids)])
+        all_stats = all_builds.sudo().stat_ids
+        category_per_trigger = {}
+        step_per_trigger_category = {}
+        all_categories = set()
+        all_steps = set()
+        all_triggers = set()
+        for stat in all_stats:
+            stat_trigger = stat.build_id.params_id.trigger_id
+            if not stat_trigger.has_stats:  # skip, most likely a multi build or other noisy trigger
+                continue
+            all_categories.add(stat.category)
+            all_steps.add(stat.dynamic_step_name or stat.config_step_id.name)
+            all_triggers.add(stat_trigger)
+            category_per_trigger.setdefault(stat_trigger, set()).add(stat.category)
+            step_per_trigger_category.setdefault((stat_trigger, stat.category), set()).add(stat.dynamic_step_name or stat.config_step_id.name)
+        all_triggers = sorted(all_triggers, key=lambda t: (t.category_id.id, t.sequence, t.id))
+        main_trigger = all_triggers[0] if all_triggers else None
+        context = {
+            'category_per_trigger': category_per_trigger,
+            'step_per_trigger_category': step_per_trigger_category,
+            'bundle': bundle,
+            'main_trigger': main_trigger,
+            'all_categories': sorted(all_categories),
+            'all_steps': sorted(all_steps),
+            'all_triggers': all_triggers,
+        }
         return request.render("runbot.modules_stats", context)
 
     @route(['/runbot/load_info'], type='http', auth="user", website=True, sitemap=False)
@@ -720,33 +744,46 @@ class Runbot(Controller):
         if not (dockerfile_result.dockerfile_id.public_visibility or request.env.user.has_group('runbot.group_runbot_admin')):
             raise NotFound
 
+        future_result = dockerfile._get_last_successful_result_for_ident(dockerfile.image_future_identifier)
+        current_result = dockerfile._get_last_successful_result_for_ident(dockerfile.image_identifier)
+
         return request.render("runbot.docker_result_template", {
             'dockerfile_result': dockerfile_result,
             'dockerfile': dockerfile,
-            'future_result': dockerfile._get_last_successful_result_for_ident(dockerfile.image_future_identifier),
-            'current_result': dockerfile._get_last_successful_result_for_ident(dockerfile.image_identifier),
+            'future_result': future_result,
+            'current_result': current_result,
+            'future_diff': current_result._getdocker_metadata_diff(future_result.id),
         })
 
     @route([
+        '/runbot/batches/ids/<string:batch_ids>',
+        '/runbot/batches/ids/<string:batch_ids>/<model("runbot.build.error"):build_error>',
         '/runbot/batches/<int:project_id>/<int:category_id>/<batches_date>',
         '/runbot/batches/<int:project_id>/<int:category_id>/<batches_date>/<model("runbot.build.error"):build_error>',
         ], type='http', auth="public", website=True, sitemap=False)
-    def batches_by_date(self, project_id=None, category_id=None, batches_date=None, build_error=None, **kwargs):
+    def batches_by_date(self, batch_ids=None, project_id=None, category_id=None, batches_date=None, build_error=None, title=None, **kwargs):
         limit = int(kwargs.get('limit', 25)) if int(kwargs.get('limit', 25)) < 100 else 25
         try:
             start_date = fields.Date.from_string(batches_date)
         except ValueError:
             raise NotFound
-
-        end_date = start_date + relativedelta(days=1)
-        next_date_url = f'/runbot/batches/{project_id}/{category_id}/{end_date}/{build_error.id if build_error else ""}'
-        previous_date_url = f'/runbot/batches/{project_id}/{category_id}/{start_date - relativedelta(days=1)}/{build_error.id if build_error else ""}'
-        batches = request.env["runbot.batch"].search([
-            ("category_id", "=", category_id),
-            ("bundle_id.project_id", "=", project_id),
-            ("create_date", ">=", start_date),
-            ("create_date", "<", end_date),
-        ], limit=limit)
+        if batch_ids:
+            batch_ids = [int(bid) for bid in batch_ids.split(',')]
+            batches = request.env['runbot.batch'].browse(batch_ids).exists().sorted(lambda b: b.bundle_id.version_id.number, reverse=True)
+            if not batches:
+                raise NotFound
+            next_date_url = None
+            previous_date_url = None
+        else:
+            end_date = start_date + relativedelta(days=1)
+            next_date_url = f'/runbot/batches/{project_id}/{category_id}/{end_date}/{build_error.id if build_error else ""}'
+            previous_date_url = f'/runbot/batches/{project_id}/{category_id}/{start_date - relativedelta(days=1)}/{build_error.id if build_error else ""}'
+            batches = request.env["runbot.batch"].search([
+                ("category_id", "=", category_id),
+                ("bundle_id.project_id", "=", project_id),
+                ("create_date", ">=", start_date),
+                ("create_date", "<", end_date),
+            ], limit=limit)
 
         builds_by_batch_id = None
         if build_error:
@@ -754,12 +791,14 @@ class Runbot(Controller):
             for batch in batches:
                 builds_by_batch_id[batch.id] = build_error.build_ids.filtered_domain([('id', 'child_of', batch.slot_ids.build_id.ids)])
 
-        build_error = build_error if build_error else self.env['runbot.build.error']
+        build_error = build_error if build_error else request.env['runbot.build.error']
         diff_versions_filter = build_error.version_ids
         diff_repos_filter = build_error.trigger_ids.dependency_ids
         commit_link_details_url = f'/runbot/commit_link/details/{",".join(map(str, batches.commit_link_ids.ids))}'
 
         return request.render("runbot.batches_by_date", {
+            'build_error': build_error,
+            'title': title,
             'batches_date': batches_date,
             'batches': batches,
             'next_date_url': next_date_url,
@@ -800,3 +839,72 @@ class Runbot(Controller):
             'commit_links': selected_commit_links,
             'diff_by_commit_link_ids': diff_by_commit_link_ids,
         })
+
+    @route([
+        '/runbot/json/last_batches_infos',
+        '/runbot/json/last_batches_infos/<int:project_id>',
+        ], type='http', auth='public', website=True, sitemap=False)
+    def repos_heads(self, project_id=None, bundle_name=None, **kwargs):
+        project_id = project_id or request.env.ref('runbot.main_project').id
+        domain = [('project_id', '=', project_id)]
+        if bundle_name:
+            domain = Domain.AND([domain, [('name', '=', bundle_name)]])
+        else:
+            domain = Domain.AND([domain, [('sticky', '=', True)]])
+        bundles = request.env['runbot.bundle'].search(domain, order='id desc, name')
+
+        last_batches_infos = {
+            bundle.name: {
+                "commits": [
+                    {
+                        "repo": commit_link.commit_id.repo_id.name,
+                        "head": commit_link.commit_id.name,
+                        "match_type": commit_link.match_type,
+                    }
+                    for commit_link in bundle.last_batch.commit_link_ids
+                ],
+                "autotags": request.env["runbot.build.error"].sudo()._disabling_tags(build_id=bundle.last_batch.slot_ids.build_id[0]),
+            }
+            for bundle in bundles
+        }
+        return request.make_json_response(last_batches_infos)
+
+    @route([
+        '/runbot/bundle/tag/<model("runbot.bundle.tag"):bundle_tag_id>',
+        '/runbot/<model("runbot.project"):project>/bundle/tag/<model("runbot.bundle.tag"):bundle_tag_id>',
+        ], type="http", auth="user", website=True, sitemap=False)
+    def bundles_by_tag(self, bundle_tag_id=None, project=None, **kwargs):
+        projects = self.env['runbot.project'].search([('hidden', '=', False)])
+        if not project and projects:
+            project = projects[0]
+        bundles_by_team = defaultdict(list)
+        nb_bundles = 0
+        nb_bundles_done = 0
+        for bundle in self.env['runbot.bundle'].search([('tag_ids', 'in', bundle_tag_id.id)]):
+            bundles_by_team[bundle.team_id.name or 'No Team Defined'].append(bundle)
+            nb_bundles += 1
+            bundle_prs = bundle.branch_ids.filtered(lambda rec: rec.is_pr)
+            if any(bundle_prs) and not any(bundle_prs.mapped('alive')):
+                nb_bundles_done += 1
+
+        qctx = {
+            'tag': bundle_tag_id,
+            'bundles_by_team': bundles_by_team,
+            'nb_bundles': nb_bundles,
+            'nb_bundles_done': nb_bundles_done,
+        }
+        return request.render('runbot.bundles_by_tag', qctx)
+
+    @route([
+        '/runbot/versions',
+        ], website=True, auth='public', type='http', sitemap=False)
+    def versions(self, **kwargs):
+        project = self.env.ref('runbot.main_project')
+        bundles = self.env['runbot.bundle'].sudo().search([('is_base', '=', True), ('project_id', '=', project.id), ('sticky', '=', True)])
+        qctx = {
+            'category': self.env.ref('runbot.nightly_category'),
+            'project': project,
+            'bundles': bundles,
+            'keys': ['os_version', 'python_version', 'chrome_version', 'psql_version', 'pip_freeze', 'packages'],
+        }
+        return request.render('runbot.versions', qctx)

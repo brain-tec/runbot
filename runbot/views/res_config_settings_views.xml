@@ -35,9 +35,6 @@
                       <field name="runbot_use_ssl"/>
                     </setting>
                     <setting>
-                      <field name="runbot_disable_host_on_fetch_failure"/>
-                    </setting>
-                    <setting>
                       <field name="runbot_dockerfile_public_by_default"/>
                     </setting>
                   </block>
@@ -111,7 +108,6 @@
             <field name="type">ir.actions.act_window</field>
             <field name="res_model">res.config.settings</field>
             <field name="view_mode">form</field>
-            <field name="target">inline</field>
             <field name="context">{'module' : 'runbot'}</field>
         </record>
 

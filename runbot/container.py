@@ -68,7 +68,7 @@ class Command():
 
     def __repr__(self):
         return self.build().replace('&& ', '&&\n').replace('|| ', '||\n\t').replace(';', ';\n')
-        
+
     def shell_join(self, elems):
         return ' '.join([self.escape(elem) for elem in elems])
 
@@ -234,7 +234,7 @@ def docker_run(*args, **kwargs):
     return _docker_run(*args, **kwargs)
 
 
-def _docker_run(cmd=False, log_path=False, build_dir=False, container_name=False, image_tag=False, exposed_ports=None, cpu_limit=None, cpu_period=100000, cpus=0, memory=None, preexec_fn=None, ro_volumes=None, env_variables=None, network_enabled=True):
+def _docker_run(cmd=False, log_path=False, build_dir=False, container_name=False, image_tag=False, exposed_ports=None, cpu_limit=None, cpu_period=100000, cpus=0, memory=None, preexec_fn=None, ro_volumes=None, env_variables=None, network_enabled=False):
     """Run tests in a docker container
     :param run_cmd: command string to run in container
     :param log_path: path to the logfile that will contain odoo stdout and stderr
@@ -349,6 +349,10 @@ def _docker_stop(container_name, build_dir):
 
 
 def docker_state(container_name, build_dir):
+    try:
+        build_dir = file_path(build_dir)
+    except FileNotFoundError:
+        return 'VOID'
     container_name = sanitize_container_name(container_name)
     exist = os.path.exists(os.path.join(build_dir, 'exist-%s' % container_name))
     started = os.path.exists(os.path.join(build_dir, 'start-%s' % container_name))

@@ -16,7 +16,7 @@ from collections import OrderedDict
 from datetime import timedelta
 from markupsafe import Markup
 
-from odoo.osv import expression
+from odoo.fields import Domain
 from odoo.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT, file_open, html_escape, OrderedSet
 
 _logger = logging.getLogger(__name__)
@@ -27,10 +27,10 @@ dest_reg = re.compile(r'^\d{5,}-.+$')
 def transactioncache(method):
     @functools.wraps(method)
     def wrapper(self, *args, **kwargs):
-        assert not self.ids
+        assert not self.ids or len(self.ids) == 1, "transactioncache only works on singletons or empty recordsets"
         cache = self.env.cr.cache
         method_key = method
-        params_key = (args, frozenset(kwargs.items()))
+        params_key = (tuple(self.ids), args, frozenset(kwargs.items()))
         # should check id key is serializable
         if method_key not in cache:
             cache[method_key] = {}
@@ -63,6 +63,12 @@ def now():
 
 def findall(filename, pattern):
     return set(re.findall(pattern, file_open(filename).read()))
+
+
+def tail(filename, n=10):
+    if os.path.isfile(filename):
+        return file_open(filename).readlines()[-n:]
+    return ''
 
 
 def grep(filename, string):
@@ -366,5 +372,5 @@ class TestTagsParser:
             if exclude_error_id:
                 tag_domain.append(('id', '!=', exclude_error_id))
             search_domains.append(tag_domain)
-        search_domain = expression.OR(search_domains)
+        search_domain = Domain.OR(search_domains)
         return search_domain

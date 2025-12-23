@@ -2,11 +2,11 @@
 import datetime
 import subprocess
 
-from ..common import os, RunbotException, make_github_session
+from ..common import os, RunbotException, make_github_session, transactioncache
 import glob
 import shutil
 
-from odoo import models, fields, api, registry
+from odoo import models, fields, api
 from odoo.tools import file_open
 from odoo.exceptions import ValidationError
 import logging
@@ -18,13 +18,10 @@ class Commit(models.Model):
     _name = 'runbot.commit'
     _description = "Commit"
 
-    _sql_constraints = [
-        (
-            "commit_unique",
-            "unique (name, repo_id, rebase_on_id)",
-            "Commit must be unique to ensure correct duplicate matching",
-        )
-    ]
+    _commit_unique = models.Constraint(
+        'unique (name, repo_id, rebase_on_id)',
+        "Commit must be unique to ensure correct duplicate matching",
+    )
     name = fields.Char('SHA')
     tree_hash = fields.Char('Tree hash', readonly=True)
     repo_id = fields.Many2one('runbot.repo', string='Repo group')
@@ -41,7 +38,7 @@ class Commit(models.Model):
     def create(self, vals_list):
         for vals in vals_list:
             if 'date' not in vals:
-                vals['date'] = fields.Datetime.now()
+                vals['date'] = datetime.datetime.now()
         return super().create(vals_list)
 
     def _get_commit_infos(self, sha, repo):
@@ -167,9 +164,22 @@ class Commit(models.Model):
         except:
             return False
 
+    @transactioncache
+    def _git_show_file(self, file):
+        self.ensure_one()
+        self.repo_id._fetch(self.name)
+        try:
+            return self.repo_id._git(['show', '%s:%s' % (self.name, file)])
+        except subprocess.CalledProcessError:
+            return False
+
     def _source_path(self, *paths):
         if not self.tree_hash:
-            raise ValidationError("Commit %s has no tree hash, cannot export" % self.name)
+            vals = self._get_commit_infos(self.name, self.repo_id)
+            if vals.get('tree_hash'):
+                self.tree_hash = vals['tree_hash']
+            else:
+                raise ValidationError("Commit %s has no tree hash, cannot export" % self.name)
         export_name = self.tree_hash
         if self.rebase_on_id:
             export_name = '%s_%s' % (self.name, self.rebase_on_id.name)
@@ -192,7 +202,7 @@ class Commit(models.Model):
             return
 
         if ci_strategy != 'all' and state == 'pending':
-            _logger.info("skipping github pending status for build %s and ci %s", build_id, context)
+            _logger.debug("skipping github pending status for build %s and ci %s", build_id, context)
             return
 
         if ci_strategy == 'errors' and state != 'error' and last_status.state not in ('error', 'failure'):
@@ -253,7 +263,7 @@ class CommitStatus(models.Model):
     to_process = fields.Boolean('Status was not processed yet', index=True)
 
     def _send_to_process(self):
-        commits_status = self.search([('to_process', '=', True)], order='create_date DESC, id DESC')
+        commits_status = self.search([('to_process', '=', True), ('build_id.create_date', '<', datetime.datetime.now() - datetime.timedelta(minutes=2))], order='create_date DESC, id DESC')
         if commits_status:
             _logger.info('Sending %s commit status', len(commits_status))
             commits_status._send()
@@ -288,7 +298,7 @@ class CommitStatus(models.Model):
                             ignore_errors=True,
                             session=session
                         )
-                commit_status.sent_date = fields.Datetime.now()
+                commit_status.sent_date = datetime.datetime.now()
             else:
                 _logger.info('Skipping outdated status for %s %s', commit_status.context, commit_status.commit_id.name)
 

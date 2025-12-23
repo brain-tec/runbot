@@ -14,8 +14,8 @@ from werkzeug.urls import url_join
 
 from odoo import api, fields, models
 from odoo.exceptions import UserError, ValidationError
-from odoo.tools import SQL, lazy
-from odoo.osv import expression
+from odoo.tools import SQL, lazy, ormcache
+from odoo.fields import Domain
 
 from ..fields import JsonDictField
 from ..common import transactioncache, TestTagsParser
@@ -29,36 +29,6 @@ def get_color(value: int, opacity='1'):
     elif value >= 5:
         return f'rgba(255, 165, 0, {opacity})'  # orange
     return f'rgba(0, 170, 0, {opacity})'  # green
-
-
-def draw_svg(daily_version_freq, y_labels=None, max_value: int = 10, error_id: int = 0, category_id=1, project_id=1):
-
-    rects = []
-    x_keys = sorted(daily_version_freq.keys())
-    height = 40
-    for idx, (x_key) in enumerate(x_keys):
-        batch_date = x_key.strftime("%Y-%m-%d")
-        for idy, (y_key, y_label) in enumerate(y_labels.items()):
-            value = daily_version_freq[x_key].get(y_key, 0)
-            if not value:
-                cell_color = "white"
-                cell_opacity = 0
-            else:
-                value = min(value, max_value)
-                cell_opacity = ((max_value * 0.3 + value) / (max_value * 0.3 + max_value))
-                cell_color = get_color(value, cell_opacity)
-            href = f'/runbot/batches/{project_id}/{category_id}/{batch_date}/{error_id or ""}'
-            pos_y = idy * 10 + 0.5
-            pos_x = idx * 10 + 0.5
-            rects.append(
-                f'''
-                <a href="{href}">
-                <title>{batch_date} {y_label} ({value})</title>
-                <rect fill="{cell_color}" width="9" height="9" x="{pos_x}" y="{pos_y}"/>
-                </a>''',
-            )
-    rects = ''.join(rects)
-    return f'<div style="height: {height}px"><svg xmlns="https://www.w3.org/2000/svg" viewbox="0 0 {len(x_keys) * 10} {len(y_labels) * 10}" style="border: 1px solid black; height: 100%; width: 100%;" preserveAspectRatio="none" shape-rendering="cripsEdges">{rects}</svg></div>'
 
 
 class BuildErrorLink(models.Model):
@@ -76,9 +46,10 @@ class BuildErrorLink(models.Model):
     description = fields.Char(related='build_id.description')
     build_url = fields.Char(related='build_id.build_url')
 
-    _sql_constraints = [
-        ('error_build_rel_unique', 'UNIQUE (build_id, error_content_id)', 'A link between a build and an error must be unique'),
-    ]
+    _error_build_rel_unique = models.Constraint(
+        'UNIQUE (build_id, error_content_id)',
+        "A link between a build and an error must be unique",
+    )
 
 class BuildErrorSeenMixin(models.AbstractModel):
     _name = 'runbot.build.error.seen.mixin'
@@ -90,10 +61,10 @@ class BuildErrorSeenMixin(models.AbstractModel):
     last_seen_date = fields.Datetime(string='Last Seen Date', compute='_compute_seen', store=True)
     build_count = fields.Integer(string='Nb Seen', compute='_compute_seen', store=True)
     seen_hash = fields.Char(string='Seen hash', compute='_compute_seen_hash', store=True)
+    first_seen_batch_ids = fields.Many2many('runbot.batch', compute='_compute_seen_batch', string='First Seen Batches')
+    last_seen_batch_ids = fields.Many2many('runbot.batch', compute='_compute_seen_batch', string='Last Seen Batches')
 
-    graph_history = fields.Html('30 days history', compute='_compute_graph', sanitize=False)
-    graph_day_of_week_recurence = fields.Html('Weekly recurence', compute='_compute_graph', sanitize=False)
-    graph_day_of_month_recurence = fields.Html('Monthly recurence', compute='_compute_graph', sanitize=False)
+    history_data = fields.Json('30 days history', compute='_compute_graph')
 
     @api.depends('build_error_link_ids')
     def _compute_seen(self):
@@ -101,7 +72,7 @@ class BuildErrorSeenMixin(models.AbstractModel):
             record.first_seen_date = False
             record.last_seen_date = False
             record.build_count = 0
-            error_link_ids = record.build_error_link_ids.sorted('log_date')
+            error_link_ids = record.build_error_link_ids.sorted(lambda bel: bel.build_id.top_parent.create_batch_id.id)
             if error_link_ids:
                 first_error_link = error_link_ids[0]
                 last_error_link = error_link_ids[-1]
@@ -110,6 +81,32 @@ class BuildErrorSeenMixin(models.AbstractModel):
                 record.first_seen_build_id = first_error_link.build_id
                 record.last_seen_build_id = last_error_link.build_id
                 record.build_count = len(error_link_ids.build_id)
+
+    @api.depends('build_error_link_ids')
+    def _compute_seen_batch(self):
+        from_clause, content_table = self.get_log_dates_from_clause()
+        query = f"""
+            SELECT record.id, bundle.version_id, MIN(batch.id) AS first_batch_id, MAX(batch.id) AS last_batch_id
+            {from_clause}
+            JOIN runbot_build_error_link AS link ON link.error_content_id = {content_table}.id
+            JOIN runbot_build AS build ON link.build_id = build.id
+            JOIN runbot_build_params AS params ON params.id = build.params_id
+            JOIN runbot_batch AS batch ON build.create_batch_id = batch.id
+            JOIN runbot_bundle AS bundle ON bundle.id = batch.bundle_id
+            WHERE record.id IN %s
+            GROUP BY record.id, bundle.version_id
+        """
+        self.env.cr.execute(query, (tuple(self.ids),))
+        first_batch_ids_by_record_id = {}
+        last_batch_ids_by_record_id = {}
+        res = self.env.cr.fetchall()
+        for row in res:
+            record_id, _version_id, first_batch_id, last_batch_id = row
+            first_batch_ids_by_record_id.setdefault(record_id, []).append(first_batch_id)
+            last_batch_ids_by_record_id.setdefault(record_id, []).append(last_batch_id)
+        for record in self:
+            record.first_seen_batch_ids = self.env['runbot.batch'].browse(sorted(first_batch_ids_by_record_id.get(record.id, [])))
+            record.last_seen_batch_ids = self.env['runbot.batch'].browse(sorted(last_batch_ids_by_record_id.get(record.id, [])))
 
     @api.depends('build_error_link_ids')
     def _compute_seen_hash(self):
@@ -124,30 +121,57 @@ class BuildErrorSeenMixin(models.AbstractModel):
         start_date = end_date - relativedelta(days=30)
         log_date_per_error = self._get_log_dates(start_date, end_date)
         for error in self:
+
+            fixing_prs = {pr.bundle_id.version_id.id: pr for pr in (error.fixing_pr_id | error.fixing_pr_id.forwardport_ids).filtered('close_date')}
+            breaking_prs = {pr.bundle_id.version_id.id: pr for pr in (error.breaking_pr_id | error.breaking_pr_id.forwardport_ids).filtered('close_date')}
+            fixing_pr_close_dates = {pr.bundle_id.version_id.id: pr.close_date.strftime("%Y-%m-%d") for pr in fixing_prs.values()}
+            breaking_pr_close_dates = {pr.bundle_id.version_id.id: pr.close_date.strftime("%Y-%m-%d") for pr in breaking_prs.values()}
             project_id = error.first_seen_build_id.params_id.project_id.id
             dates = log_date_per_error[error]
             versions = self.env['runbot.bundle'].search([('project_id', '=', project_id), ('sticky', '=', True)]).version_id.sorted(lambda v: (v.sequence, v.number), reverse=True)
             versions_ids = versions.ids
-            y_labels = {version.id: version.number for version in versions}
-            daily_version_freq = dict.fromkeys([date.date() for date in rrule.rrule(rrule.DAILY, dtstart=start_date, until=end_date)])
-            for date in daily_version_freq:
-                daily_version_freq[date] = {version: 0 for version in versions_ids}
+            date_labels = [date.strftime("%Y-%m-%d") for date in rrule.rrule(rrule.DAILY, dtstart=start_date, until=end_date)]
+            version_labels = [version.number for version in versions]
+            x_indexes = {date: idx for idx, date in enumerate(date_labels)}
+            y_indexes = {version_id: idx for idx, version_id in enumerate(versions_ids)}
+            daily_version_freq = []
+            for date in date_labels:
+                daily_version_freq.append([0] * len(version_labels))
             max_count = 0
-            for (date, version), count in dates.items():
-                d = date.date()
-                if d in daily_version_freq and version in daily_version_freq[d]:
-                    c = daily_version_freq[d][version] + count
-                    daily_version_freq[d][version] = c
+            for (bundle_create_date, version_id), count in dates.items():
+                date_str = bundle_create_date.strftime("%Y-%m-%d")
+                # check if the pr close time is after the batch date and move it one day if needed
+                # this should be replaced by checking if the pr is in the batch a more reliable way in, the future
+                if fixing_pr_close_dates.get(version_id) == date_str and bundle_create_date < fixing_prs[version_id].close_date:
+                    fixing_pr_close_dates[version_id] = (fixing_prs[version_id].close_date + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+                if breaking_pr_close_dates.get(version_id):
+                    breaking_pr = breaking_prs[version_id]
+                    breaking_next_day = (breaking_pr.close_date + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+                    if breaking_next_day == date_str and bundle_create_date < (breaking_pr.close_date + datetime.timedelta(days=1)):
+                        breaking_pr_close_dates['version_id'] = (breaking_pr.close_date + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+                x_index = x_indexes.get(date_str)
+                y_index = y_indexes.get(version_id)
+                if x_index is not None and y_index is not None:
+                    c = daily_version_freq[x_index][y_index] + count
+                    daily_version_freq[x_index][y_index] = c
                     max_count = max(max_count, c)
 
-            error.graph_history = draw_svg(
-                daily_version_freq, y_labels=y_labels, max_value=max_count, error_id=error.id,
-                category_id=error.first_seen_build_id.create_batch_id.category_id.id if error.first_seen_build_id else 1,
-                project_id=project_id if error.first_seen_build_id else 1,
-            )
-            error.graph_day_of_week_recurence = False
-            error.graph_day_of_month_recurence = False
+            error.history_data = {
+                'breaking_pr_close_dates': breaking_pr_close_dates,
+                'fixing_pr_close_dates': fixing_pr_close_dates,
+                'versions_ids': versions_ids,
+                'date_labels': date_labels,
+                'version_labels': version_labels,
+                'start_date': start_date.strftime("%Y-%m-%d"),
+                'end_date': end_date.strftime("%Y-%m-%d"),
+                'daily_version_freq': daily_version_freq,
+                'max_count': max_count,
+                'error_id': error.id,
+                'category_id': error.first_seen_build_id.top_parent.params_id.create_batch_id.category_id.id if error.first_seen_build_id else 1,
+                'project_id': project_id if error.first_seen_build_id else 1,
+            }
 
+    @ormcache('tuple(self.ids)', 'start_date', 'end_date')  # not sure that this is a good idea. Could be a stored field recomputed after scanning the errors?
     def _get_log_dates(self, start_date: datetime.datetime, end_date: datetime.datetime):
         """
         Returns an count of build_error per hour for the last 30 days.
@@ -157,11 +181,11 @@ class BuildErrorSeenMixin(models.AbstractModel):
         result = defaultdict(dict)
         if not self._origin.ids:
             return result
-        from_clause, content_field = self.get_log_dates_from_clause()
+        from_clause, content_table = self.get_log_dates_from_clause()
         self.env.cr.execute(f"""
-            SELECT record.id as record_id, date_trunc('day', batch.create_date) as time, build.version_id as version_id, count(*) as count
+            SELECT record.id as record_id, max(batch.create_date) as bundle_create_date, build.version_id as version_id, count(*) as count
               {from_clause}
-              JOIN runbot_build_error_link AS link ON link.error_content_id = {content_field}.id
+              JOIN runbot_build_error_link AS link ON link.error_content_id = {content_table}.id
               JOIN runbot_build AS build ON link.build_id = build.id
               JOIN runbot_batch AS batch ON build.create_batch_id = batch.id
              WHERE record.id IN %s AND batch.create_date BETWEEN %s AND %s
@@ -169,7 +193,7 @@ class BuildErrorSeenMixin(models.AbstractModel):
         """, (tuple(self.ids), start_date, end_date))
         data = self.env.cr.dictfetchall()
         for d in data:
-            result[self.browse(d['record_id'])][d['time'], d['version_id']] = d['count']
+            result[self.browse(d['record_id'])][d['bundle_create_date'], d['version_id']] = d['count']
         return result
 
 def _compute_related_error_content_ids(field_name):
@@ -189,6 +213,7 @@ class BuildError(models.Model):
     _description = "Build error"
     # An object to manage a group of errors log that fit together and assign them to a team
     _inherit = ('mail.thread', 'mail.activity.mixin', 'runbot.build.error.seen.mixin')
+    _mail_post_access = 'read'
 
 
     name = fields.Char("Name")
@@ -208,14 +233,14 @@ class BuildError(models.Model):
     fixing_pr_id = fields.Many2one('runbot.branch', 'Fixing PR', tracking=True, domain=[('is_pr', '=', True)])
     fixing_pr_alive = fields.Boolean('Fixing PR alive', related='fixing_pr_id.alive')
     fixing_pr_url = fields.Char('Fixing PR url', related='fixing_pr_id.branch_url')
-    fixing_bundle_id = fields.Many2one('runbot.bundle', 'Fixing bundle', related='fixing_pr_id.bundle_id', store=True, tracking=True)
+    fixing_bundle_id = fields.Many2one('runbot.bundle', 'Fixing bundle', compute='_compute_fixing_bundle_id', store=True, tracking=True)
     fixing_bundle_url = fields.Char('Fixing bundle url', related='fixing_bundle_id.frontend_url')
     fixing_pr_date = fields.Datetime('Fixing date', related="fixing_pr_id.close_date", help="Date of the merge of the first pr")
 
     breaking_pr_id = fields.Many2one('runbot.branch', 'Breaking pr', tracking=True, help="Pr that introduced the error")
     breaking_pr_url = fields.Char('Breaking PR url', related='breaking_pr_id.branch_url')
     breaking_bundle_id = fields.Many2one('runbot.bundle', 'Breaking bundle', tracking=True, help="Bundle that introduced the error", related='breaking_pr_id.bundle_id')
-    breaking_bundle_url = fields.Char('Breaking bundle url', related='fixing_bundle_id.frontend_url')
+    breaking_bundle_url = fields.Char('Breaking bundle url', related='breaking_bundle_id.frontend_url')
     breaking_pr_date = fields.Datetime('Breaking date', related="breaking_pr_id.close_date", help="Date of the merge of the first pr")
 
     test_tags = fields.Char(string='Test tags', help="Comma separated list of test_tags to use to reproduce/remove this error", tracking=True)
@@ -240,8 +265,12 @@ class BuildError(models.Model):
     version_ids = fields.Many2many('runbot.version', string='Versions', compute=_compute_related_error_content_ids('version_ids'), search=_search_related_error_content_ids('version_ids'))
     trigger_ids = fields.Many2many('runbot.trigger', string='Triggers', compute=_compute_related_error_content_ids('trigger_ids'), store=True)
     tag_ids = fields.Many2many('runbot.build.error.tag', string='Tags', compute=_compute_related_error_content_ids('tag_ids'), search=_search_related_error_content_ids('tag_ids'))
-
     random = fields.Boolean('Random', compute="_compute_random", store=True)
+
+    disappearing_batch_ids = fields.Many2many('runbot.batch', compute='_compute_disappearing_batch_ids', string='Fixing batches')
+
+    only_trigger_ids = fields.Many2one('runbot.trigger', string='Only Triggers', compute='_compute_only_trigger_ids', search='_search_only_trigger_ids')
+    only_version_ids = fields.Many2one('runbot.version', string='Only Versions', compute='_compute_only_version_ids', search='_search_only_version_ids')
 
     @api.constrains('tags_min_version_id', 'tags_max_version_id')
     def _check_min_max_version(self):
@@ -287,6 +316,73 @@ class BuildError(models.Model):
             record.description = record.name
             if record.error_content_ids:
                 record.description = record.error_content_ids[0].content
+
+    @api.depends('fixing_pr_id')
+    def _compute_fixing_bundle_id(self):
+        for record in self:
+            record.fixing_bundle_id = record.fixing_pr_id.bundle_id if record.fixing_pr_id else False
+
+    def _compute_disappearing_batch_ids(self):
+        # this is really inefficient but should only be used in form view
+        # One search per version where it appeared
+        # an alternative solution could be to do it using a table, fetching all batches after the minimal
+        # last_seen_batches, but it could scale verry bad on old errors
+        for record in self:
+            disappearing_batches_ids = []
+            last_seen_batches = record.last_seen_batch_ids
+            for batch in last_seen_batches:
+                disappearing_batch = self.env['runbot.batch'].search([
+                    ('bundle_id', '=', batch.bundle_id.id),
+                    ('id', '>', batch.id),
+                    ('category_id', '=', batch.category_id.id),
+                    ('state', '=', 'done')], order='id', limit=1)
+                if disappearing_batch:
+                    disappearing_batches_ids.append(disappearing_batch.id)
+            record.disappearing_batch_ids = self.env['runbot.batch'].browse(disappearing_batches_ids)
+
+    def _compute_only_trigger_ids(self):
+        for record in self:
+            record.only_trigger_ids = record.trigger_ids[0] if record.trigger_ids else False
+
+    def _search_only_trigger_ids(self, operator, value):
+        if operator == 'any':
+            operator = 'in'
+            value = self.env['runbot.trigger'].search(value).ids
+        if operator == 'in':
+            return ["!", ("trigger_ids", "any", [("id", "not in", value)])]
+        raise UserError("Operator %s is not supported for only_trigger_ids search" % operator)
+
+    def _compute_only_version_ids(self):
+        for record in self:
+            record.only_version_ids = record.version_ids[0] if record.version_ids else False
+
+    def _search_only_version_ids(self, operator, value):
+        if operator == 'any':
+            operator = 'in'
+            value = self.env['runbot.version'].search(value).ids
+        if operator == 'in':
+            return ["!", ("version_ids", "any", [("id", "not in", value)])]
+        raise UserError("Operator %s is not supported for only_version_ids search" % operator)
+
+    def action_appearing_batches(self):
+        self.ensure_one()
+        if not self.first_seen_batch_ids:
+            return
+        ids = ','.join(str(i) for i in self.first_seen_batch_ids.ids)
+        return {
+            'type': 'ir.actions.act_url',
+            'url': f'/runbot/batches/ids/{ids}/{self.id}?title=First%20seen%20batches'
+            }
+
+    def action_disappearing_batches(self):
+        self.ensure_one()
+        if not self.disappearing_batch_ids:
+            return
+        ids = ','.join(str(i) for i in self.disappearing_batch_ids.ids)
+        return {
+            'type': 'ir.actions.act_url',
+            'url': f'/runbot/batches/ids/{ids}/{self.id}?title=Disappearing%20batches',
+        }
 
     def _compute_content(self):
         for record in self:
@@ -435,19 +531,18 @@ class BuildError(models.Model):
                 if not (self.env.su or self.env.user.has_groups('runbot.group_runbot_admin')):
                     if build_error.test_tags:
                         raise UserError("This error as a test-tag and can only be (de)activated by admin")
-                    if not vals['active'] and build_error.active and build_error.last_seen_date and build_error.last_seen_date + relativedelta(days=1) > fields.Datetime.now():
+                    if not vals['active'] and build_error.active and build_error.last_seen_date and build_error.last_seen_date + relativedelta(days=1) > datetime.datetime.now():
                         raise UserError("This error broke less than one day ago can only be deactivated by admin")
 
-        if (responsible_id := vals.get('responsible')):
+        if (responsible_id := vals.get('responsible')) and vals.get('active', True):
             responsible = self.env['res.users'].browse(responsible_id)
             for build_error in self:
-                if responsible != self.env.user:
+                if build_error.active and responsible != self.env.user:
                     _logger.info('Notifying responsible %s of build error %s', responsible.name, build_error.id)
                     build_error.message_notify(
                         body=f'Error {build_error.id} was assigned to you by {self.env.user.name}',
                         partner_ids=responsible.partner_id.ids,
                         email_layout_xmlid='mail.mail_notification_layout',
-                        record_name=build_error.display_name,
                     )
                 build_error.message_subscribe(
                     partner_ids=(responsible.partner_id | self.env.user.partner_id).ids,
@@ -737,14 +832,14 @@ class BuildErrorContent(models.Model):
     version_ids = fields.One2many('runbot.version', compute='_compute_version_ids', string='Versions', search='_search_version')
     trigger_ids = fields.Many2many('runbot.trigger', compute='_compute_trigger_ids', string='Triggers', search='_search_trigger_ids')
     tag_ids = fields.Many2many('runbot.build.error.tag', string='Tags')
-    qualifiers = JsonDictField('Qualifiers', index=True)
+    qualifiers = JsonDictField('Qualifiers')
     similar_ids = fields.One2many('runbot.build.error.content', compute='_compute_similar_ids')
-
     responsible = fields.Many2one(related='error_id.responsible')
     customer = fields.Many2one(related='error_id.customer')
     team_id = fields.Many2one(related='error_id.team_id')
     fixing_commit = fields.Char(related='error_id.fixing_commit')
     fixing_pr_id = fields.Many2one(related='error_id.fixing_pr_id')
+    breaking_pr_id = fields.Many2one(related='error_id.breaking_pr_id')
     fixing_pr_alive = fields.Boolean(related='error_id.fixing_pr_alive')
     fixing_pr_url = fields.Char(related='error_id.fixing_pr_url')
     test_tags = fields.Char(related='error_id.test_tags')
@@ -785,7 +880,7 @@ class BuildErrorContent(models.Model):
             if not vals.get('error_id'):
                 temp = self.new(vals)  # _get_similar_domain could use any field of the record
                 similar_domain = auto_merge._get_similar_domain(temp)
-                similar_domain = expression.AND([similar_domain, [('error_id.active', '=', True)]])
+                similar_domain = Domain.AND([similar_domain, [('error_id.active', '=', True)]])
                 error_candidates = self.env['runbot.build.error.content'].search(similar_domain, order="id", limit=1)
                 if error_candidates:
                     vals['error_id'] = error_candidates[0].error_id.id
@@ -863,7 +958,7 @@ class BuildErrorContent(models.Model):
         res = dict(self.env.cr.fetchall())
 
         for build_error_content in self:
-            build_error_content.version_ids = self.env['runbot.version'].browse(res.get(build_error_content.id, []))
+            build_error_content.version_ids = self.env['runbot.version'].browse([v for v in res.get(build_error_content.id, []) if v])
 
     @api.depends('build_ids')
     def _compute_trigger_ids(self):
@@ -1164,7 +1259,7 @@ for error_content in self:
             except re.error as e:
                 raise ValidationError("Unable to compile regular expression: %s" % e)
             # verify that a named group exist in the pattern
-            if not re.search(r'\(\?P<\w+>.+\)', r.pattern):
+            if not r.groupindex:
                 raise ValidationError(
                     "The regular expresion should contain at least one named group pattern e.g: '(?P<module>.+)'"
                 )

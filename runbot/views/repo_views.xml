@@ -17,8 +17,10 @@
                   <field name="category_id" required='1'/>
                   <field name="project_id" default=""/>
                   <field name="config_id"/>
+                  <field name="network_enabled"/>
                   <field name="config_data" widget="runbotjsonb"/>
                   <field name="report_view_id"/>
+                  <field name="has_stats"/>
                 </group>
                 <group>
                   <field name="description"/>
@@ -26,6 +28,9 @@
                   <field name="upgrade_dumps_trigger_id"/>
                   <field name="upgrade_step_id"/>
                   <field name="version_domain" widget="domain" options="{'model': 'runbot.version', 'in_dialog': True}"/>
+                  <field name="on_base"/>
+                  <field name="on_staging"/>
+                  <field name="on_dev"/>
                 </group>
               </group>
               <group>

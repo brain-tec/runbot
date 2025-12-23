@@ -1,6 +1,4 @@
-from datetime import timedelta
-
-from odoo import fields
+from datetime import datetime, timedelta
 
 from .common import RunbotCase
 
@@ -15,7 +13,7 @@ class TestBatch(RunbotCase):
         batch._process()
         self.assertEqual(batch.state, 'preparing')
 
-        batch.last_update = fields.Datetime.now() - timedelta(seconds=120)
+        batch.last_update = datetime.now() - timedelta(seconds=120)
         batch._process()
         self.assertEqual(batch.state, 'ready')
 
@@ -24,12 +22,12 @@ class TestBatch(RunbotCase):
         self.trigger_server.ci_context = "test"
 
         def get_build_commit(sha, tree_hash, branch):
-            commit = self.Commit._get(sha, self.repo_server.id, {
+            commit = self.Commit._get(sha, self.repo_odoo.id, {
                 'tree_hash': tree_hash,
             })
             branch.head = commit
             batch = self.env['runbot.batch'].create({
-                'last_update': fields.Datetime.now(),
+                'last_update': datetime.now(),
                 'bundle_id': branch.bundle_id.id,
                 'state': 'preparing',
             })
@@ -38,10 +36,10 @@ class TestBatch(RunbotCase):
             self.assertEqual(batch.commit_link_ids.commit_id, commit)
             return batch, batch.slot_ids.build_id, commit
 
-        batch_1, build_1, commit_1 = get_build_commit('aaaaaaa', '0aaaaaa', self.branch_server)
+        batch_1, build_1, commit_1 = get_build_commit('aaaaaaa', '0aaaaaa', self.branch_odoo)
         self.assertEqual(build_1.slot_ids.mapped('batch_id'), batch_1)
 
-        batch_2, build_2, commit_2 = get_build_commit('bbbbbbb', '0bbbbbb', self.branch_server)
+        batch_2, build_2, commit_2 = get_build_commit('bbbbbbb', '0bbbbbb', self.branch_odoo)
         self.assertNotEqual(build_1, build_2)
         self.assertNotEqual(commit_1, commit_2)
         self.assertNotEqual(batch_1, batch_2)

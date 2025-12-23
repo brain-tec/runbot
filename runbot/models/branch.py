@@ -14,7 +14,10 @@ class Branch(models.Model):
     _order = 'name'
     _rec_name = 'dname'
 
-    _sql_constraints = [('branch_repo_uniq', 'unique (name,remote_id)', 'The branch must be unique per repository !')]
+    _branch_repo_uniq = models.Constraint(
+        'unique (name,remote_id)',
+        "The branch must be unique per repository !",
+    )
 
     name = fields.Char('Name', required=True)
     remote_id = fields.Many2one('runbot.remote', 'Remote', required=True, ondelete='cascade', index=True)
@@ -45,25 +48,39 @@ class Branch(models.Model):
     draft = fields.Boolean('Draft', store=True)
     close_date = fields.Datetime('Close date')
 
+    forwardport_of_id = fields.Many2one('runbot.branch', compute='_compute_forwardport_of_id', string='Forwardport of', store=True, index=True)
+    forwardport_ids = fields.One2many('runbot.branch', 'forwardport_of_id', string='Forwardports')
+
     @api.depends('name', 'remote_id.short_name')
     def _compute_dname(self):
         for branch in self:
             branch.dname = '%s:%s' % (branch.remote_id.short_name, branch.name)
 
-    def _search_dname(self, operator, value):
+    def _search_dname(self, operator, values):
         # Match format (owner?, repo, branch)
-        owner = repo = branch = None
-        if (m := re.match(r'(?:([\w-]+)/)?([\w-]+)[:#]([\w\.-]+)', value)):
-            owner, repo, branch = m.groups()
-        # Match PR url format
-        if (m := re.search(r'/([\w-]+)/([\w-]+)/pull/(\d+)', value)):
-            owner, repo, branch = m.groups()
-        if repo and branch:
-            domain = [('name', operator, branch), ('remote_id.repo_name', '=', repo)]
-            if owner:
-                domain.append(('remote_id.owner', '=', owner))
-            return domain
-        return [('name', operator, value)]
+        def make_domain(value):
+            owner = repo = branch = None
+            if (m := re.match(r'(?:([\w-]+)/)?([\w-]+)[:#]([\w\.-]+)', value)):
+                owner, repo, branch = m.groups()
+            # Match PR url format
+            if (m := re.search(r'/([\w-]+)/([\w-]+)/pull/(\d+)', value)):
+                owner, repo, branch = m.groups()
+            if repo and branch:
+                domain = [('name', '=', branch), ('remote_id.repo_name', '=', repo)]
+                if owner:
+                    domain.append(('remote_id.owner', '=', owner))
+                return domain
+
+        if operator == 'in':
+            domains = [make_domain(value) for value in values]
+            if all(domains):
+                return fields.Domain.OR(domains)
+
+        if operator in ('=', 'ilike'):
+            if (domain := make_domain(values)):
+                return domain
+
+        return [('name', operator, values)]
 
     @api.depends('name', 'is_pr', 'target_branch_name', 'pull_head_name', 'pull_head_remote_id')
     def _compute_reference_name(self):
@@ -88,6 +105,25 @@ class Branch(models.Model):
             if forced_version and not reference_name.startswith(f'{forced_version.name}-'):
                 reference_name = f'{forced_version.name}---{reference_name}'
             branch.reference_name = reference_name
+
+    @api.depends('pr_body')
+    def _compute_forwardport_of_id(self):
+        r = re.compile(r'Forward-Port-Of: (?:.+/.+)?#(\d+)')
+        base_candidates = {}
+        for branch in self:
+            branch.forwardport_of_id = False
+        for fowardport in self.filtered(lambda b: b.is_pr and (b.pull_head_name or '').endswith('-fw') and 'Forward-Port-Of:' in (b.pr_body or '')):
+            for name in r.findall(fowardport.pr_body):
+                base_candidates.setdefault(name, []).append(fowardport)
+        base_candidates_pr = self.search([('is_pr', '=', True), ('name', 'in', tuple(base_candidates.keys())), ('pull_head_name', '!=', False)])
+        if base_candidates:
+            assert base_candidates_pr
+
+        for pr in base_candidates_pr:
+            for forwardport in base_candidates[pr.name]:
+                rname = re.escape(pr.pull_head_name.split(':')[1])
+                if pr.remote_id == forwardport.remote_id and re.match(rf'^.*-{rname}-\w+-fw$', forwardport.pull_head_name.split(':')[1]):
+                    forwardport.forwardport_of_id = pr
 
     def _update_branch_infos(self, pull_info=None):
         """compute branch_url, pull_head_name and target_branch_name based on name"""
@@ -252,9 +288,6 @@ class Branch(models.Model):
 
         if was_alive and not self.alive:
             self.close_date = self.env.cr.now()
-            if self.bundle_id.for_next_freeze:
-                if not any(branch.alive and branch.is_pr for branch in self.bundle_id.branch_ids):
-                    self.bundle_id.for_next_freeze = False
 
         if (not self.draft and was_draft) or (self.alive and not was_alive) or (self.target_branch_name != init_target_branch_name and self.alive):
             self.bundle_id._force()
