@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
-import datetime
+import json
+import subprocess
 from unittest.mock import patch, mock_open
 from odoo import Command, fields
+from odoo.tests import Like
 from odoo.tools import mute_logger
 from odoo.exceptions import UserError
 from odoo.addons.runbot.common import RunbotException
 from .common import RunbotCase
 from ..common import markdown_unescape
+
 
 class TestBuildConfigStepCommon(RunbotCase):
     def setUp(self):
@@ -19,14 +22,13 @@ class TestBuildConfigStepCommon(RunbotCase):
         self.server_commit = self.Commit.create({
             'name': 'dfdfcfcf',
             'tree_hash': '0dfdfcfcf',
-            'repo_id': self.repo_server.id
+            'repo_id': self.repo_odoo.id,
         })
         self.parent_build = self.Build.create({
             'params_id': self.base_params.copy({'commit_link_ids': [(0, 0, {'commit_id': self.server_commit.id})]}).id,
             'local_result': 'ok',
         })
         self.start_patcher('find_patcher', 'odoo.addons.runbot.common.find', 0)
-        self.start_patcher('findall_patcher', 'odoo.addons.runbot.models.build.BuildResult._parse_config', {})
 
 
 class TestCodeowner(TestBuildConfigStepCommon):
@@ -96,35 +98,34 @@ class TestCodeowner(TestBuildConfigStepCommon):
         second_pr = self.Branch.create({
             'name': '1235',
             'is_pr': True,
-            'remote_id': self.remote_server.id,
+            'remote_id': self.remote_odoo.id,
             'target_branch_name': self.dev_bundle.base_id.name,
-            'pull_head_remote_id': self.remote_server.id,
-            'pull_head_name': f'{self.remote_server.owner}:{self.dev_branch.name}',
+            'pull_head_remote_id': self.remote_odoo.id,
+            'pull_head_name': f'{self.remote_odoo.owner}:{self.dev_branch.name}',
         })
         self.assertEqual(second_pr.bundle_id.id, self.dev_bundle.id)
         self.config_step._run_codeowner(self.parent_build)
         self.assertEqual(self.parent_build.log_ids.mapped('message'), [
-            "More than one open pr in this bundle for server: ['1234', '1235']"
+            "More than one open pr in this bundle for odoo: ['1234', '1235']"
         ])
         self.assertEqual(self.parent_build.local_result, 'ko')
 
     def test_get_module(self):
-        self.assertEqual(self.repo_server.addons_paths, 'addons,core/addons')
-        self.assertEqual('module1', self.repo_server._get_module('server/core/addons/module1/some/file.py'))
-        self.assertEqual('module1', self.repo_server._get_module('server/addons/module1/some/file.py'))
-        self.assertEqual('module_addons', self.repo_addons._get_module('addons/module_addons/some/file.py'))
-        self.assertEqual(None, self.repo_server._get_module('server/core/module1/some/file.py'))
-        self.assertEqual(None, self.repo_server._get_module('server/core/module/some/file.py'))
-
+        self.assertEqual(self.repo_odoo.addons_paths, 'addons,core/addons')
+        self.assertEqual('module1', self.repo_odoo._get_module('odoo/core/addons/module1/some/file.py'))
+        self.assertEqual('module1', self.repo_odoo._get_module('odoo/addons/module1/some/file.py'))
+        self.assertEqual('module_addons', self.repo_enterprise._get_module('enterprise/module_addons/some/file.py'))
+        self.assertEqual(None, self.repo_odoo._get_module('odoo/core/module1/some/file.py'))
+        self.assertEqual(None, self.repo_odoo._get_module('odoo/core/module/some/file.py'))
     def test_codeowner_regex_multiple(self):
         self.diff = 'file.js\nfile.py\nfile.xml'
         self.config_step._run_codeowner(self.parent_build)
         messages = self.parent_build.log_ids.mapped('message')
         self.assertEqual(messages[1], 'Checking 2 codeowner regexed on 3 files')
-        self.assertEqual(markdown_unescape(messages[2]), 'Adding team_js to reviewers for file [server/file.js](https://False/blob/dfdfcfcf/file.js)')
-        self.assertEqual(markdown_unescape(messages[3]), 'Adding team_py to reviewers for file [server/file.py](https://False/blob/dfdfcfcf/file.py)')
-        self.assertEqual(markdown_unescape(messages[4]), 'Adding codeowner-team to reviewers for file [server/file.xml](https://False/blob/dfdfcfcf/file.xml)')
-        self.assertEqual(markdown_unescape(messages[5]), 'Requesting review for pull request [base/server:1234](https://example.com/base/server/pull/1234): codeowner-team, team_js, team_py')
+        self.assertEqual(markdown_unescape(messages[2]), 'Adding team_js to reviewers for file [odoo/file.js](https://False/blob/dfdfcfcf/file.js)')
+        self.assertEqual(markdown_unescape(messages[3]), 'Adding team_py to reviewers for file [odoo/file.py](https://False/blob/dfdfcfcf/file.py)')
+        self.assertEqual(markdown_unescape(messages[4]), 'Adding codeowner-team to reviewers for file [odoo/file.xml](https://False/blob/dfdfcfcf/file.xml)')
+        self.assertEqual(markdown_unescape(messages[5]), 'Requesting review for pull request [base/odoo:1234](https://example.com/base/odoo/pull/1234): codeowner-team, team_js, team_py')
         self.assertEqual(self.dev_pr.reviewers, 'codeowner-team,team_js,team_py')
 
     def test_codeowner_regex_some_already_on(self):
@@ -132,14 +133,14 @@ class TestCodeowner(TestBuildConfigStepCommon):
         self.dev_pr.reviewers = 'codeowner-team,team_js'
         self.config_step._run_codeowner(self.parent_build)
         messages = self.parent_build.log_ids.mapped('message')
-        self.assertEqual(markdown_unescape(messages[5]), 'Requesting review for pull request [base/server:1234](https://example.com/base/server/pull/1234): team_py')
+        self.assertEqual(markdown_unescape(messages[5]), 'Requesting review for pull request [base/odoo:1234](https://example.com/base/odoo/pull/1234): team_py')
 
     def test_codeowner_regex_all_already_on(self):
         self.diff = 'file.js\nfile.py\nfile.xml'
         self.dev_pr.reviewers = 'codeowner-team,team_js,team_py'
         self.config_step._run_codeowner(self.parent_build)
         messages = self.parent_build.log_ids.mapped('message')
-        self.assertEqual(messages[5], 'All reviewers are already on pull request [base/server:1234](https://example.com/base/server/pull/1234)')
+        self.assertEqual(messages[5], 'All reviewers are already on pull request [base/odoo:1234](https://example.com/base/odoo/pull/1234)')
 
     def test_codeowner_author_in_team(self):
         self.diff = 'file.js\nfile.py\nfile.xml'
@@ -150,7 +151,7 @@ class TestCodeowner(TestBuildConfigStepCommon):
         self.config_step._run_codeowner(self.parent_build)
         messages = self.parent_build.log_ids.mapped('message')
         self.assertEqual(markdown_unescape(messages[5]), "Skipping teams ['team_py'] since author is part of the team members")
-        self.assertEqual(markdown_unescape(messages[6]), 'Requesting review for pull request [base/server:1234](https://example.com/base/server/pull/1234): codeowner-team, team_js')
+        self.assertEqual(markdown_unescape(messages[6]), 'Requesting review for pull request [base/odoo:1234](https://example.com/base/odoo/pull/1234): codeowner-team, team_js')
         self.assertEqual(self.dev_pr.reviewers, 'codeowner-team,team_js,team_py')
 
     def test_codeowner_ownership_base(self):
@@ -163,7 +164,7 @@ class TestCodeowner(TestBuildConfigStepCommon):
         messages = self.parent_build.log_ids.mapped('message')
         self.assertEqual(
             markdown_unescape(messages[2]), 
-            'Adding team_01, team_py to reviewers for file [server/core/addons/module1/some/file.py](https://False/blob/dfdfcfcf/core/addons/module1/some/file.py)'
+            'Adding team_01, team_py to reviewers for file [odoo/core/addons/module1/some/file.py](https://False/blob/dfdfcfcf/core/addons/module1/some/file.py)'
         )
 
     def test_codeowner_ownership_fallback(self):
@@ -176,7 +177,7 @@ class TestCodeowner(TestBuildConfigStepCommon):
         messages = self.parent_build.log_ids.mapped('message')
         self.assertEqual(
             markdown_unescape(messages[2]), 
-            'Adding team_py to reviewers for file [server/core/addons/module1/some/file.py](https://False/blob/dfdfcfcf/core/addons/module1/some/file.py)'
+            'Adding team_py to reviewers for file [odoo/core/addons/module1/some/file.py](https://False/blob/dfdfcfcf/core/addons/module1/some/file.py)'
         )
 
     def test_codeowner_ownership(self):
@@ -193,13 +194,13 @@ class TestCodeowner(TestBuildConfigStepCommon):
         self.config_step._run_codeowner(self.parent_build)
         messages = [markdown_unescape(message) for message in self.parent_build.log_ids.mapped('message')]
         self.assertEqual(messages, [
-            'PR [base/server:1234](https://example.com/base/server/pull/1234) found for repo **server**',
+            'PR [base/odoo:1234](https://example.com/base/odoo/pull/1234) found for repo **odoo**',
             'Checking 2 codeowner regexed on 4 files',
-            'Adding team_01, team_py to reviewers for file [server/core/addons/module1/some/file.py](https://False/blob/dfdfcfcf/core/addons/module1/some/file.py)',
-            'Adding team_02 to reviewers for file [server/core/addons/module2/some/file.ext](https://False/blob/dfdfcfcf/core/addons/module2/some/file.ext)',
-            'Adding team_js to reviewers for file [server/core/addons/module3/some/file.js](https://False/blob/dfdfcfcf/core/addons/module3/some/file.js)',
-            'Adding codeowner-team to reviewers for file [server/core/addons/module4/some/file.txt](https://False/blob/dfdfcfcf/core/addons/module4/some/file.txt)',
-            'Requesting review for pull request [base/server:1234](https://example.com/base/server/pull/1234): codeowner-team, team_01, team_02, team_js, team_py'
+            'Adding team_01, team_py to reviewers for file [odoo/core/addons/module1/some/file.py](https://False/blob/dfdfcfcf/core/addons/module1/some/file.py)',
+            'Adding team_02 to reviewers for file [odoo/core/addons/module2/some/file.ext](https://False/blob/dfdfcfcf/core/addons/module2/some/file.ext)',
+            'Adding team_js to reviewers for file [odoo/core/addons/module3/some/file.js](https://False/blob/dfdfcfcf/core/addons/module3/some/file.js)',
+            'Adding codeowner-team to reviewers for file [odoo/core/addons/module4/some/file.txt](https://False/blob/dfdfcfcf/core/addons/module4/some/file.txt)',
+            'Requesting review for pull request [base/odoo:1234](https://example.com/base/odoo/pull/1234): codeowner-team, team_01, team_02, team_js, team_py'
         ])
 
     def test_codeowner___init__log(self):
@@ -210,10 +211,10 @@ class TestCodeowner(TestBuildConfigStepCommon):
         ])
         self.config_step._run_codeowner(self.parent_build)
         logs = self.parent_build.log_ids
-        print
+
         self.assertEqual(
             logs[2]._markdown(),
-            'Adding team_01, team_py to reviewers for file <a href="https://False/blob/dfdfcfcf/core/addons/module1/some/__init__.py">server/core/addons/module1/some/__init__.py</a>',
+            'Adding team_01, team_py to reviewers for file <a href="https://False/blob/dfdfcfcf/core/addons/module1/some/__init__.py">odoo/core/addons/module1/some/__init__.py</a>',
             '__init__.py should not be replaced by <ins>init</ins>.py'
         )
 
@@ -273,9 +274,7 @@ class TestBuildConfigStepRestore(TestBuildConfigStepCommon):
         cmds = docker_params['cmd'].split(' && ')
         self.assertEqual(f'wget --retry-on-host-error https://False/runbot/static/build/{reference_build.dest}/logs/{reference_build.dest}-suffix.zip', cmds[2])
         self.assertEqual(f'psql -q {dev_build.dest}-suffix < dump.sql', cmds[8])
-        self.called=True
-
-
+        self.called = True
 
 class TestBuildConfigStepCreate(TestBuildConfigStepCommon):
 
@@ -380,6 +379,404 @@ class TestBuildConfigStepCreate(TestBuildConfigStepCommon):
         self.assertEqual(len(self.parent_build.children_ids.filtered(lambda b: b.config_id == test_config_2)), 5)
 
 
+class TestBuildConfigStepDynamic(TestBuildConfigStepCommon):
+
+    def setUp(self):
+        super().setUp()
+        self.config_step = self.ConfigStep.create({
+            'name': 'test_step',
+            'job_type': 'dynamic',
+            'number_builds': 2,
+        })
+        self.commit_server = self.Commit.create({
+            'name': 'dfdfcfcf0000ffffffffffffffffffffffffffff',
+            'tree_hash': '0dfdfcfcf0000fffffffffffffffffffffffffff',
+            'repo_id': self.repo_odoo.id,
+        })
+        self.commit_addons = self.Commit.create({
+            'name': 'dfdfcfcf0011ffffffffffffffffffffffffffff',
+            'tree_hash': '0dfdfcfcf0011fffffffffffffffffffffffffff',
+            'repo_id': self.repo_enterprise.id,
+        })
+
+        with open(__file__[:-25] + 'test_build_config_step_dynamic.json') as f:
+            self.config_file = f.read()
+
+        with open(__file__[:-25] + 'test_build_config_step_dynamic_extension.json') as f:
+            self.config_file_extension = f.read()
+
+        with open(__file__[:-25] + 'test_build_config_step_dynamic_l10n.json') as f:
+            self.l10n_standalone_testing_file = f.read()
+
+        self.config = self.Config.create({
+            'name': 'Dynamic parallel testing',
+            'step_order_ids': [
+                (0, 0, {'sequence': 10, 'step_id': self.config_step.id}),
+            ],
+            'default_dynamic_config': self.config_file,
+            'dynamic_config_extension': self.config_file_extension,
+        })
+
+        self.build = self.Build.create({
+            'params_id': self.base_params.copy({
+                'config_id': self.config.id,
+                'commit_link_ids': [(0, 0, {'commit_id': self.commit_server.id}), (0, 0, {'commit_id': self.commit_addons.id})],
+                }).id,
+            'local_result': 'ok',
+        })
+
+    def mock_git_helper(self, repo, cmd):
+        if repo == self.repo_odoo and cmd == ['show', 'dfdfcfcf0000ffffffffffffffffffffffffffff:odoo/tests/.runbot/parallel_testing.json']:
+            return self.config_file
+        elif repo == self.repo_odoo and cmd == ['show', 'dfdfcfcf0000ffffffffffffffffffffffffffff:odoo/tests/.runbot/l10n_standalone_testing.json']:
+            return self.l10n_standalone_testing_file
+        elif 'show' in cmd:
+            raise subprocess.CalledProcessError(cmd, 128)
+        return super().mock_git_helper(repo, cmd)
+
+    def test_module_filters(self):
+        self.assertEqual(self.build._get_modules_to_test('-> !mail'), ['base', 'crm', 'documents'])
+        self.assertEqual(self.build._get_modules_to_test('mail -> !web'), ['mail', 'project', 'test_l10n', 'test_lint'])
+        self.assertEqual(self.build._get_modules_to_test('web -> web'), ['web'])
+        self.assertEqual(self.build._get_modules_to_test('!web ->'), ['web_enterprise'])
+        self.assertEqual(self.build._get_modules_to_test('-> !mail, -crm'), ['base', 'documents'])
+        self.assertEqual(self.build._get_modules_to_test('mail -> !web, !project'), ['mail', 'test_l10n', 'test_lint'])
+        self.assertEqual(self.build._get_modules_to_test('-*,odoo/*'), ['base', 'crm', 'hw_drivers', 'mail', 'project', 'test_l10n', 'test_lint', 'web'])
+        self.assertEqual(self.build._get_modules_to_test('-*,odoo/test_*'), ['test_l10n', 'test_lint'])
+        self.assertEqual(self.build._get_modules_to_test('-*,enterprise/*'), ['documents', 'l10n_be', 'l10n_in', 'web_enterprise'])
+        self.assertEqual(self.build._get_modules_to_test('-*,web*'), ['web', 'web_enterprise'])
+        self.assertEqual(self.build._get_modules_to_test('-*,web*,-enterprise/web*'), ['web'])
+
+    def test_config_extension(self):
+        self.assertEqual(self.build.dynamic_config['steps'][1]['cpu_limit'], 6500)
+        self.assertEqual(json.loads(self.config.default_dynamic_config)['vars']['module_filter'], '*,-hw_*')
+        self.assertEqual(self.build.dynamic_config['vars']['module_filter'], '*,-hw_*,-l10n_*')
+
+    def check_server_cmd(self, cmd, install, test_enable, test_tags, db=None):
+        self.assertIn('odoo/server.py', cmd)
+        if install:
+            self.assertIn('-i', cmd)
+            cmd_install = cmd[cmd.index('-i') + 1].split(',')
+            self.assertEqual(cmd_install, install)
+        else:
+            self.assertNotIn('-i', cmd)
+        if test_enable:
+            self.assertIn('--test-enable', cmd)
+        else:
+            self.assertNotIn('--test-enable', cmd)
+        if test_tags:
+            self.assertIn('--test-tags', cmd)
+            cmd_test_tags = cmd[cmd.index('--test-tags') + 1]
+            self.assertEqual(cmd_test_tags, test_tags)
+        else:
+            self.assertNotIn('--test-tags', cmd)
+
+        if db:
+            self.assertIn('-d', cmd)
+            cmd_db = cmd[cmd.index('-d') + 1]
+            self.assertEqual(cmd_db, db)
+
+    def test_dynamic_step_parallel_testing(self):
+        config = self.Config.create({
+            'name': 'Dynamic parallel testing',
+            'step_order_ids': [
+                (0, 0, {'sequence': 10, 'step_id': self.config_step.id}),
+            ],
+            'dynamic_config_file_path': 'odoo/tests/.runbot/parallel_testing.json',
+            'dynamic_config_extension': self.config_file_extension,
+        })
+        build = self.Build.create({
+            'params_id': self.base_params.copy({
+                'config_id': config.id,
+                'commit_link_ids': [(0, 0, {'commit_id': self.commit_server.id}), (0, 0, {'commit_id': self.commit_addons.id})],
+                }).id,
+            'local_result': 'ok',
+        })
+        self.maxDiff = None
+
+        self.start_patcher('_make_results', 'odoo.addons.runbot.models.build_config.ConfigStep._make_results', None)
+
+        # 0.1. create at install builds
+        build._schedule()
+        self.assertEqual(build.active_step.id, self.config_step.id)
+        self.assertEqual(build.dynamic_active_step_index, 0)
+        self.assertEqual(len(build.children_ids), 2, 'Two sub-builds should have been generated')
+        self.assertEqual(build.children_ids[0].config_id.id, config.id)
+        self.assertEqual(build.children_ids[1].config_id.id, config.id)
+        step_logs = build.log_ids[-3:]
+        self.assertEqual(step_logs[0].message, 'Starting step **create_at_install** from config **Dynamic parallel testing**')
+        self.assertEqual(step_logs[1].message, 'created with config Test at install')
+        self.assertEqual(step_logs[2].message, 'created with config Test pylint')
+
+        # 0.2. install test database
+        self.assertFalse(self.docker_run_calls, "No docker run should have been called yet")
+        build._schedule()()
+        self.assertEqual(build.active_step.id, self.config_step.id)
+        self.assertEqual(build.dynamic_active_step_index, 1)
+
+        step_logs = build.log_ids[-2:]
+        self.assertEqual(step_logs[0].message, Like('Starting step **install all** from config **Dynamic parallel testing**...'))
+        self.assertEqual(step_logs[1].message, 'Using Dockerfile Tag [odoo:DockerDefault](/runbot/dockerfile_result/odoo:DockerDefault/None)')
+
+        self.assertEqual(len(self.docker_run_calls), 1, "One docker run should have been called for install_all step")
+        cmd = self.docker_run_calls[0][0]
+        odoo_cmd = cmd.cmd
+        self.check_server_cmd(odoo_cmd,
+            install=['base', 'crm', 'documents', 'mail', 'project', 'test_l10n', 'test_lint', 'web', 'web_enterprise'],
+            test_enable=False,
+            test_tags=None,
+            db=f'{build.dest}-all',
+        )
+        # 0.3. create post install builds
+        build._schedule()
+        self.assertEqual(build.active_step.id, self.config_step.id)
+        self.assertEqual(build.dynamic_active_step_index, 2)
+        step_logs = build.log_ids[-6:]
+        #self.assertEqual(step_logs[0].message, Like(f'Step install_all finished in ...{build.dest}-all.zip...'))
+        self.assertEqual(step_logs[1].message, 'Starting step **create_post_install** from config **Dynamic parallel testing**')
+        self.assertEqual(step_logs[2].message, 'created with config Test Post Install')
+        self.assertEqual(step_logs[3].message, 'created with config Test Post Install')
+        self.assertEqual(step_logs[4].message, 'created with config Test Post Install')
+        self.assertEqual(step_logs[5].message, 'created with config Test Post Install')
+
+        # 0.4. parent done
+        build._schedule()
+        self.assertEqual(build.active_step.id, False)
+        self.assertEqual(build.dynamic_active_step_index, 3)
+        self.assertEqual(build.local_state, 'done')
+
+        ### Check children
+
+        at_install, test_lint, post_install_1, post_install_2, post_install_3, post_install_4 = build.children_ids.sorted('id')
+
+        # 2.1 at install builds
+        self.docker_run_calls = []
+
+        at_install._schedule()()
+
+        cmd = self.docker_run_calls[0][0]
+        odoo_cmd = cmd.cmd
+        self.check_server_cmd(odoo_cmd,
+            install=['base', 'crm', 'documents', 'mail', 'project', 'test_l10n', 'test_lint', 'web', 'web_enterprise'],
+            test_enable=True,
+            test_tags='-post_install,-/test_lint',
+        )
+
+        # 3.1 at install builds
+        self.docker_run_calls = []
+        test_lint._schedule()()
+        cmd = self.docker_run_calls[0][0]
+        odoo_cmd = cmd.cmd
+        self.check_server_cmd(odoo_cmd,
+            install=['test_lint'],
+            test_enable=True,
+            test_tags='-post_install,/test_lint',
+        )
+
+        for post_install, expected_tags in [
+            (post_install_1, '-at_install,/base,/crm,/documents,/hw_drivers,/l10n_be,/l10n_in'),  # we need the blacklisted modules here
+            (post_install_2, '-at_install,/mail,/project,/test_l10n,/test_lint'),
+            (post_install_3, '-at_install,/web'),
+            (post_install_4, '-at_install,/web_enterprise'),
+        ]:
+            with self.subTest(post_install=expected_tags):
+                # 4.1 post install restore
+                self.docker_run_calls = []
+                post_install._schedule()()
+                self.assertEqual(len(self.docker_run_calls), 1, "One docker run should have been called for post_install restore step")
+                cmd = self.docker_run_calls[0][0]
+                self.assertIn(f'{build.dest}/logs/{build.dest}-all.zip', cmd, 'The database from the parent should be downloaded by default')
+
+                # 4.2 post install test
+                post_install._schedule()()
+                self.assertEqual(len(self.docker_run_calls), 2, "Two docker run should have been called for post_install restore and post install step")
+                self.check_server_cmd(self.docker_run_calls[1][0].cmd,
+                    install=None,
+                    test_enable=True,
+                    test_tags=expected_tags,
+                )
+                test_module_filter = post_install.params_id.config_data['dynamic_vars']['test_module_filter']
+                self.assertIn('->', test_module_filter)
+                self.assertEqual(post_install.description, f'Post install tests for **{test_module_filter}**')
+
+    def test_dynamic_step_l10n_standalone(self):
+        self.addons_per_repo[self.repo_enterprise] += [
+            ('', 'l10n_edi_be', '__manifest__.py'),
+            ('', 'l10n_edi_in', '__manifest__.py'),
+            ('', 'l10n_reports_be', '__manifest__.py'),
+            ('', 'l10n_reports_in', '__manifest__.py'),
+            ('', 'l10n_hr_payroll_be', '__manifest__.py'),
+            ('', 'l10n_hr_payroll_in', '__manifest__.py'),
+        ]
+        config = self.Config.create({
+            'name': 'Dynamic L10N Standalone Testing',
+            'step_order_ids': [
+                (0, 0, {'sequence': 10, 'step_id': self.config_step.id}),
+            ],
+            'dynamic_config_file_path': 'odoo/tests/.runbot/l10n_standalone_testing.json',
+        })
+        build = self.Build.create({
+            'params_id': self.base_params.copy({
+                'config_id': config.id,
+                'commit_link_ids': [(0, 0, {'commit_id': self.commit_server.id}), (0, 0, {'commit_id': self.commit_addons.id})],
+                }).id,
+            'local_result': 'ok',
+        })
+        self.maxDiff = None
+
+        self.start_patcher('_make_results', 'odoo.addons.runbot.models.build_config.ConfigStep._make_results', None)
+
+        # 0.1. install test_l10 database
+        self.assertFalse(self.docker_run_calls, "No docker run should have been called yet")
+        build._schedule()()
+        self.assertEqual(build.active_step.id, self.config_step.id)
+        self.assertEqual(build.dynamic_active_step_index, 0)
+
+        step_logs = build.log_ids[-2:]
+        self.assertEqual(step_logs[0].message, Like('Starting step **Install test_l10n database** from config...'))
+        self.assertEqual(step_logs[1].message, 'Using Dockerfile Tag [odoo:DockerDefault](/runbot/dockerfile_result/odoo:DockerDefault/None)')
+
+        self.assertEqual(len(self.docker_run_calls), 1, "One docker run should have been called for install_all step")
+        cmd = self.docker_run_calls[0][0]
+        odoo_cmd = cmd.cmd
+        self.check_server_cmd(odoo_cmd,
+            install=['test_l10n'],
+            test_enable=False,
+            test_tags=None,
+            db=f'{build.dest}-l10n',
+        )
+
+        # 0.2 run standalone l10n script
+        self.docker_run_calls = []
+        build._schedule()()
+        self.assertEqual(len(self.docker_run_calls), 1, "One docker run should have been called for install_all step")
+        cmd = self.docker_run_calls[0][0]
+        self.assertEqual(cmd.build(), f'odoo/odoo/tests/test_module_operations.py -d {build.dest}-l10n --data-dir /data/build/datadir/ --addons-path odoo/addons,odoo/core/addons,enterprise --standalone all_l10n')
+
+        # 0.3. create post install builds
+        build._schedule()
+        self.assertEqual(build.active_step.id, self.config_step.id)
+        self.assertEqual(build.dynamic_active_step_index, 2)
+        step_logs = build.log_ids[-6:]
+        #self.assertEqual(step_logs[0].message, Like(f'Step install_all finished in ...{build.dest}-all.zip...'))
+        self.assertEqual(step_logs[1].message, 'Starting step **Create post install** from config **Dynamic L10N Standalone Testing**')
+        self.assertEqual(step_logs[2].message, 'created with config Test Post Install')
+        self.assertEqual(step_logs[3].message, 'created with config Test Post Install')
+        self.assertEqual(step_logs[4].message, 'created with config Test Post Install')
+        self.assertEqual(step_logs[5].message, 'created with config Test Post Install')
+
+        # 0.4. parent done
+        build._schedule()
+        self.assertEqual(build.active_step.id, False)
+        self.assertEqual(build.dynamic_active_step_index, 3)
+        self.assertEqual(build.local_state, 'done')
+
+        ### Check children
+
+        post_install_1, post_install_2, post_install_3, post_install_4 = build.children_ids.sorted('id')
+
+        for post_install, expected_tags in [
+            (post_install_1, '-external,-external_l10n,post_install_l10n/l10n_hr_payroll_be,post_install_l10n/l10n_hr_payroll_in'),  # we need the blacklisted modules here
+            (post_install_2, '-external,-external_l10n,post_install_l10n/l10n_edi_be,post_install_l10n/l10n_edi_in'),
+            (post_install_3, '-external,-external_l10n,post_install_l10n/l10n_reports_be,post_install_l10n/l10n_reports_in'),
+            (post_install_4, Like('-external,-external_l10n,post_install_l10n/base,post_install_l10n/crm,...')),
+        ]:
+            with self.subTest(post_install=expected_tags):
+                # 4.1 post install restore
+                self.docker_run_calls = []
+                post_install._schedule()()
+                self.assertEqual(len(self.docker_run_calls), 1, "One docker run should have been called for post_install restore step")
+                cmd = self.docker_run_calls[0][0]
+                self.assertIn(f'{build.dest}/logs/{build.dest}-l10n.zip', cmd, 'The database from the parent should be downloaded by default')
+
+                # 4.2 post install test
+                post_install._schedule()()
+                self.assertEqual(len(self.docker_run_calls), 2, "Two docker run should have been called for post_install restore and post install step")
+                self.check_server_cmd(self.docker_run_calls[1][0].cmd,
+                    install=None,
+                    test_enable=True,
+                    test_tags=expected_tags,
+                )
+                test_module_filter = post_install.params_id.config_data['dynamic_vars']['test_module_filter']
+                self.assertEqual(post_install.description, f'Post install tests for **{test_module_filter}**')
+
+    def test_foreach_module(self):
+        dynamic_config = '''{
+            "name": "Foreach module testing",
+            "steps": [{
+                "name": "Create module builds",
+                "job_type": "create_build",
+                "for_each_module": "{{-test_*|filter_default_modules}}",
+                "children": [{
+                    "name": "Test single module",
+                    "description": "Post install tests for **{{module}}**",
+                    "steps": [{
+                        "name": "Start single module test",
+                        "job_type": "odoo",
+                        "install_modules": "{{module}}",
+                        "test_tags": "{{module|make_module_test_tags}}"
+                    }]
+                }]
+            }]
+        }'''
+        self.config.default_dynamic_config = dynamic_config
+        self.config.step_ids[0]._run_dynamic(self.build)
+        self.assertEqual(self.build.children_ids.mapped('description'),
+            [
+                'Post install tests for **base**',
+                'Post install tests for **crm**',
+                'Post install tests for **documents**',
+                'Post install tests for **mail**',
+                'Post install tests for **project**',
+                'Post install tests for **web**',
+                'Post install tests for **web_enterprise**',
+        ])
+
+    def test_foreach_modified_module(self):
+        dynamic_config = '''{
+            "name": "Foreach module testing",
+            "steps": [{
+                "name": "Create module builds",
+                "job_type": "create_build",
+                "for_each_module": "{{-test_*|filter_default_modules|modified_modules}}",
+                "children": [{
+                    "name": "Test single module",
+                    "description": "Post install tests for **{{module}}**",
+                    "steps": [{
+                        "name": "Start single module test",
+                        "job_type": "odoo",
+                        "install_modules": "{{module}}",
+                        "test_tags": "{{module|make_module_test_tags}}"
+                    }]
+                }]
+            }]
+        }'''
+
+        self.patch(type(self.build), '_modified_modules', lambda cl: {'crm'})
+        self.config.default_dynamic_config = dynamic_config
+        self.config.step_ids[0]._run_dynamic(self.build)
+        self.assertEqual(self.build.children_ids.mapped('description'),
+            [
+                'Post install tests for **crm**',
+        ])
+
+    def test_parse_dynamic_entry(self):
+        Step = self.env['runbot.build.config.step']
+
+        def check_parse(entry, expected):
+            res = Step._parse_dynamic_entry(entry, self.build, {'key': 'value', 'test_method': '.test_method'})
+            self.assertEqual(res, expected)
+        check_parse('{{-test_*|filter_all_modules}}', 'base,crm,documents,hw_drivers,l10n_be,l10n_in,mail,project,web,web_enterprise')
+        check_parse('{{-*,web*|filter_all_modules}}', 'web,web_enterprise')
+        check_parse('{{-*,web*|filter_all_modules|make_module_test_tags}}', '/web,/web_enterprise')
+        check_parse('{{-*,web*|filter_all_modules|make_module_test_tags|prepend("some_tag")}}', 'some_tag/web,some_tag/web_enterprise')
+        check_parse('{{-*,web*|filter_all_modules|make_module_test_tags|prepend(key)}}', 'value/web,value/web_enterprise')
+        check_parse('{{-*,web*|filter_all_modules|make_module_test_tags|append(".test_method")}}', '/web.test_method,/web_enterprise.test_method')
+        check_parse('{{-*,web*|filter_all_modules|make_module_test_tags|append(test_method)}}', '/web.test_method,/web_enterprise.test_method')
+
+        self.patch(type(self.build), '_modified_modules', lambda cl: {'crm'})
+
+        check_parse('{{*|filter_all_modules|modified_modules}}', 'crm')
 
 
 class TestBuildConfigStep(TestBuildConfigStepCommon):
@@ -451,18 +848,14 @@ class TestBuildConfigStep(TestBuildConfigStepCommon):
         config_step = self.ConfigStep.create({
             'name': 'coverage',
             'job_type': 'install_odoo',
-            'coverage': True
+            'coverage': True,
         })
 
-        def docker_run(cmd, log_path, *args, **kwargs):
-            self.assertEqual(cmd.pres, [['sudo', 'pip3', 'install', '-r', 'server/requirements.txt']])
-            self.assertEqual(cmd.cmd[:10], ['python3', '-m', 'coverage', 'run', '--branch', '--source', '/data/build', '--omit', '*__manifest__.py', 'server/server.py'])
-            self.assertIn(['python3', '-m', 'coverage', 'html', '-d', '/data/build/coverage', '--ignore-errors'], cmd.posts)
-            self.assertIn(['python3', '-m', 'coverage', 'xml', '-o', '/data/build/logs/coverage.xml', '--ignore-errors'], cmd.posts)
-            self.assertEqual(log_path, 'dev/null/logpath')
+        cmd = config_step._run_install_odoo(self.parent_build)['cmd']
+        self.assertEqual(cmd.cmd[:10], ['python3', '-m', 'coverage', 'run', '--branch', '--source', '/data/build', '--omit', '*__manifest__.py,odoo/addons/hw_drivers/*', 'odoo/server.py'])
+        self.assertIn(['python3', '-m', 'coverage', 'html', '-d', '/data/build/coverage', '--ignore-errors'], cmd.finals)
+        self.assertIn(['python3', '-m', 'coverage', 'xml', '-o', '/data/build/logs/coverage.xml', '--ignore-errors'], cmd.finals)
 
-        self.patchers['docker_run'].side_effect = docker_run
-        config_step._run_install_odoo(self.parent_build)
 
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
     def test_dump(self, mock_checkout):
@@ -471,27 +864,23 @@ class TestBuildConfigStep(TestBuildConfigStepCommon):
             'job_type': 'install_odoo',
         })
 
-        def docker_run(cmd, log_path, *args, **kwargs):
-            dest = self.parent_build.dest
-            self.assertEqual(cmd.cmd[:2], ['python3', 'server/server.py'])
-            self.assertEqual(cmd.finals[0], ['pg_dump', '%s-all' % dest, '>', '/data/build/logs/%s-all//dump.sql' % dest])
-            self.assertEqual(cmd.finals[1], ['cp', '-r', '/data/build/datadir/filestore/%s-all' % dest, '/data/build/logs/%s-all//filestore/' % dest])
-            self.assertEqual(cmd.finals[2], ['cd', '/data/build/logs/%s-all/' % dest, '&&', 'zip', '-rmq9', '/data/build/logs/%s-all.zip' % dest, '*'])
-            self.assertEqual(log_path, 'dev/null/logpath')
+        dest = self.parent_build.dest
 
-        self.patchers['docker_run'].side_effect = docker_run
-
-        config_step._run_install_odoo(self.parent_build)
+        cmd = config_step._run_install_odoo(self.parent_build)['cmd']
+        self.assertEqual(cmd.cmd[:2], ['python3', 'odoo/server.py'])
+        self.assertEqual(cmd.finals[0], ['pg_dump', '%s-all' % dest, '>', '/data/build/logs/%s-all//dump.sql' % dest])
+        self.assertEqual(cmd.finals[1], ['cp', '-r', '/data/build/datadir/filestore/%s-all' % dest, '/data/build/logs/%s-all//filestore/' % dest])
+        self.assertEqual(cmd.finals[2], ['cd', '/data/build/logs/%s-all/' % dest, '&&', 'zip', '-rmq9', '/data/build/logs/%s-all.zip' % dest, '*'])
 
     def get_test_tags(self, params):
         cmds = params['cmd'].build().split(' && ')
-        self.assertEqual(cmds[1].split(' server/server.py')[0], 'python3')
+        self.assertEqual(cmds[1].split(' odoo/server.py')[0], 'python3')
         return cmds[1].split('--test-tags ')[1].split(' --')[0]
 
     def get_odoo_cmd(self, params):
         cmds = params['cmd'].build().split(' && ')
-        self.assertTrue(any('server/server.py' in cmd for cmd in cmds), 'did not find start command')
-        return next(iter(cmd for cmd in cmds if 'server/server.py' in cmd))
+        self.assertTrue(any('odoo/server.py' in cmd for cmd in cmds), 'did not find start command')
+        return next(iter(cmd for cmd in cmds if 'odoo/server.py' in cmd))
 
     @patch('odoo.addons.runbot.models.build.BuildResult._parse_config')
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
@@ -560,20 +949,16 @@ class TestBuildConfigStep(TestBuildConfigStepCommon):
             'job_type': 'install_odoo',
             'custom_db_name': 'custom',
         })
-        call_count = 0
-        assert_db_name = 'custom'
-
-        def docker_run(cmd, log_path, *args, **kwargs):
-            db_sufgfix = cmd.cmd[cmd.index('-d')+1].split('-')[-1]
-            self.assertEqual(db_sufgfix, assert_db_name)
-            nonlocal call_count
-            call_count += 1
-
-        self.patchers['docker_run'].side_effect = docker_run
 
         config_step._run_step(self.parent_build)()
 
-        assert_db_name = 'custom_build'
+        self.assertEqual(len(self.docker_run_calls), 1)
+        for cmd, *_ in self.docker_run_calls:
+            db_suffix = cmd.cmd[cmd.index('-d') + 1].split('-')[-1]
+            self.assertEqual(db_suffix, 'custom')
+
+        self.docker_run_calls = []
+
         parent_build_params = self.parent_build.params_id.copy({'config_data': {'db_name': 'custom_build'}})
         parent_build = self.parent_build.copy({'params_id': parent_build_params.id})
         config_step._run_step(parent_build)()
@@ -585,11 +970,17 @@ class TestBuildConfigStep(TestBuildConfigStepCommon):
         })
         config_step._run_step(parent_build)()
 
-        self.assertEqual(call_count, 3)
+        self.assertEqual(len(self.docker_run_calls), 2)
+        for cmd, *_ in self.docker_run_calls:
+            db_suffix = cmd.cmd[cmd.index('-d') + 1].split('-')[-1]
+            self.assertEqual(db_suffix, 'custom_build')
 
+
+    @patch('odoo.addons.runbot.models.build.BuildResult._parse_config')
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
-    def test_run_python(self, mock_checkout):
+    def test_run_python(self, mock_checkout, parse_config):
         """minimal test for python steps. Also test that `-d` in cmd creates a database"""
+        parse_config.return_value = {}
         test_code = """cmd = build._cmd()
 cmd += ['-d', 'test_database']
 docker_params = dict(cmd=cmd)
@@ -600,13 +991,9 @@ docker_params = dict(cmd=cmd)
             'python_code': test_code,
         })
 
-        def docker_run(cmd, *args, **kwargs):
-            run_cmd = cmd.build()
-            self.assertIn('-d test_database', run_cmd)
-
-        self.patchers['docker_run'].side_effect = docker_run
         config_step._run_step(self.parent_build)()
-        self.patchers['docker_run'].assert_called_once()
+
+        self.assertEqual(self.docker_run_calls[0][0].build(), Like('python3 -m pip install ... && python3 odoo/server.py...-d test_database...'))
         db = self.env['runbot.database'].search([('name', '=', 'test_database')])
         self.assertEqual(db.build_id, self.parent_build)
 
@@ -632,18 +1019,10 @@ def run():
             'job_type': 'install_odoo',
             'sub_command': 'subcommand',
         })
-        call_count = 0
-
-        def docker_run(cmd, log_path, *args, **kwargs):
-            nonlocal call_count
-            sub_command = cmd.cmd[cmd.index('server/server.py')+1]
-            self.assertEqual(sub_command, 'subcommand')
-            call_count += 1
-
-        self.patchers['docker_run'].side_effect = docker_run
         config_step._run_step(self.parent_build)()
+        self.assertEqual(len(self.docker_run_calls), 1)
+        self.assertEqual(self.docker_run_calls[0][0].build(), Like('python3 -m pip install ... && python3 odoo/server.py subcommand ...'))
 
-        self.assertEqual(call_count, 1)
 
     @patch('odoo.addons.runbot.models.build.BuildResult._parse_config')
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
@@ -711,9 +1090,11 @@ def run():
         self.assertIn('--with-demo', cmd)
         self.assertNotIn('--without-demo', cmd)
 
+    @patch('odoo.addons.runbot.models.build.BuildResult._parse_config')
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
-    def test_install_demo_mode_with_demo_default_with_demo(self, mock_checkout):
+    def test_install_demo_mode_with_demo_default_with_demo(self, mock_checkout, parse_config):
         # Test demo_mode = 'with_demo' when the default is with_demo
+        parse_config.return_value = {}
         config_step = self.ConfigStep.create({
             'name': 'all',
             'job_type': 'install_odoo',
@@ -757,9 +1138,11 @@ def run():
         self.assertNotIn('--with-demo', cmd)
         self.assertNotIn('--without-demo', cmd)
 
+    @patch('odoo.addons.runbot.models.build.BuildResult._parse_config')
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
-    def test_install_demo_mode_without_demo_default_with_demo(self, mock_checkout):
+    def test_install_demo_mode_without_demo_default_with_demo(self, mock_checkout, parse_config):
         # Test demo_mode = 'without_demo' when the default is with_demo
+        parse_config.return_value = {}
         config_step = self.ConfigStep.create({
             'name': 'all',
             'job_type': 'install_odoo',
@@ -791,13 +1174,13 @@ def run():
         def first_docker_run(cmd, log_path, *args, **kwargs):
             self.assertFalse(kwargs['network_enabled'])
 
-        self.patchers['docker_run'].side_effect = first_docker_run
+        self.docker_run_patch = first_docker_run
         config_step._run_step(self.parent_build)()
 
         def second_docker_run(cmd, log_path, *args, **kwargs):
             self.assertTrue(kwargs['network_enabled'])
 
-        self.patchers['docker_run'].side_effect = second_docker_run
+        self.docker_run_patch = second_docker_run
 
         parent_build_params = self.parent_build.params_id.copy({'config_data': {'network_enabled': True}})
         parent_build = self.parent_build.copy({'params_id': parent_build_params.id})
@@ -805,7 +1188,7 @@ def run():
 
 
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
-    def test_run_python_networkcan_be_disabled(self, mock_checkout):
+    def test_run_python_networkcan_be_enabled(self, mock_checkout):
         """test that docker network can be enabled from python step"""
         test_code = """cmd = build._cmd()
 docker_params = dict(cmd=cmd, network_enabled=True)
@@ -816,11 +1199,9 @@ docker_params = dict(cmd=cmd, network_enabled=True)
             'python_code': test_code,
         })
 
-        def docker_run(cmd, *args, **kwargs):
-            self.assertTrue(kwargs['network_enabled'])
-
-        self.patchers['docker_run'].side_effect = docker_run
         config_step._run_step(self.parent_build)()
+        self.assertEqual(len(self.docker_run_calls), 1)
+        self.assertTrue(self.docker_run_calls[0][3]['network_enabled'])
 
     @patch('odoo.addons.runbot.models.build.BuildResult._parse_config')
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
@@ -892,8 +1273,12 @@ Some post install stuff
         self.assertEqual(self.build.local_result, 'ko')
         self.assertEqual(self.logs, [
             ('INFO', 'Getting results for build %s' % self.build.dest),
-            ('ERROR', 'No "Initiating shutdown" found in logs, maybe because of cpu limit.'),
-        ])
+            ('ERROR', 'No "Initiating shutdown" found in logs.\n'
+   '\n'
+   'Loading stuff\n'
+   'odoo.stuff.modules.loading: Modules loaded.\n'
+   'Some post install stuff\n'
+   '        ')])
 
     def test_make_result_no_loaded(self):
         file_content = """
@@ -905,34 +1290,10 @@ Loading stuff
         self.assertEqual(self.build.local_result, 'ko')
         self.assertEqual(self.logs, [
             ('INFO', 'Getting results for build %s' % self.build.dest),
-            ('ERROR', 'Modules loaded not found in logs'),
+            ('ERROR', 'Modules loaded not found in logs\n\nLoading stuff\n'),
         ])
 
-    def test_make_result_traceback(self):
-        file_content = """
-Loading stuff
-Traceback (most recent call last):
-  File "/data/build/odoo/odoo-bin", line 5, in <module>
-    import odoo
-  File "/data/build/odoo/odoo/__init__.py", line 134, in <module>
-    from . import modules
-  File "/data/build/odoo/odoo/modules/__init__.py", line 8, in <module>
-    from . import db, graph, loading, migration, module, registry, neutralize
-  File "/data/build/odoo/odoo/modules/graph.py", line 11, in <module>
-    import odoo.tools as tools
-  File "/data/build/odoo/odoo/tools/__init__.py", line 25, in <module>
-    from .mail import *
-  File "/data/build/odoo/odoo/tools/mail.py", line 32, in <module>
-    safe_attrs = clean.defs.safe_attrs | frozenset(
-AttributeError: module 'lxml.html.clean' has no attribute 'defs'
-2024-05-14 09:54:22,692 17 INFO dbname path.to.test: aaa
-"""
-        with patch('builtins.open', mock_open(read_data=file_content)):
-            self.config_step._make_results(self.build)
-        self.assertEqual(str(self.build.job_end), '1970-01-01 02:00:00')
-        self.assertEqual(self.build.local_result, 'ko')
-        expected = """Traceback found in logs:
-Traceback (most recent call last):
+    traceback_example = """Traceback (most recent call last):
   File "/data/build/odoo/odoo-bin", line 5, in <module>
     import odoo
   File "/data/build/odoo/odoo/__init__.py", line 134, in <module>
@@ -946,10 +1307,61 @@ Traceback (most recent call last):
   File "/data/build/odoo/odoo/tools/mail.py", line 32, in <module>
     safe_attrs = clean.defs.safe_attrs | frozenset(
 AttributeError: module 'lxml.html.clean' has no attribute 'defs'"""
+
+    def test_make_result_traceback(self):
+        self.maxDiff = None
+        file_content = f"""
+2025-05-04 08:39:00,000 42 INFO other info
+2025-05-04 08:40:00,000 42 INFO test_runbot odoo.addons.runbot.tests.test_build_config_step: FAIL: TestMakeResult.test_make_result_traceback
+{self.traceback_example}
+2024-05-14 09:54:22,692 17 INFO dbname path.to.test: aaa
+"""
+        with patch('builtins.open', mock_open(read_data=file_content)):
+            self.config_step._make_results(self.build)
+        self.assertEqual(str(self.build.job_end), '1970-01-01 02:00:00')
+        self.assertEqual(self.build.local_result, 'ko')
+        expected = f"""Traceback found in logs:
+2025-05-04 08:40:00,000 42 INFO test_runbot odoo.addons.runbot.tests.test_build_config_step: FAIL: TestMakeResult.test_make_result_traceback
+{self.traceback_example}"""
         self.assertEqual(self.logs, [
             ('INFO', 'Getting results for build %s' % self.build.dest),
             ('ERROR', expected),
         ])
+
+    def test_make_result_traceback_alone(self):
+        self.maxDiff = None
+        file_content = f"""{self.traceback_example}
+2024-05-14 09:54:22,692 17 INFO dbname path.to.test: aaa
+"""
+        with patch('builtins.open', mock_open(read_data=file_content)):
+            self.config_step._make_results(self.build)
+        self.assertEqual(str(self.build.job_end), '1970-01-01 02:00:00')
+        self.assertEqual(self.build.local_result, 'ko')
+        expected = f"""Traceback found in logs:
+{self.traceback_example}"""
+        self.assertEqual(self.logs, [
+            ('INFO', 'Getting results for build %s' % self.build.dest),
+            ('ERROR', expected),
+        ])
+
+    def test_make_result_traceback_retry(self):
+        self.maxDiff = None
+        file_content = f"""
+2025-05-04 08:39:00,000 42 INFO other info
+2025-05-04 08:40:00,000 42 _ERROR test_runbot odoo.addons.runbot.tests.test_build_config_step: FAIL: TestMakeResult.test_make_result_traceback
+{self.traceback_example}
+2024-05-14 09:54:22,692 17 INFO dbname path.to.test: aaa
+2024-05-14 09:54:22,692 17 INFO dbname odoo.modules.loading: Modules loaded.
+Some post install stuff
+Initiating shutdown
+"""
+        with patch('builtins.open', mock_open(read_data=file_content)):
+            self.config_step._make_results(self.build)
+        self.assertEqual(str(self.build.job_end), '1970-01-01 02:00:00')
+        self.assertEqual(self.logs, [
+            ('INFO', 'Getting results for build %s' % self.build.dest),
+        ])
+        self.assertEqual(self.build.local_result, 'ok')
 
     def test_make_result_error(self):
         file_content = """
@@ -986,7 +1398,7 @@ Initiating shutdown
         self.assertEqual(self.build.local_result, 'warn')
         self.assertEqual(self.logs, [
             ('INFO', 'Getting results for build %s' % self.build.dest),
-            ('WARNING', 'Warning found in logs')
+            ('WARNING', 'Warning found in logs:\n2019-12-17 17:34:37,692 17 WARNING dbname path.to.test: timeout exceded')
         ])
 
         # no log file
@@ -1047,5 +1459,3 @@ Initiating shutdown
         mock_make_odoo_results.side_effect = make_warn
         config_step._make_results(build)
         self.assertEqual(build.local_result, 'warn')
-
-# TODO add generic test to copy_paste _run_* in a python step

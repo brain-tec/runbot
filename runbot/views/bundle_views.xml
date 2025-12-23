@@ -46,9 +46,14 @@
                 </header>
                 <sheet>
                     <group>
+                        <field name="name" widget="char_frontend_url"/>
+                        <field name="description"/>
+                        <field name="tag_ids" widget="many2many_tags" options="{'not_delete': True, 'no_create': True}"/>
+                    </group>
+                    <group>
                         <group string="Base options">
-                            <field name="name" widget="char_frontend_url"/>
                             <field name="project_id"/>
+                            <field name="team_id"/>
                             <field name="sticky" readonly="0"/>
                             <field name="to_upgrade" readonly="0"/>
                             <field name="to_upgrade_from" readonly="0"/>
@@ -57,7 +62,6 @@
                             <field name="base_id"/>
                             <field name="defined_base_id" readonly="is_base"/>
                             <field name="version_id"/>
-                            <field name="for_next_freeze"/>
                             <field name="has_pr"/>
                         </group>
                         <group string="Testing options">
@@ -96,7 +100,7 @@
                                 </list>
                             </field>
                         </page>
-                        <page string="Last batchs">
+                        <page string="Last batches">
                             <field name="last_batchs" nolabel="1">
                                 <list>
                                     <field name="id" widget="char_frontend_url"/>
@@ -155,6 +159,7 @@
                 <field name="no_build"/>
                 <field name="branch_ids"/>
                 <field name="version_id"/>
+                <field name="team_id" optional="hide"/>
             </list>
         </field>
     </record>
@@ -167,7 +172,6 @@
             <field name="name"/>
             <field name="version_id"/>
             <separator/>
-            <filter string="For next freeze" name="for_next_freeze" domain="[('for_next_freeze', '=', True)]"/>
             <filter string="Has open pr" name="has_pr" domain="[('has_pr', '=', True)]"/>
             <filter string="No pr" name="no_pr" domain="[('branch_ids', '!=', []), '!', ('branch_ids', 'any', [('is_pr', '=', True)])]"/>
             <filter string="Is base" name="is_base" domain="[('is_base', '=', True)]"/>
@@ -185,7 +189,7 @@
         <field name="arch" type="xml">
             <form string="Batch">
                 <group>
-                    <field name="last_update"/>
+                    <field name="last_update" options="{'numeric': true}"/>
                     <field name="bundle_id"/>
                     <field name="state"/>
                     <field name="commit_link_ids">
@@ -227,6 +231,30 @@
             </list>
         </field>
     </record>
+
+    <record id="view_runbot_bundle_tag_tree" model="ir.ui.view">
+        <field name="model">runbot.bundle.tag</field>
+        <field name="arch" type="xml">
+            <list string="Bundle Tag">
+                <field name="name"/>
+            </list>
+        </field>
+    </record>
+
+   <record id="view_runbot_bundle_tag" model="ir.ui.view">
+        <field name="model">runbot.bundle.tag</field>
+        <field name="arch" type="xml">
+            <form string="Bundle Tags">
+                <group>
+                    <field name="name"/>
+                </group>
+                <list create="0" delete="0" edit="0">
+                    <field name="bundle_ids"/>
+                </list>
+            </form>
+        </field>
+    </record>
+
     <record id="action_bundle_custom_trigger" model="ir.actions.act_window">
         <field name="name">Custom triggers</field>
         <field name="type">ir.actions.act_window</field>
@@ -255,6 +283,12 @@
         <field name="name">Batches</field>
         <field name="type">ir.actions.act_window</field>
         <field name="res_model">runbot.batch</field>
+        <field name="view_mode">list,form</field>
+    </record>
+    <record id="action_bundle_tag" model="ir.actions.act_window">
+        <field name="name">Bundle Tags</field>
+        <field name="type">ir.actions.act_window</field>
+        <field name="res_model">runbot.bundle.tag</field>
         <field name="view_mode">list,form</field>
     </record>
   </data>

@@ -25,8 +25,8 @@
                       <field name="trigger_ids" widget="many2many_tags" optional="hide"/>
                       <field name="tag_ids" widget="many2many_tags" readonly="1" optional="hide"/>
                       <field name="random" optional="hide"/>
-                      <field name="first_seen_date" widget="frontend_url" options="{'link_field': 'first_seen_build_id'}"/>
-                      <field name="last_seen_date" widget="frontend_url" options="{'link_field': 'last_seen_build_id'}"/>
+                      <field name="first_seen_date" widget="frontend_url" options="{'link_field': 'first_seen_build_id', 'numeric': True}"/>
+                      <field name="last_seen_date" widget="frontend_url" options="{'link_field': 'last_seen_build_id', 'numeric': True}"/>
                       <field name="first_seen_build_id" column_invisible="True"/>
                       <field name="last_seen_build_id" column_invisible="True"/>
                     </list>
@@ -34,12 +34,12 @@
               </group>
               <group>
                 <group name="fixer_info" string="Fixing" col="2">
-                  <field name="breaking_bundle_url" invisible="not breaking_pr_id"/>
-                  <field name="responsible"/>
-                  <field name="customer"/>
-                  <field name="team_id"/>
-                  <field name="fixing_pr_id"/>
+                  <field name="responsible" options="{'no_create': True}"/>
+                  <field name="customer" options="{'no_create': True}"/>
+                  <field name="team_id" options="{'no_create': True}"/>
+                  <field name="fixing_pr_id" options="{'no_create': True}"/>
                   <field name="fixing_pr_url" widget="pull_request_url" invisible="not fixing_pr_id"/>
+                  <field name="fixing_bundle_id" options="{'no_create': True}" readonly="fixing_pr_id"/>
                   <field name="fixing_bundle_url" invisible="not fixing_pr_id"/>
                   <field name="active"/>
                 </group>
@@ -48,10 +48,11 @@
                   <field name="trigger_ids" widget="many2many_tags"/>
                   <field name="tag_ids" widget="many2many_tags"/>
                   <field name="random"/>
-                  <field name="breaking_pr_id"/>
+                  <field name="breaking_pr_id" options="{'no_create': True}"/>
                   <field name="breaking_pr_url"  widget="pull_request_url" invisible="not breaking_pr_id"/>
-                  <field name="first_seen_date" widget="frontend_url" options="{'link_field': 'first_seen_build_id'}"/>
-                  <field name="last_seen_date" widget="frontend_url" options="{'link_field': 'last_seen_build_id'}"/>
+                  <field name="breaking_bundle_url" invisible="not breaking_pr_id"/>
+                  <field name="first_seen_date" widget="frontend_url" options="{'link_field': 'first_seen_build_id', 'numeric': True}"/>
+                  <field name="last_seen_date" widget="frontend_url" options="{'link_field': 'last_seen_build_id', 'numeric': True}"/>
                   <field name="first_seen_build_id" invisible="True"/>
                   <field name="last_seen_build_id" invisible="True"/>
                   <field name="history_data" widget="history_graph" options="{'cell_size': 13, 'mouse_actions': True}"/>
@@ -135,19 +136,19 @@
                 <group name="fixer_info" string="More info" col="2">
                   <group>
                     <field name="random"/>
-                    <field name="first_seen_date"/>
+                    <field name="first_seen_date" options="{'numeric': True}"/>
                     <field name="first_seen_build_id" widget="frontend_url"/>
                   </group>
                   <group>
-                    <field name="last_seen_date"/>
+                    <field name="last_seen_date" options="{'numeric': True}"/>
                     <field name="last_seen_build_id" widget="frontend_url"/>
                   </group>
-                </group>               
+                </group>
                 <notebook>
                   <page string="Builds">
                     <field name="build_error_link_ids" widget="one2many" options="{'not_delete': True, 'no_create': True}" readonly="1">
                       <list>
-                        <field name="log_date"/>
+                        <field name="log_date" options="{'numeric': True}"/>
                         <field name="host" groups="base.group_no_one"/>
                         <field name="dest"/>
                         <field name="version_id"/>
@@ -161,7 +162,7 @@
                   <page string="Similary qualified">
                     <field name="similar_ids" widget="one2many" options="{'not_delete': True, 'no_create': True}" readonly="1">
                       <list>
-                        <field name="create_date"/>
+                        <field name="create_date" options="{'numeric': True}"/>
                         <field name="module_name"/>
                         <field name="summary"/>
                         <field name="random"/>
@@ -243,8 +244,8 @@
               <field name="canonical_tags" optional="hide" readonly="1"/>
               <field name="description" optional="hide" readonly="1"/>
               <field name="random" string="Random"/>
-              <field name="first_seen_date" string="First Seen" optional="hide" readonly="1"/>
-              <field name="last_seen_date" string="Last Seen" readonly="1" options="{'link_field': 'last_seen_build_id'}"/>
+              <field name="first_seen_date" string="First Seen" optional="hide" readonly="1" options="{'numeric': True}"/>
+              <field name="last_seen_date" string="Last Seen" readonly="1" options="{'link_field': 'last_seen_build_id', 'numeric': True}"/>
               <field name="last_seen_build_id" column_invisible="True"/>
               <field name="error_count" readonly="1"/>
               <field name="build_count" readonly="1"/>
@@ -281,8 +282,8 @@
                 <field name="module_name" optional="hide" readonly="1"/>
                 <field name="summary" optional="show" readonly="1"/>
                 <field name="random" string="Random"/>
-                <field name="first_seen_date" string="First Seen" optional="hide" readonly="1"/>
-                <field name="last_seen_date" string="Last Seen" readonly="1"/>
+                <field name="first_seen_date" string="First Seen" optional="hide" readonly="1" options="{'numeric': True}"/>
+                <field name="last_seen_date" string="Last Seen" readonly="1" options="{'numeric': True}"/>
                 <field name="build_count" readonly="1"/>
                 <field name="team_id"/>
                 <field name="test_tags" optional="hide"/>
@@ -304,10 +305,14 @@
       <field name="arch" type="xml">
         <search string="Search errors">
           <field name="content"/>
+          <field name="name"/>
           <field name="canonical_tags"/>
-          <field name="version_ids"/>
           <field name="responsible"/>
           <field name="team_id"/>
+          <!--field name="only_version_ids"/--><!--to uncomment once version_ids is stored-->
+          <field name="version_ids"/>
+          <field name="only_trigger_ids"/>
+          <field name="trigger_ids"/>
           <filter string="Assigned to me" name="my_errors" domain="[('responsible', '=', uid)]"/>
           <separator/>
           <filter string="Customer is me" name="my_errors_customer" domain="[('customer', '=', uid)]"/>
@@ -327,7 +332,7 @@
           <separator/>
           <filter string="Test Tags" name="test_tagged_errors" domain="[('test_tags', '!=', False)]"/>
           <separator/>
-          <filter string="Not seen in one month" name="not_seen_one_month" domain="[('last_seen_date','&lt;', (context_today() - datetime.timedelta(days=30)).strftime('%Y-%m-%d'))]"/>
+          <filter string="Not seen in one month" name="not_seen_one_month" domain="[('last_seen_date', '&lt;', 'today -30d')]"/>
           <searchpanel>
             <field name="team_id" select="multi" string="Assigned Team" icon="fa-users" enable_counters="0"/>
             <field name="customer" select="multi" string="Customer" icon="fa-address-card" enable_counters="0"/>
@@ -363,7 +368,7 @@
           <separator/>
           <filter string="Test Tags" name="test_tagged_errors" domain="[('test_tags', '!=', False)]"/>
           <separator/>
-          <filter string="Not seen in one month" name="not_seen_one_month" domain="[('last_seen_date','&lt;', (context_today() - datetime.timedelta(days=30)).strftime('%Y-%m-%d'))]"/>
+          <filter string="Not seen in one month" name="not_seen_one_month" domain="[('last_seen_date', '&lt;', 'today -30d')]"/>
         </search>
       </field>
     </record>

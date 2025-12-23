@@ -73,6 +73,7 @@ class Trigger(models.Model):
     module_filters = fields.One2many('runbot.module.filter', 'trigger_id', string="Module filters", help='Will be combined with repo module filters when used with this trigger')
     config_id = fields.Many2one('runbot.build.config', string="Config", required=True)
     config_data = JsonDictField('Config Data')
+    network_enabled = fields.Boolean('Network Enabled')
     batch_dependent = fields.Boolean('Batch Dependent', help="Force adding batch in build parameters to make it unique and give access to bundle")
 
     ci_context = fields.Char("CI context", tracking=True)
@@ -92,7 +93,7 @@ class Trigger(models.Model):
         ('no_pending', 'No pending'),
         ('errors', 'Only errors'),
     ], string="CI startegy", default='all', help="Strategy to use when sending CI status to github")
-    has_stats = fields.Boolean('Has a make_stats config step', compute="_compute_has_stats", store=True)
+    has_stats = fields.Boolean('Should display stats')
 
     team_ids = fields.Many2many('runbot.team', string="Runbot Teams", help="Teams responsible of this trigger, mainly usefull for nightly")
     active = fields.Boolean("Active", default=True)
@@ -103,11 +104,6 @@ class Trigger(models.Model):
                                   domain=[('type', '=', 'qweb')],
                                   context={'default_type': 'qweb', 'default_arch_base': '<t></t>'},
     )
-
-    @api.depends('config_id.step_order_ids.step_id.make_stats')
-    def _compute_has_stats(self):
-        for trigger in self:
-            trigger.has_stats = any(trigger.config_id.step_order_ids.step_id.mapped('make_stats'))
 
     @api.depends('upgrade_dumps_trigger_id', 'config_id', 'config_id.step_order_ids.step_id.job_type')
     def _compute_upgrade_step_id(self):
@@ -138,34 +134,68 @@ class Trigger(models.Model):
             return safe_eval(self.version_domain)
         return []
 
-    def _filter_modules_to_test(self, modules, module_patterns=None):
+    def _filter_modules_to_test(self, modules_per_repo, module_patterns=None):
+        if module_patterns == '-*':
+            return []
         repo_module_patterns = {}
         for module_filter in self.module_filters:
             repo_module_patterns.setdefault(module_filter.repo_id, [])
             repo_module_patterns[module_filter.repo_id] += module_filter.modules.split(',')
         module_patterns = module_patterns or []
 
-        def _filter_patterns(patterns_list, default, all):
+        def _parse_filter(pat):
+            e1, e2 = pat.split('->', 1)
+            exclude = []
+            if e1.startswith('!'):
+                e1 = e1[1:]
+                exclude.append(e1)
+            if e2.startswith('!'):
+                e2 = e2[1:]
+                exclude.append(e2)
+            return lambda mod: ((not e1 or mod >= e1) and (not e2 or mod <= e2) and mod not in exclude)
+
+        def _filter_patterns(patterns_list, default, all_modules):
             current = set(default)
             for pat in patterns_list:
-                pat = pat.strip()
+                pat = pat.replace(' ', '')
                 if not pat:
                     continue
-                if pat.startswith('-'):
-                    pat = pat.strip('- ')
-                    current -= {mod for mod in current if fnmatch.fnmatch(mod, pat)}
-                elif pat:
-                    current |= {mod for mod in all if fnmatch.fnmatch(mod, pat)}
+
+                if '->' in pat:
+                    mod_filter = _parse_filter(pat)
+                    current = {mod for mod in current if mod_filter(mod)}
+                    continue
+
+                negate = False
+                repo = None
+                if pat.startswith(('-', '!')) and '->' not in pat:
+                    negate = True
+                    pat = pat[1:]
+                available_modules = all_modules
+                if '/' in pat:
+                    repo, pat = pat.split('/', 1)
+                    available_modules = {mod: r for mod, r in all_modules.items() if r.name == repo}
+
+                if pat == '*' and not repo:  # optimisation when matchin all
+                    if negate:
+                        current = set()
+                    else:
+                        current = set(available_modules)
+                else:
+                    selection = {mod for mod in available_modules if fnmatch.fnmatch(mod, pat)}
+                    if negate:
+                        current -= selection
+                    else:
+                        current |= selection
             return current
 
-        available_modules = []
+        available_modules = {}
         modules_to_install = set()
-        for repo, repo_available_modules in modules.items():
-            available_modules += repo_available_modules
 
-        # repo specific filters
-        for repo, repo_available_modules in modules.items():
-            repo_modules = set(repo_available_modules)
+        for repo, repo_modules in modules_per_repo.items():
+            repo_available_modules = {module: repo for module in repo_modules}
+            available_modules.update(repo_available_modules)
+            repo_modules = set(repo_available_modules.keys())
             if repo.modules:
                 repo_modules = _filter_patterns(repo.modules.split(','), repo_modules, repo_available_modules)
             module_pattern = repo_module_patterns.get(repo)
@@ -636,7 +666,7 @@ class Repo(models.Model):
 
                 if bundle.last_batch.state != 'preparing':
                     preparing = self.env['runbot.batch'].create({
-                        'last_update': fields.Datetime.now(),
+                        'last_update': datetime.datetime.now(),
                         'bundle_id': bundle.id,
                         'state': 'preparing',
                     })

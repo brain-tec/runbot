@@ -6,10 +6,14 @@
     'author': "Odoo SA",
     'website': "http://runbot.odoo.com",
     'category': 'Website',
-    'version': '5.12',
+    'version': '5.14',
     'application': True,
-    'depends': ['base', 'base_automation', 'website'],
+    'depends': ['base', 'base_automation', 'website', 'auth_oauth'],
     'data': [
+        'security/runbot_security.xml',
+        'security/ir.model.access.csv',
+        'security/ir.rule.csv',
+
         'data/dockerfile_data.xml',
         'data/build_parse.xml',
         'data/error_link.xml',
@@ -18,9 +22,6 @@
         'data/runbot_error_regex_data.xml',
         'data/website_data.xml',
 
-        'security/runbot_security.xml',
-        'security/ir.model.access.csv',
-        'security/ir.rule.csv',
 
         'templates/utils.xml',
         'templates/badge.xml',
@@ -38,6 +39,8 @@
         'templates/build_error.xml',
         'templates/batches_by_date.xml',
         'templates/commit_link_details.xml',
+        'templates/bundles_by_tag.xml',
+        'templates/versions.xml',
 
         'views/branch_views.xml',
         'views/build_error_link_views.xml',
@@ -50,8 +53,8 @@
         'views/config_views.xml',
         'views/dashboard_views.xml',
         'views/dockerfile_views.xml',
-        'views/error_log_views.xml',
         'views/host_views.xml',
+        'views/oauth_provider_views.xml',
         'views/repo_views.xml',
         'views/res_config_settings_views.xml',
         'views/stat_views.xml',
@@ -66,21 +69,20 @@
 
     'assets': {
         'web.assets_backend': [
-            'runbot/static/src/libs/diff_match_patch/diff_match_patch.js',
+            'runbot/static/lib/diff_match_patch/diff_match_patch.js',
             'runbot/static/src/js/views/**/*',
             'runbot/static/src/js/fields/*',
+            'runbot/static/src/js/components/*',
         ],
         'runbot.assets_frontend': [
-            '/web/static/lib/bootstrap/dist/css/bootstrap.css',
-            '/web/static/src/libs/fontawesome/css/font-awesome.css',
-            '/runbot/static/src/css/runbot.css',
+            'web/static/lib/odoo_ui_icons/style.css',
+            'runbot/static/lib/bootstrap/css/bootstrap.css',
+            'runbot/static/lib/fontawesome/css/font-awesome.css',
+            'runbot/static/src/css/runbot.css',
 
-            '/web/static/lib/jquery/jquery.js',
-            '/web/static/lib/popper/popper.js',
-            #'/web/static/lib/bootstrap/js/dist/util.js',
-            '/web/static/lib/bootstrap/js/dist/dropdown.js',
-            '/web/static/lib/bootstrap/js/dist/collapse.js',
-            '/runbot/static/src/js/runbot.js',
+            'runbot/static/lib/jquery/jquery.js',
+            'runbot/static/lib/bootstrap/js/bootstrap.bundle.js',
+            'runbot/static/src/js/runbot.js',
         ],
     },
     'post_load': 'runbot_post_load',

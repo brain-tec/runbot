@@ -14,7 +14,10 @@ class Branch(models.Model):
     _order = 'name'
     _rec_name = 'dname'
 
-    _sql_constraints = [('branch_repo_uniq', 'unique (name,remote_id)', 'The branch must be unique per repository !')]
+    _branch_repo_uniq = models.Constraint(
+        'unique (name,remote_id)',
+        "The branch must be unique per repository !",
+    )
 
     name = fields.Char('Name', required=True)
     remote_id = fields.Many2one('runbot.remote', 'Remote', required=True, ondelete='cascade', index=True)
@@ -53,20 +56,31 @@ class Branch(models.Model):
         for branch in self:
             branch.dname = '%s:%s' % (branch.remote_id.short_name, branch.name)
 
-    def _search_dname(self, operator, value):
+    def _search_dname(self, operator, values):
         # Match format (owner?, repo, branch)
-        owner = repo = branch = None
-        if (m := re.match(r'(?:([\w-]+)/)?([\w-]+)[:#]([\w\.-]+)', value)):
-            owner, repo, branch = m.groups()
-        # Match PR url format
-        if (m := re.search(r'/([\w-]+)/([\w-]+)/pull/(\d+)', value)):
-            owner, repo, branch = m.groups()
-        if repo and branch:
-            domain = [('name', operator, branch), ('remote_id.repo_name', '=', repo)]
-            if owner:
-                domain.append(('remote_id.owner', '=', owner))
-            return domain
-        return [('name', operator, value)]
+        def make_domain(value):
+            owner = repo = branch = None
+            if (m := re.match(r'(?:([\w-]+)/)?([\w-]+)[:#]([\w\.-]+)', value)):
+                owner, repo, branch = m.groups()
+            # Match PR url format
+            if (m := re.search(r'/([\w-]+)/([\w-]+)/pull/(\d+)', value)):
+                owner, repo, branch = m.groups()
+            if repo and branch:
+                domain = [('name', '=', branch), ('remote_id.repo_name', '=', repo)]
+                if owner:
+                    domain.append(('remote_id.owner', '=', owner))
+                return domain
+
+        if operator == 'in':
+            domains = [make_domain(value) for value in values]
+            if all(domains):
+                return fields.Domain.OR(domains)
+
+        if operator in ('=', 'ilike'):
+            if (domain := make_domain(values)):
+                return domain
+
+        return [('name', operator, values)]
 
     @api.depends('name', 'is_pr', 'target_branch_name', 'pull_head_name', 'pull_head_remote_id')
     def _compute_reference_name(self):
@@ -274,9 +288,6 @@ class Branch(models.Model):
 
         if was_alive and not self.alive:
             self.close_date = self.env.cr.now()
-            if self.bundle_id.for_next_freeze:
-                if not any(branch.alive and branch.is_pr for branch in self.bundle_id.branch_ids):
-                    self.bundle_id.for_next_freeze = False
 
         if (not self.draft and was_draft) or (self.alive and not was_alive) or (self.target_branch_name != init_target_branch_name and self.alive):
             self.bundle_id._force()

@@ -12,23 +12,24 @@ _logger = logging.getLogger(__name__)
 
 class RunbotCase(TransactionCase):
 
-    def mock_git_helper(self):
+    def mock_git_helper(self, repo, cmd):
         """Helper that returns a mock for repo._git()"""
-        def mock_git(repo, cmd):
-            if cmd[:2] == ['show', '-s'] or cmd[:3] == ['show', '--pretty="%H -- %s"', '-s']:
-                return 'commit message for %s' % cmd[-1]
-            if cmd[:2] == ['cat-file', '-e']:
-                return True
-            if cmd[0] == 'for-each-ref':
-                if self.commit_list.get(repo.id):
-                    return '\n'.join(['\0'.join(commit_fields) for commit_fields in self.commit_list[repo.id]])
-                else:
-                    return ''
-            if cmd[0] == 'diff':
-                return self.diff
+        if cmd[:2] == ['show', '-s'] or cmd[:3] == ['show', '--pretty="%H -- %s"', '-s']:
+            return 'commit message for %s' % cmd[-1]
+        if cmd[:2] == ['cat-file', '-e']:
+            return True
+        if cmd[0] == 'for-each-ref':
+            if self.commit_list.get(repo.id):
+                return '\n'.join(['\0'.join(commit_fields) for commit_fields in self.commit_list[repo.id]])
             else:
-                _logger.warning('Unsupported mock command %s' % cmd)
-        return mock_git
+                return ''
+        if cmd[0] == 'diff':
+            return self.diff
+        else:
+            _logger.warning('Unsupported mock command %s' % cmd)
+
+    def docker_run_patch(self, cmd, log_path, *args, **kwargs):
+        self.docker_run_calls.append((cmd, log_path, args, kwargs))
 
     def push_commit(self, remote, branch_name, subject, sha=None, tstamp=None, committer=None, author=None):
         """Helper to simulate a commit pushed"""
@@ -37,7 +38,7 @@ class RunbotCase(TransactionCase):
         commiter_email = '%s@somewhere.com' % committer.lower().replace(' ', '_')
         author = author or committer
         author_email = '%s@somewhere.com' % author.lower().replace(' ', '_')
-        self.commit_list[self.repo_server.id] = [(
+        self.commit_list[self.repo_odoo.id] = [(
             'refs/%s/heads/%s' % (remote.remote_name, branch_name),
             sha or 'd0d0caca',
             str(tstamp or int(time.time())),
@@ -65,35 +66,56 @@ class RunbotCase(TransactionCase):
         self.Commit = self.env['runbot.commit']
         self.Runbot = self.env['runbot.runbot']
         self.project = self.env['runbot.project'].create({'name': 'Tests', 'process_delay': 0})
-        self.repo_server = self.Repo.create({
-            'name': 'server',
+        self.repo_odoo = self.Repo.create({
+            'name': 'odoo',
             'project_id': self.project.id,
             'server_files': 'server.py',
-            'addons_paths': 'addons,core/addons'
+            'addons_paths': 'addons,core/addons',
+            'modules': '-hw_*',
         })
-        self.repo_addons = self.Repo.create({
-            'name': 'addons',
+        self.repo_enterprise = self.Repo.create({
+            'name': 'enterprise',
             'project_id': self.project.id,
+            'modules': '-l10n_*',
         })
+        self.addons_per_repo = {
+            self.repo_odoo: [
+                ('odoo/addons', 'base', '__manifest__.py'),
+                ('odoo/addons', 'test_lint', '__manifest__.py'),
+                ('addons', 'mail', '__manifest__.py'),
+                ('addons', 'web', '__manifest__.py'),
+                ('addons', 'crm', '__manifest__.py'),
+                ('addons', 'project', '__manifest__.py'),
+                ('addons', 'hw_drivers', '__manifest__.py'),
+                ('addons', 'test_l10n', '__manifest__.py'),
 
-        self.remote_server = self.Remote.create({
-            'name': 'bla@example.com:base/server',
-            'repo_id': self.repo_server.id,
+            ],
+            self.repo_enterprise: [
+                ('', 'documents', '__manifest__.py'),
+                ('', 'web_enterprise', '__manifest__.py'),
+                ('', 'l10n_be', '__manifest__.py'),
+                ('', 'l10n_in', '__manifest__.py'),
+            ],
+        }
+
+        self.remote_odoo = self.Remote.create({
+            'name': 'bla@example.com:base/odoo',
+            'repo_id': self.repo_odoo.id,
             'token': '123',
         })
-        self.remote_server_dev = self.Remote.create({
-            'name': 'bla@example.com:dev/server',
-            'repo_id': self.repo_server.id,
+        self.remote_odoo_dev = self.Remote.create({
+            'name': 'bla@example.com:dev/odoo',
+            'repo_id': self.repo_odoo.id,
             'token': '123',
         })
-        self.remote_addons = self.Remote.create({
-            'name': 'bla@example.com:base/addons',
-            'repo_id': self.repo_addons.id,
+        self.remote_enterprise = self.Remote.create({
+            'name': 'bla@example.com:base/enterprise',
+            'repo_id': self.repo_enterprise.id,
             'token': '123',
         })
-        self.remote_addons_dev = self.Remote.create({
-            'name': 'bla@example.com:dev/addons',
-            'repo_id': self.repo_addons.id,
+        self.remote_enterprise_dev = self.Remote.create({
+            'name': 'bla@example.com:dev/enterprise',
+            'repo_id': self.repo_enterprise.id,
             'token': '123',
         })
 
@@ -103,7 +125,7 @@ class RunbotCase(TransactionCase):
         self.initial_server_commit = self.Commit.create({
             'name': 'aaaaaaa',
             'tree_hash': '0aaaaaaa',
-            'repo_id': self.repo_server.id,
+            'repo_id': self.repo_odoo.id,
             'date': '2006-12-07',
             'subject': 'New trunk',
             'author': 'purply',
@@ -111,13 +133,13 @@ class RunbotCase(TransactionCase):
         })
         self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_is_base_regex', r'^((master)|(saas-)?\d+\.\d+)$')
 
-        self.branch_server = self.Branch.create({
+        self.branch_odoo = self.Branch.create({
             'name': 'master',
-            'remote_id': self.remote_server.id,
+            'remote_id': self.remote_odoo.id,
             'is_pr': False,
             'head': self.initial_server_commit.id,
         })
-        self.master_bundle = self.branch_server.bundle_id # compute
+        self.master_bundle = self.branch_odoo.bundle_id  # compute
         self.dev_bundle = self.Bundle.create({
             'name': 'master-dev-tri',
             'project_id': self.project.id
@@ -126,17 +148,17 @@ class RunbotCase(TransactionCase):
             'name': 'master-dev-tri',
             'bundle_id': self.dev_bundle.id,
             'is_pr': False,
-            'remote_id': self.remote_server.id,
+            'remote_id': self.remote_odoo.id,
         })
         with patch('odoo.addons.runbot.models.branch.Branch._update_branch_infos', return_value=None):
             self.dev_pr = self.Branch.create({
                 'name': '1234',
                 'is_pr': True,
                 'alive': True,
-                'remote_id': self.remote_server.id,
+                'remote_id': self.remote_odoo.id,
                 'target_branch_name': self.dev_bundle.base_id.name,
-                'pull_head_remote_id': self.remote_server.id,
-                'pull_head_name': f'{self.remote_server.owner}:{self.dev_branch.name}',
+                'pull_head_remote_id': self.remote_odoo.id,
+                'pull_head_name': f'{self.remote_odoo.owner}:{self.dev_branch.name}',
             })
         self.assertEqual(self.dev_pr.bundle_id.id, self.dev_bundle.id)
 
@@ -153,15 +175,15 @@ class RunbotCase(TransactionCase):
 
         self.trigger_server = self.Trigger.create({
             'name': 'Server trigger',
-            'repo_ids': [(4, self.repo_server.id)],
+            'repo_ids': [(4, self.repo_odoo.id)],
             'config_id': self.default_config.id,
             'project_id': self.project.id,
         })
 
         self.trigger_addons = self.Trigger.create({
             'name': 'Addons trigger',
-            'repo_ids': [(4, self.repo_addons.id)],
-            'dependency_ids': [(4, self.repo_server.id)],
+            'repo_ids': [(4, self.repo_enterprise.id)],
+            'dependency_ids': [(4, self.repo_odoo.id)],
             'config_id': self.default_config.id,
             'project_id': self.project.id,
         })
@@ -169,8 +191,13 @@ class RunbotCase(TransactionCase):
         self.patchers = {}
         self.patcher_objects = {}
         self.commit_list = {}
+        self.docker_run_calls = []
         self.diff = ''
-        self.start_patcher('git_patcher', 'odoo.addons.runbot.models.repo.Repo._git', new=self.mock_git_helper())
+
+        def mock_git(repo, cmd):
+            return self.mock_git_helper(repo, cmd)
+
+        self.start_patcher('git_patcher', 'odoo.addons.runbot.models.repo.Repo._git', new=mock_git)
         self.start_patcher('hostname_patcher', 'odoo.addons.runbot.common.socket.gethostname', 'host.runbot.com')
         self.start_patcher('github_patcher', 'odoo.addons.runbot.models.repo.Remote._github', {})
         self.start_patcher('makedirs', 'odoo.addons.runbot.common.os.makedirs', True)
@@ -179,7 +206,7 @@ class RunbotCase(TransactionCase):
         self.start_patcher('host_local_pg_cursor', 'odoo.addons.runbot.models.host.local_pg_cursor')
         self.start_patcher('isdir', 'odoo.addons.runbot.common.os.path.isdir', True)
         self.start_patcher('isfile', 'odoo.addons.runbot.common.os.path.isfile', True)
-        self.start_patcher('docker_run', 'odoo.addons.runbot.container._docker_run')
+        self.start_patcher('docker_run', 'odoo.addons.runbot.container._docker_run', new=self.docker_run_patch)
         self.start_patcher('docker_build', 'odoo.addons.runbot.container._docker_build')
         self.start_patcher('docker_push', 'odoo.addons.runbot.container._docker_push')
         self.start_patcher('docker_prune', 'odoo.addons.runbot.container._docker_prune')
@@ -201,8 +228,14 @@ class RunbotCase(TransactionCase):
         self.start_patcher('_local_pg_createdb', 'odoo.addons.runbot.models.build.BuildResult._local_pg_createdb', True)
         self.start_patcher('getmtime', 'odoo.addons.runbot.common.os.path.getmtime', datetime.datetime.now().timestamp())
         self.start_patcher('file_exist', 'odoo.tools.misc.os.path.exists', True)
-
         self.start_patcher('_get_py_version', 'odoo.addons.runbot.models.build.BuildResult._get_py_version', 3)
+        self.start_patcher('_write_file', 'odoo.addons.runbot.models.build.BuildResult._write_file', None)
+        self.start_patcher('_parse_config', 'odoo.addons.runbot.models.build.BuildResult._parse_config', {'--test-enable', '--test-tags', '--with-demo'})
+
+        def get_available_modules(self_commit):
+            return self.addons_per_repo.get(self_commit.repo_id, [])
+
+        self.start_patcher('_get_available_modules', 'odoo.addons.runbot.models.commit.Commit._get_available_modules', new=get_available_modules)
 
         def no_commit(*_args, **_kwargs):
             _logger.info('Skipping commit')
@@ -235,11 +268,11 @@ class RunbotCase(TransactionCase):
 
     def additionnal_setup(self):
         """Helper that setup a the repos with base branches and heads"""
-        self.branch_server.bundle_id.is_base = True
+        self.branch_odoo.bundle_id.is_base = True
         initial_addons_commit = self.Commit.create({
             'name': 'cccccc',
             'tree_hash': '0cccccc',
-            'repo_id': self.repo_addons.id,
+            'repo_id': self.repo_enterprise.id,
             'date': '2015-03-12',
             'subject': 'Initial commit',
             'author': 'someone',
@@ -248,14 +281,14 @@ class RunbotCase(TransactionCase):
 
         self.branch_addons = self.Branch.create({
             'name': 'master',
-            'remote_id': self.remote_addons.id,
+            'remote_id': self.remote_enterprise.id,
             'is_pr': False,
             'head': initial_addons_commit.id,
         })
-        self.assertEqual(self.branch_addons.bundle_id, self.branch_server.bundle_id)
-        triggers = self.env['runbot.trigger'].search([('repo_ids', 'in', [self.repo_addons.id, self.repo_server.id])])
+        self.assertEqual(self.branch_addons.bundle_id, self.branch_odoo.bundle_id)
+        triggers = self.env['runbot.trigger'].search([('repo_ids', 'in', [self.repo_enterprise.id, self.repo_odoo.id])])
 
-        self.assertEqual(triggers.repo_ids + triggers.dependency_ids, self.remote_addons.repo_id + self.remote_server.repo_id)
+        self.assertEqual(triggers.repo_ids + triggers.dependency_ids, self.remote_enterprise.repo_id + self.remote_odoo.repo_id)
 
         batch = self.branch_addons.bundle_id._force()
         batch._process()

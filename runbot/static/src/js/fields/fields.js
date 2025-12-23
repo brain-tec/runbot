@@ -5,9 +5,8 @@ import { CharField } from "@web/views/fields/char/char_field";
 import { Many2OneField } from "@web/views/fields/many2one/many2one_field";
 
 import { _lt } from "@web/core/l10n/translation";
+import { formatDateTime } from "@web/core/l10n/dates";
 import { registry } from "@web/core/registry";
-import { useDynamicPlaceholder } from "@web/views/fields/dynamic_placeholder_hook";
-import { standardFieldProps } from "@web/views/fields/standard_field_props";
 import { useInputField } from "@web/views/fields/input_field_hook";
 
 import { useRef, xml, Component, markup, useEffect } from "@odoo/owl";
@@ -78,7 +77,6 @@ export class JsonField extends TextField {
 }
 
 registry.category("fields").add("runbotjsonb", {
-    supportedTypes: ["jsonb"],
     component: JsonField,
 });
 
@@ -94,13 +92,12 @@ export class FrontendUrl extends Component {
         linkField: { type: String, optional: true },
     };
 
-    get baseProps() {
-        console.log(omit(this.props, 'linkField'))
-        return omit(this.props, 'linkField', 'context')
-    }
-
     get displayValue() {
-        return this.props.record.data[this.props.name] ? getFormattedValue(this.props.record, this.props.name) : ''
+        if (this.props.record.data[this.props.name].isLuxonDateTime){
+            return formatDateTime(this.props.record.data[this.props.name])
+        } else {
+            return this.props.record.data[this.props.name] ? getFormattedValue(this.props.record, this.props.name) : ''
+        }
     }
 
     get route() {
@@ -109,7 +106,7 @@ export class FrontendUrl extends Component {
 
     _route(fieldName) {
         const model = this.props.record.fields[fieldName].relation || "runbot.unknown";
-        const id = this.props.record.data[fieldName][0];
+        const { id } = this.props.record.data[fieldName];
         if (model.startsWith('runbot.')){
             return '/runbot/' + model.split('.')[1] + '/' + id;
         } else {
@@ -119,7 +116,7 @@ export class FrontendUrl extends Component {
 }
 
 registry.category("fields").add("frontend_url", {
-    supportedTypes: ["many2one"],
+    supportedTypes: ["many2one", "datetime"],
     component: FrontendUrl,
     extractProps({ attrs, options }, dynamicInfo) {
         return {
@@ -151,7 +148,7 @@ export class FieldCharFrontendUrl extends Component {
 }
 
 registry.category("fields").add("char_frontend_url", {
-    supportedTypes: ["char"],
+    supportedTypes: ["char", "integer"],
     component: FieldCharFrontendUrl,
 });
 
