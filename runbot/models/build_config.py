@@ -1027,7 +1027,7 @@ class ConfigStep(models.Model):
                                 source_builds |= builds_references_by_version_id.get(version.id) or build.browse()
                     else:
                         for version in valid_source_versions:
-                            source_builds |= builds_references_by_version_id.get(version.id) or build.browse()
+                            source_builds |= builds_references_by_version_id.get(target_version.id) or build.browse()
                 # TODO remove upgrade cleanup
                 elif self.upgrade_from_current:
                     source_builds = build
