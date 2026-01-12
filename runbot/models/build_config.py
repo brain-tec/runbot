@@ -946,8 +946,11 @@ class ConfigStep(models.Model):
                         for version in self.upgrade_matrix_id._get_target_versions_from(param.version_id):
                             target_builds |= builds_references_by_version_id.get(version.id) or build.browse()
                 else:
+                    build._log('', f'Valid target versions {valid_target_versions}({valid_target_versions.mapped('name')}) using {builds_references_by_version_id}')
                     for version in valid_target_versions:
                         target_builds |= builds_references_by_version_id.get(version.id) or build.browse()
+
+                    build._log('', f'target_builds {target_builds}')
 
             # TODO remove upgrade cleanup
             elif self.upgrade_to_current:
