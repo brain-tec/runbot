@@ -1013,7 +1013,7 @@ class ConfigStep(models.Model):
                         'version_id': target.params_id.version_id.id,
                         'trigger_id': None,
                         'dockerfile_id': target.params_id.dockerfile_id.id,
-                    })
+                    }, link=True)
                     source_description = source.params_id.version_id.name
                     target_description = target.params_id.version_id.name
                     if source in build.create_batch_id.slot_ids.build_id:
@@ -1026,12 +1026,12 @@ class ConfigStep(models.Model):
                         db.name,
                     )
 
-                    if self.allow_similar_build_quick_result:
-                        existing_done_build = next((build for build in child.params_id.build_ids.sorted('id') if build.global_state == 'done' and build.local_result not in ('skipped', 'killed')), None)
-                        if existing_done_build:
-                            child._log('', 'A similar [build](%s) has been found, marking as done directly', existing_done_build.build_url, log_type='markdown')
-                            child.local_state = 'done'
-                            child.local_result = existing_done_build.local_result
+                    #if self.allow_similar_build_quick_result:
+                    #    existing_done_build = next((build for build in child.params_id.build_ids.sorted('id') if build.global_state == 'done' and build.local_result not in ('skipped', 'killed')), None)
+                    #    if existing_done_build:
+                    #        child._log('', 'A similar [build](%s) has been found, marking as done directly', existing_done_build.build_url, log_type='markdown')
+                    #        child.local_state = 'done'
+                    #        child.local_result = existing_done_build.local_result
 
     def _filter_upgrade_database(self, dbs, pattern):
         pat_list = pattern.split(',') if pattern else []

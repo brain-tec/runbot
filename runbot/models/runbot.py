@@ -131,9 +131,22 @@ class Runbot(models.AbstractModel):
         if available_slots > 0 or nb_pending == 0:
             return
 
+        killable_build = []
+
         for build in testing_builds:
             if build.top_parent.killable:
-                build.top_parent._ask_kill(message='Build automatically killed, new build found.')
+                killable_build.append(build)
+                continue
+            if not build.parent_id and build.parent_ids:
+                killable_build.append(build)
+                continue
+
+        for build in killable_build:
+            build._log('_ask_kill', "Build automatically killed, new build found.")
+            if build.local_state == 'pending':
+                build._skip()
+            elif build.local_state in ['testing', 'running']:
+                build.requested_action = 'deathrow'
 
     def _allocate_builds(self, host, nb_slots, domain=None):
         if nb_slots <= 0:
