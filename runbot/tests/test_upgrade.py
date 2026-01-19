@@ -351,9 +351,9 @@ class TestUpgradeFlow(RunbotCase):
         master_upgrade_build._schedule()
         master_upgrade_build._schedule()
         self.assertEqual(master_upgrade_build.local_state, 'done')
-        self.assertEqual(len(master_upgrade_build.children_ids), 2)
+        self.assertEqual(len(master_upgrade_build.linked_children_build_ids), 2)
 
-        [b_17_master_no_demo, b_173_master_no_demo] = master_upgrade_build.children_ids.sorted(lambda b: b.params_id.upgrade_from_build_id.params_id.version_id.number)
+        [b_17_master_no_demo, b_173_master_no_demo] = master_upgrade_build.linked_children_build_ids.sorted(lambda b: b.params_id.upgrade_from_build_id.params_id.version_id.number)
 
         def assertOk(build, from_build, target_build, db_suffix):
             try:
@@ -388,7 +388,7 @@ class TestUpgradeFlow(RunbotCase):
         upgrade_build_17._schedule()
         upgrade_build_17._schedule()
         self.assertEqual(upgrade_build_17.local_state, 'done')
-        upgrade_childrens = upgrade_build_17.children_ids.sorted(lambda b: (b.params_id.upgrade_from_build_id.params_id.version_id.number, b.params_id.version_id.number))
+        upgrade_childrens = upgrade_build_17.linked_children_build_ids.sorted(lambda b: (b.params_id.upgrade_from_build_id.params_id.version_id.number, b.params_id.version_id.number))
 
         [b_16_17, _b_163_17, _b_17_173, b_17_master] = upgrade_childrens
 
@@ -404,7 +404,7 @@ class TestUpgradeFlow(RunbotCase):
         upgrade_stable_build._schedule()
         upgrade_stable_build._schedule()
         self.assertEqual(upgrade_stable_build.local_state, 'done')
-        stables_upgrades = upgrade_stable_build.children_ids.sorted(lambda b: (b.params_id.upgrade_from_build_id.params_id.version_id.number, b.params_id.version_id.number))
+        stables_upgrades = upgrade_stable_build.linked_children_build_ids.sorted(lambda b: (b.params_id.upgrade_from_build_id.params_id.version_id.number, b.params_id.version_id.number))
 
         [b_15_16, b_16_17, _b_163_17, _b_17_173, _b_172_173] = stables_upgrades
         assertOk(b_15_16, self.template_per_version['15.0'], self.template_per_version['16.0'], 'no-demo-all')

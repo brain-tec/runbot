@@ -792,6 +792,7 @@ class TestBuildResult(RunbotCase):
             'File &#34;<a href="https://False/blob/dfdfcfcf0000ffffffffffffffffffffffffffff/addons/web/tests/test_web.py" target="_blank" class="subtle_link">/data/build/odoo/addons/web/tests/test_web.py</a>&#34;, in test_web'
         )
 
+
 class TestGc(RunbotCaseMinimalSetup):
 
     def test_repo_gc_testing(self):

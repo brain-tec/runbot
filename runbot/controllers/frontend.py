@@ -329,6 +329,7 @@ class Runbot(Controller):
         if not build.exists():
             return request.not_found()
         siblings = (build.parent_id.children_ids if build.parent_id else from_batch.slot_ids.build_id if from_batch else build).sorted('id')
+        # TODO FIXME for linked builds. Sibling may depends on the context of the batch
         context = {
             'build': build,
             'from_batch': from_batch,

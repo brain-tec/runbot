@@ -1052,7 +1052,7 @@ class ConfigStep(models.Model):
                         build._log('_run_configure_upgrade', 'No database found for pattern %s' % (upgrade_db.db_pattern), level='ERROR')
 
                 for db in valid_databases:
-                    child = build._add_child({
+                    _link, child = build._add_child({
                         'upgrade_to_build_id': None,
                         'upgrade_from_build_id': source.id,
                         'dump_db': db.id,
@@ -1062,7 +1062,7 @@ class ConfigStep(models.Model):
                         'version_id': target.params_id.version_id.id,
                         'trigger_id': None,
                         'dockerfile_id': target.params_id.dockerfile_id.id,
-                    })
+                    }, link=self.allow_similar_build_quick_result)
                     source_description = source.params_id.version_id.name
                     target_description = target.params_id.version_id.name
                     if source in build.create_batch_id.slot_ids.build_id:
@@ -1074,15 +1074,6 @@ class ConfigStep(models.Model):
                         target_description,
                         db.name,
                     )
-
-                    if self.allow_similar_build_quick_result:
-                        existing_done_build = next((build for build in child.params_id.build_ids.sorted('id') if build.global_state == 'done' and build.global_result == 'ok'), None)
-                        if not existing_done_build and not build.create_batch_id.bundle_id.is_staging:
-                            existing_done_build = next((build for build in child.params_id.build_ids.sorted('id') if build.global_state == 'done' and build.local_result not in ('skipped', 'killed') and not build.orphan_result), None)
-                        if existing_done_build:
-                            child._log('', 'A similar [build](%s) has been found, marking as done directly', existing_done_build.build_url, log_type='markdown')
-                            child.local_state = 'done'
-                            child.local_result = existing_done_build.local_result
 
     def _filter_upgrade_database(self, dbs, pattern):
         pat_list = pattern.split(',') if pattern else []
