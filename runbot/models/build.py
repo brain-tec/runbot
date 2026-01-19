@@ -1797,3 +1797,13 @@ class BuildResult(models.Model):
             "name": "Build errors",
             "view_mode": "list,form"
         }
+
+class BuildLink(models.Model):
+    _name = 'runbot.build.link'
+    _description = 'Runbot Build Link'
+    _order = 'id desc'
+
+    parent_id = fields.Many2one('runbot.build', string='Parent Build', required=True, ondelete='cascade')
+    child_id = fields.Many2one('runbot.build', string='Child Build', required=True, ondelete='cascade')
+    params_id = fields.Many2one('runbot.params', string='Params', related='child_id.params_id', store=True)
+    
