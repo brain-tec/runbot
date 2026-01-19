@@ -306,6 +306,7 @@ class Config(models.Model):
             'max_builds': OPTIONAL(INT),
             'if': OPTIONAL(DYNAMIC_VALUE),
             'log': OPTIONAL(DYNAMIC_VALUE),
+            'use_parent': OPTIONAL(BOOL),
         }
         valid_steps['restore'] = {
             'name': REQUIRED(NAME),
@@ -381,6 +382,18 @@ class Config(models.Model):
             if step.job_type == 'create_build':
                 for create_config in step.create_config_ids:
                     create_config._check_recursion(visited[:])
+
+    def _default_uses_parent(self, param_values):
+        if param_values.get('dump_db'):
+            return False
+        config_data = param_values.get('config_data', {}) or {}
+        if config_data.get('dump_url'):
+            return False
+        if config_data.get('restore_build_id'):
+            return False
+        if config_data.get('dump_trigger_id'):
+            return False
+        return any(step.job_type == 'restore' for step in self.step_ids)
 
 
 class ConfigStepUpgradeDb(models.Model):
@@ -600,7 +613,7 @@ class ConfigStep(models.Model):
             return build._docker_run(self, **docker_params)
         return True
 
-    def _run_create_build(self, build, config_data=None, max_build=200):
+    def _run_create_build(self, build, config_data=None, max_build=200, use_parent=...):
         if config_data:
             config_data = {**config_data, **build.params_id.config_data}
         else:
@@ -624,7 +637,7 @@ class ConfigStep(models.Model):
                         build._log('create_build', f'More than {max_build} build created, stopping', level='WARNING')
                         return
                     config_name = config_name or create_config.name
-                    child = build._add_child(child_data_values, orphan=self.make_orphan, description=description or config_name)
+                    child = build._add_child(child_data_values, orphan=self.make_orphan, description=description or config_name, use_parent=use_parent)
                     build._log('create_build', 'created with config %s' % config_name, log_type='subbuild', path=str(child.id))
 
     def _make_python_ctx(self, build):
@@ -1136,7 +1149,7 @@ class ConfigStep(models.Model):
                 dump_build = dump_db.build_id
             else:
                 download_db_suffix = config_data.get('dump_suffix', self.restore_download_db_suffix or 'all')
-                dump_build = build.parent_id
+                dump_build = params.reference_build_id or build.parent_id  # TODO cleanup parent_id
             assert download_db_suffix and dump_build
             download_db_name = '%s-%s' % (dump_build.dest, download_db_suffix)
             zip_name = '%s.zip' % download_db_name
@@ -1618,11 +1631,15 @@ class ConfigStep(models.Model):
                         'config_name': config_name,
                         'description': description,
                     }
+                    if current_step.get('use_parent') or (current_step.get('use_parent') is None and any(step.get('job_type') == 'restore' for step in child.get('steps', []))):
+                        # TODO improve, not needed is other restore params are given
+                        child_data['reference_build_id'] = build.id
                     child_data_list.append(child_data)
             return self._run_create_build(
                 build,
                 {'child_data': child_data_list, 'number_build': current_step.get('number_builds', 1)},
                 max_build=min(current_step.get('max_builds', 20), 200),
+                use_parent=current_step.get('use_parent', ...)
             )
 
         if current_step['job_type'] == 'restore':
