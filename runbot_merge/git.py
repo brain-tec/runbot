@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import io
 import itertools
@@ -117,6 +118,9 @@ class Repo:
         except subprocess.CalledProcessError as e:
             stream = e.stderr or e.stdout
             if stream:
+                if isinstance(stream, bytes):
+                    with contextlib.suppress(UnicodeDecodeError):
+                        stream = stream.decode()
                 _logger.error("git call error: %s", stream)
             raise
 
