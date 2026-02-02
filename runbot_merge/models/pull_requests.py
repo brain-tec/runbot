@@ -31,8 +31,9 @@ from odoo.addons.base.controllers.rpc import OdooMarshaller
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.osv import expression
 from odoo.tools import html_escape, Reverse, mute_logger, groupby
+from odoo.tools.safe_eval import safe_eval
 
-from . import commands
+from .commands import commands, AccessFailure, Rel
 from .. import github, exceptions, controllers, utils, git
 from .utils import enum, readonly, dfm
 
@@ -839,33 +840,16 @@ class PullRequests(models.Model):
                 'close': close,
             })
 
-        is_admin, is_reviewer, is_author = self._pr_acl(author)
-        source_author = self.source_id._pr_acl(author).is_author
-        # nota: 15.0 `has_group` completely doesn't work if the recordset is empty
-        super_admin = is_admin and author.user_ids and author.user_ids.has_group('runbot_merge.group_admin')
-        is_employee = (is_author or source_author) and author.user_ids and author.user_ids.has_group('base.group_user')
+        rel = Rel(author=author, pr=self)
+        acls = self.env['runbot_merge.acls'].search([
+            '|', ('partner_id', '=', False), ('partner_id', '=', author.id),
+            '|', ('repository_id', '=', False), ('repository_id', '=', self.repository.id),
+        ], order='effect').filtered(
+            lambda acl: (not acl.predicate) or safe_eval(acl.predicate, {
+                'rel': rel,
+            })
+        )
 
-        help_list: list[type(commands.Command)] = list(filter(None, [
-            commands.Help,
-
-            (is_reviewer or (self.source_id and source_author)) and not self.reviewed_by and commands.Approve,
-            (is_author or source_author) and self.reviewed_by and commands.Reject,
-            (is_author or source_author) and self.error and commands.Retry,
-
-            (is_author or source_author) and commands.FW,
-            is_author and commands.Limit,
-            source_author and self.source_id and commands.Close,
-
-            (is_reviewer or is_employee) and commands.MergeMethod,
-            is_reviewer and commands.Delegate,
-
-            is_admin and commands.Priority,
-            super_admin and commands.SkipChecks,
-            is_admin and commands.CancelStaging,
-
-            author.override_rights and commands.Override,
-            is_author and commands.Check,
-        ]))
         def format_help(warn_ignore: bool, address: bool = True) -> str:
             s = [
                 'Currently available commands{}:'.format(
@@ -875,9 +859,10 @@ class PullRequests(models.Model):
                 '|command||',
                 '|-|-|',
             ]
-            for command_type in help_list:
-                for cmd, text in command_type.help(is_reviewer):
-                    s.append(f"|`{cmd}`|{text}|")
+            s.extend(
+                f"|`{cmd}`|{text}|"
+                for cmd, text in acls.help()
+            )
 
             s.extend(['', 'Note: this help text is dynamic and will change with the state of the PR.'])
             if warn_ignore:
@@ -885,11 +870,16 @@ class PullRequests(models.Model):
             return "\n".join(s)
 
         try:
-            cmds: List[commands.Command] = [
+            cmds: List[commands.Command] = list(acls.commands_check(
                 ps
                 for line in commandlines
                 for ps in commands.Parser(line.rstrip())
-            ]
+            ))
+        except AccessFailure as e:
+            _logger.info("ignoring comment of %s (%s): no ACL to %s on %s",
+                          login, name, e.args[0], self.display_name)
+            feedback(message=f"@{login} you can't {e.args[0]}.")
+            return 'ignored'
         except Exception as e:
             _logger.info(
                 "error %s while parsing comment of %s (%s): %s",
@@ -913,24 +903,13 @@ For your own safety I've ignored *everything in your entire comment*.
             })
             return "help"
 
-        if not (is_author or self.source_id or (any(isinstance(cmd, commands.Override) for cmd in cmds) and author.override_rights)):
-            # no point even parsing commands
-            _logger.info("ignoring comment of %s (%s): no ACL to %s",
-                          login, name, self.display_name)
-            self.env.ref('runbot_merge.command.access.no')._send(
-                repository=self.repository,
-                pull_request=self.number,
-                format_args={'user': login, 'pr': self}
-            )
-            return 'ignored'
-
         rejections = []
         for command in cmds:
             msg = None
             match command:
                 case commands.Approve() if self.draft:
                     msg = "draft PRs can not be approved."
-                case commands.Approve() if self.source_id and (source_author or is_reviewer):
+                case commands.Approve() if self.source_id:
                     if selected := [p for p in self._iter_ancestors() if p.number in command]:
                         for pr in selected:
                             # ignore already reviewed PRs, unless it's the one
@@ -940,12 +919,12 @@ For your own safety I've ignored *everything in your entire comment*.
                                 pr._approve(author, login)
                     else:
                         msg = f"tried to approve PRs {command.fmt()} but no such PR is an ancestors of {self.number}"
-                case commands.Approve() if is_reviewer:
+                case commands.Approve():
                     if command.ids is None or command.ids == [self.number]:
                         msg = self._approve(author, login)
                     else:
                         msg = f"tried to approve PRs {command.fmt()} but the current PR is {self.number}"
-                case commands.Reject() if is_author or source_author:
+                case commands.Reject():
                     if self.batch_id.skipchecks or self.reviewed_by:
                         if self.error:
                             self.error = False
@@ -965,7 +944,7 @@ For your own safety I've ignored *everything in your entire comment*.
                         self.unstage("unreviewed (r-) by %s", login)
                     else:
                         msg = "r- makes no sense in the current PR state."
-                case commands.MergeMethod() if (is_reviewer or is_employee):
+                case commands.MergeMethod():
                     self.merge_method = command.value
                     explanation = next(label for value, label in type(self).merge_method.selection if value == command.value)
                     self.env.ref("runbot_merge.command.method")._send(
@@ -977,17 +956,17 @@ For your own safety I've ignored *everything in your entire comment*.
                     # *blocking*) staging, trigger a staging
                     if self.state == 'ready':
                         self.env.ref("runbot_merge.staging_cron")._trigger()
-                case commands.Retry() if is_author or source_author:
+                case commands.Retry():
                     if self.error:
                         self.error = False
                     else:
                         msg = "retry makes no sense when the PR is not in error."
-                case commands.Check() if is_author:
+                case commands.Check():
                     self.env['runbot_merge.fetch_job'].create({
                         'repository': self.repository.id,
                         'number': self.number,
                     })
-                case commands.Delegate(users) if is_reviewer:
+                case commands.Delegate(users):
                     if not users:
                         delegates = self.author
                     else:
@@ -998,9 +977,9 @@ For your own safety I've ignored *everything in your entire comment*.
                                 'github_login': login,
                             })
                     delegates.write({'delegate_reviewer': [(4, self.id, 0)]})
-                case commands.Priority() if is_admin:
+                case commands.Priority():
                     self.batch_id.priority = str(command)
-                case commands.SkipChecks() if super_admin:
+                case commands.SkipChecks():
                     self.batch_id.skipchecks = True
                     self.reviewed_by = author
                     if not (self.squash or self.merge_method):
@@ -1009,7 +988,7 @@ For your own safety I've ignored *everything in your entire comment*.
                     for p in self.batch_id.prs - self:
                         if not p.reviewed_by:
                             p.reviewed_by = author
-                case commands.CancelStaging() if is_admin:
+                case commands.CancelStaging():
                     self.batch_id.cancel_staging = True
                     if not self.batch_id.blocked:
                         if splits := self.target.split_ids:
@@ -1019,10 +998,13 @@ For your own safety I've ignored *everything in your entire comment*.
                             author.github_login, self.display_name,
                         )
                 case commands.Override(statuses):
+                    overridable = {acl.arg for acl in acls if acl.command == 'Override'}
+                    if '*' in overridable:
+                        overridable.discard('*')
+                        overridable.update(author.override_rights \
+                            .filtered(lambda r: not r.repository_id or (r.repository_id == self.repository)) \
+                            .mapped('context'))
                     for status in statuses:
-                        overridable = author.override_rights\
-                            .filtered(lambda r: not r.repository_id or (r.repository_id == self.repository))\
-                            .mapped('context')
                         if status in overridable:
                             self.overrides = json.dumps({
                                 **json.loads(self.overrides),
@@ -1040,20 +1022,20 @@ For your own safety I've ignored *everything in your entire comment*.
                         else:
                             msg = f"you are not allowed to override {status!r}."
                 # FW
-                case commands.Close() if source_author:
+                case commands.Close():
                     feedback(close=True)
                 case commands.FW():
                     message = None
                     match command:
                         case _ if self.batch_id.fw_policy == 'skipmerge' and command != commands.FW.SKIPMERGE:
                             msg = "a pull request set to skip merge can not be reverted to other fw methods"
-                        case commands.FW.NO if is_author or source_author:
+                        case commands.FW.NO:
                             message = "Disabled forward-porting."
-                        case commands.FW.DEFAULT if is_author or source_author:
+                        case commands.FW.DEFAULT:
                             message = "Waiting for CI to create followup forward-ports."
-                        case commands.FW.SKIPCI if is_reviewer:
+                        case commands.FW.SKIPCI:
                             message = "Not waiting for CI to create followup forward-ports."
-                        case commands.FW.SKIPMERGE if is_reviewer:
+                        case commands.FW.SKIPMERGE:
                             if self.source_id or self.merge_date:
                                 message = "Forcing all forward ports."
                             else:
@@ -1080,7 +1062,7 @@ For your own safety I've ignored *everything in your entire comment*.
                         self.batch_id.genealogy_ids.fw_policy = command.name.lower()
                         feedback(message=message)
 
-                case commands.Limit(branch) if is_author:
+                case commands.Limit(branch):
                     if branch is None:
                         feedback(message="'ignore' is deprecated, use 'fw=no' to disable forward porting.")
                     limit = branch or self.target.name
@@ -1097,8 +1079,6 @@ For your own safety I've ignored *everything in your entire comment*.
                                 'pull_request': p.number,
                                 'message': m,
                             })
-                case commands.Limit():
-                    msg = "you can't set a forward-port limit."
                 # NO!
                 case _:
                     msg = f"you can't {command}."

@@ -9,7 +9,7 @@ def project(env, config, rolemap):
         'github_prefix': 'hansen',
         'github_name': config['github']['name'],
         'github_email': "foo@example.org",
-        'branch_ids': [(0, 0, {'name': 'master', 'presplit': True, 'optimistic_staging_threshold': 1})],
+        'branch_ids': [(0, 0, {'name': 'master'})],
     })
 
 

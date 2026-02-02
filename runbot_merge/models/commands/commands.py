@@ -1,5 +1,5 @@
 import enum
-from collections.abc import Iterator
+from collections.abc import Iterator, Container
 from dataclasses import dataclass, field
 from typing import List, Optional, Union, Tuple
 
@@ -82,7 +82,7 @@ class Approve:
         return ", ".join(f"#{n:d}" for n in (self.ids or ()))
 
     @classmethod
-    def help(cls, _: bool) -> Iterator[Tuple[str, str]]:
+    def help(cls, _: Container[str]) -> Iterator[Tuple[str, str]]:
         yield "r(eview)+", "approves the PR, if it's a forwardport also approves all non-detached parents"
         yield "r(eview)=<number>", "only approves the specified parents"
 
@@ -91,7 +91,7 @@ class Reject:
         return 'review-'
 
     @classmethod
-    def help(cls, _: bool) -> Iterator[Tuple[str, str]]:
+    def help(cls, _: Container[str]) -> Iterator[Tuple[str, str]]:
         yield "r(eview)-", "removes approval of a previously approved PR, if the PR is staged the staging will be cancelled"
 
 class MergeMethod(enum.Enum):
@@ -104,7 +104,7 @@ class MergeMethod(enum.Enum):
         return self.value
 
     @classmethod
-    def help(cls, _: bool) -> Iterator[Tuple[str, str]]:
+    def help(cls, _: Container[str]) -> Iterator[Tuple[str, str]]:
         yield str(cls.MERGE), "integrate the PR with a simple merge commit, using the PR description as message"
         yield str(cls.REBASE_MERGE), "rebases the PR on top of the target branch the integrates with a merge commit, using the PR description as message"
         yield str(cls.REBASE_FF), "rebases the PR on top of the target branch, then fast-forwards"
@@ -116,7 +116,7 @@ class Retry:
         return 'retry'
 
     @classmethod
-    def help(cls, _: bool) -> Iterator[Tuple[str, str]]:
+    def help(cls, _: Container[str]) -> Iterator[Tuple[str, str]]:
         yield "retry", 're-tries staging a PR in the "error" state'
 
 
@@ -125,7 +125,7 @@ class Check:
         return 'check'
 
     @classmethod
-    def help(cls, _: bool) -> Iterator[Tuple[str, str]]:
+    def help(cls, _: Container[str]) -> Iterator[Tuple[str, str]]:
         yield "check", "fetches or refreshes PR metadata, resets mergebot state"
 
 
@@ -137,8 +137,14 @@ class Override:
         return f"override={','.join(self.statuses)}"
 
     @classmethod
-    def help(cls, _: bool) -> Iterator[Tuple[str, str]]:
+    def help(cls, _: Container[str]) -> Iterator[Tuple[str, str]]:
         yield "override=<...>", "marks overridable statuses as successful"
+
+    def checkacl(self, acls: set[str]) -> bool:
+        return 'Override[*]' in acls or all(
+            f'Override[{status}]' in acls
+            for status in self.statuses
+        )
 
 
 @dataclass
@@ -151,7 +157,7 @@ class Delegate:
         return f"delegate={','.join(self.users)}"
 
     @classmethod
-    def help(cls, _: bool) -> Iterator[Tuple[str, str]]:
+    def help(cls, _: Container[str]) -> Iterator[Tuple[str, str]]:
         yield "delegate+", "grants approval rights to the PR author"
         yield "delegate=<...>", "grants approval rights on this PR to the specified github users"
 
@@ -166,7 +172,7 @@ class Priority(enum.Enum):
         return self.name.lower()
 
     @classmethod
-    def help(cls, _: bool) -> Iterator[Tuple[str, str]]:
+    def help(cls, _: Container[str]) -> Iterator[Tuple[str, str]]:
         yield str(cls.NICE), "only stages the PR if there's room in the batch after `default` PRs"
         yield str(cls.DEFAULT), "stages the PR normally"
         yield str(cls.PRIORITY), "tries to stage this PR first, then adds `default` PRs if the staging has room"
@@ -178,7 +184,7 @@ class CancelStaging:
         return "cancel=staging"
 
     @classmethod
-    def help(cls, _: bool) -> Iterator[Tuple[str, str]]:
+    def help(cls, _: Container[str]) -> Iterator[Tuple[str, str]]:
         yield "cancel=staging", "automatically cancels the current staging when this PR becomes ready"
 
 
@@ -187,7 +193,7 @@ class SkipChecks:
         return 'skipchecks'
 
     @classmethod
-    def help(cls, _: bool) -> Iterator[Tuple[str, str]]:
+    def help(cls, _: Container[str]) -> Iterator[Tuple[str, str]]:
         yield "skipchecks", "bypasses both statuses and review"
 
 
@@ -201,11 +207,12 @@ class FW(enum.Enum):
         return f'fw={self.name.lower()}'
 
     @classmethod
-    def help(cls, is_reviewer: bool) -> Iterator[Tuple[str, str]]:
+    def help(cls, cmds: Container[str]) -> Iterator[Tuple[str, str]]:
         yield str(cls.NO), "does not forward-port this PR"
         yield str(cls.DEFAULT), "forward-ports this PR normally"
-        if is_reviewer:
+        if f'{cls.__name__}.{cls.SKIPCI.name}' in cmds:
             yield str(cls.SKIPCI), "does not wait for a forward-port's statuses to succeed before creating the next one"
+        if f'{cls.__name__}.{cls.SKIPMERGE.name}' in cmds:
             yield str(cls.SKIPMERGE), "does not wait for the source to be merged before creating forward ports"
 
 
@@ -219,7 +226,7 @@ class Limit:
         return f'up to {self.branch}'
 
     @classmethod
-    def help(cls, _: bool) -> Iterator[Tuple[str, str]]:
+    def help(cls, _: Container[str]) -> Iterator[Tuple[str, str]]:
         yield "up to <branch>", "only ports this PR forward to the specified branch (included)"
 
 
@@ -228,7 +235,7 @@ class Close:
         return 'close'
 
     @classmethod
-    def help(cls, _: bool) -> Iterator[Tuple[str, str]]:
+    def help(cls, _: Container[str]) -> Iterator[Tuple[str, str]]:
         yield str(cls()), "closes this forward-port"
 
 
@@ -237,25 +244,31 @@ class Help:
         return 'help'
 
     @classmethod
-    def help(cls, _: bool) -> Iterator[Tuple[str, str]]:
+    def help(cls, _: Container[str]) -> Iterator[Tuple[str, str]]:
         yield str(cls()), "displays this help"
 
 
 Command = Union[
-    Approve,
-    CancelStaging,
-    Close,
-    Check,
-    Delegate,
-    FW,
     Help,
-    Limit,
-    MergeMethod,
-    Override,
-    Priority,
+
+    Approve,
     Reject,
     Retry,
+
+    FW,
+    Limit,
+    Close,
+
+    MergeMethod,
+    Delegate,
+
+    Priority,
     SkipChecks,
+    CancelStaging,
+
+    Override,
+
+    Check,
 ]
 
 

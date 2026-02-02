@@ -23,6 +23,8 @@
         'models/ir_cron/views.xml',
         'models/crons/forwardport.xml',
         'models/crons/forwardport_views.xml',
+        'models/commands/runbot_merge.acls.csv',
+        'models/commands/views.xml',
     ],
     'assets': {
        'web._assets_primary_variables': [

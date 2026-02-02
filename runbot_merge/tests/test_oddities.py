@@ -327,6 +327,8 @@ Currently available commands for @{user}:
 |`help`|displays this help|
 |`r(eview)+`|approves the PR, if it's a forwardport also approves all non-detached parents|
 |`r(eview)=<number>`|only approves the specified parents|
+|`r(eview)-`|removes approval of a previously approved PR, if the PR is staged the staging will be cancelled|
+|`retry`|re-tries staging a PR in the "error" state|
 |`fw=no`|does not forward-port this PR|
 |`fw=default`|forward-ports this PR normally|
 |`fw=skipci`|does not wait for a forward-port's statuses to succeed before creating the next one|
@@ -354,6 +356,8 @@ Currently available commands for @{user}:
 |command||
 |-|-|
 |`help`|displays this help|
+|`r(eview)-`|removes approval of a previously approved PR, if the PR is staged the staging will be cancelled|
+|`retry`|re-tries staging a PR in the "error" state|
 |`fw=no`|does not forward-port this PR|
 |`fw=default`|forward-ports this PR normally|
 |`up to <branch>`|only ports this PR forward to the specified branch (included)|

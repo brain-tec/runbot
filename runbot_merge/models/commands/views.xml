@@ -1,0 +1,22 @@
+<data>
+    <record id="action_acls" model="ir.actions.act_window">
+        <field name="name">ACLs</field>
+        <field name="res_model">runbot_merge.acls</field>
+    </record>
+    <record id="tree_acls" model="ir.ui.view">
+        <field name="name">ACLs list</field>
+        <field name="model">runbot_merge.acls</field>
+        <field name="arch" type="xml">
+            <tree editable="bottom">
+                <field name="command"/>
+                <field name="arg"/>
+                <field name="effect"/>
+                <field name="predicate"/>
+                <field name="partner_id"/>
+                <field name="repository_id"/>
+            </tree>
+        </field>
+    </record>
+    <menuitem name="ACLs" id="menu_acl" parent="menu_configuration"
+              action="action_acls"/>
+</data>

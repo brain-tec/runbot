@@ -6,6 +6,7 @@ from . import res_partner
 
 from . import project
 from . import pull_requests
+from . import commands
 from . import batch
 from . import patcher
 from . import project_freeze

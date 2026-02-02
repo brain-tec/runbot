@@ -36,7 +36,23 @@ def test_finding(env):
     assert name_search(Overrides, 'ctx') == a|b|c|d
     assert name_search(Overrides, 'r2') == c|d
 
-def test_basic(env, project, make_repo, users, setreviewers, config):
+
+@pytest.mark.parametrize('setoverride', [
+    pytest.param(lambda partner, repository: partner.write({
+        'override_rights': [(0, 0, {
+            'repository_id': repository.id,
+            'context': 'l/int',
+        })]
+    }), id="byoverride"),
+    pytest.param(lambda partner, repository: partner.env['runbot_merge.acls'].create({
+        'command': 'Override',
+        'arg': 'l/int',
+        'effect': 'add',
+        'repository_id': repository.id,
+        'partner_id': partner.id,
+    }), id="byacl"),
+])
+def test_basic(env, project, make_repo, users, setreviewers, config, setoverride):
     """
     Test that we can override a status on a PR:
 
@@ -53,14 +69,11 @@ def test_basic(env, project, make_repo, users, setreviewers, config):
     setreviewers(*project.repo_ids)
     env['runbot_merge.events_sources'].create({'repository': repo.name})
     # "other" can override the lint
-    env['res.partner'].create({
+    partner = env['res.partner'].create({
         'name': config['role_other'].get('name', 'Other'),
         'github_login': users['other'],
-        'override_rights': [(0, 0, {
-            'repository_id': repo_id.id,
-            'context': 'l/int',
-        })]
     })
+    setoverride(partner, repo_id)
 
     with repo:
         m = repo.make_commits(None, Commit('root', tree={'a': '1'}), ref='heads/master')
@@ -88,14 +101,14 @@ def test_basic(env, project, make_repo, users, setreviewers, config):
         (users['reviewer'], 'hansen r+'),
         seen(env, pr, users),
         (users['reviewer'], 'hansen override=l/int'),
-        (users['user'], "@{} you are not allowed to override 'l/int'.".format(users['reviewer'])),
+        (users['user'], f"@{users['reviewer']} you can't override=l/int."),
         (users['other'], "hansen override=l/int"),
     ]
     assert pr_id.statuses == '{}'
     assert json.loads(pr_id.overrides) == {'l/int': {
         'state': 'success',
         'target_url': comments[-1]['html_url'],
-        'description': 'Overridden by @{}'.format(users['other']),
+        'description': f'Overridden by @{users["other"]}',
     }}
 
 def test_multiple(env, project, make_repo, users, setreviewers, config):
