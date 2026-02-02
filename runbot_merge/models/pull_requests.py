@@ -1524,14 +1524,20 @@ For your own safety I've ignored *everything in your entire comment*.
                 )
             # added a new PR to an already forward-ported batch: immediately
             # port forward to complete the genealogy
-            if not pr.source_id and self.env['runbot_merge.batch'].search_count([
+            if not pr.source_id and (child_batch := self.env['runbot_merge.batch'].search([
                 ('parent_id', '=', pr.batch_id.id),
-            ], limit=1):
-                self.env['forwardport.batches'].create({
-                    'batch_id': pr.batch_id.id,
-                    'source': 'complete',
-                    'pr_id': pr.id,
-                })
+            ])):
+                # check if there is already a PR in the slot we want, if so just link it
+                if adoptee := child_batch.prs.filtered(lambda p: p.repository == pr.repository):
+                    adoptee.source_id = pr
+                    adoptee.detach_reason = "Adopted (fake source)"
+                    adoptee.message_post(body=f"Linked to new PR {pr.display_name} in previous batch")
+                else:
+                    self.env['forwardport.batches'].create({
+                        'batch_id': pr.batch_id.id,
+                        'source': 'complete',
+                        'pr_id': pr.id,
+                    })
 
         new = iter(new)
         old = iter(old)

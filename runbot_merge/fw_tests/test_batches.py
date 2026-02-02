@@ -396,3 +396,154 @@ In the former case, you may want to edit this PR message as well.
 More info at https://github.com/odoo/odoo/wiki/Mergebot#forward-port
 """.format(project=project, previous=pr2_b_id, **users))
     ]
+
+def test_add_pr_reverse(env, config, make_repo, users):
+    """Adding new PRs in the same order the ports line up? Preposterous!
+    """
+    # region setup
+    r1, _ = make_basic(env, config, make_repo, statuses="default")
+    r2, fork2 = make_basic(env, config, make_repo, statuses="default")
+    project = env['runbot_merge.project'].search([])
+    project.write({
+        'branch_ids': [(0, 0, {'name': 'd', 'sequence': 40})],
+    })
+    with r1, r2:
+        r1.make_commits('c', Commit('1111', tree={'g': 'a'}), ref='heads/d')
+        r2.make_commits('c', Commit('1111', tree={'g': 'a'}), ref='heads/d')
+
+    with r1:
+        r1.make_commits('a', Commit('a', tree={'a': 'a'}), ref="heads/pr1")
+        pr1_a = r1.make_pr(target="a", head="pr1")
+        r1.post_status(pr1_a.head, 'success')
+        pr1_a.post_comment('hansen r+', config['role_reviewer']['token'])
+    env.run_crons()
+    with r1, r2:
+        r1.post_status('staging.a', 'success')
+        r2.post_status('staging.a', 'success')
+    env.run_crons()
+
+    # region port forward
+    pr1_a_id = to_pr(env, pr1_a)
+    for branch in 'bc':
+        next_pr = env['runbot_merge.pull_requests'].search([
+            ('source_id', '=', pr1_a_id.id),
+            ('target.name', '=', branch),
+        ])
+        assert next_pr
+        with r1:
+            r1.post_status(next_pr.head, 'success')
+        env.run_crons()
+    # endregion
+    # endregion
+
+
+    pr1_b_id, pr1_c_id, pr1_d_id = pr1_a_id.forwardport_ids[::-1]
+    # new PR must be in fork for labels to actually match
+    with r2, fork2:
+        # branch in fork has no owner prefix, but HEAD for cross-repo PR does
+        fork2.make_commits(r2.commit("c").id, Commit('c', tree={'c': 'c'}), ref=f'heads/{pr1_c_id.refname}')
+        pr2_c = r2.make_pr(title="c", target="c", head=pr1_c_id.label)
+    env.run_crons()
+
+    pr2_c_id = to_pr(env, pr2_c)
+    assert pr2_c_id.batch_id == pr1_c_id.batch_id
+    # since c is the last branch, nothing should happen?
+    assert pr2_c.comments == [
+        seen(env, pr2_c, users),
+    ]
+
+    # now add a PR before it
+    with r2, fork2:
+        # branch in fork has no owner prefix, but HEAD for cross-repo PR does
+        fork2.make_commits(r2.commit("b").id, Commit('b', tree={'c': 'c'}), ref=f'heads/{pr1_b_id.refname}')
+        pr2_b = r2.make_pr(title="b", target="b", head=pr1_b_id.label)
+    env.run_crons()
+
+    pr2_b_id = to_pr(env, pr2_b)
+    assert pr2_b_id.batch_id == pr1_b_id.batch_id
+
+    # check that the existing PR was linked to this one for convenience
+    assert pr2_c_id.source_id == pr2_b_id
+
+
+def test_add_pr_reverse2(env, config, make_repo, users):
+    """Same as previous, but the later batch gets merged before we even add the PR in the middle batch
+    """
+    # region setup
+    r1, _ = make_basic(env, config, make_repo, statuses="default")
+    r2, fork2 = make_basic(env, config, make_repo, statuses="default")
+    project = env['runbot_merge.project'].search([])
+    project.write({
+        'branch_ids': [(0, 0, {'name': 'd', 'sequence': 40})],
+    })
+    with r1, r2:
+        r1.make_commits('c', Commit('1111', tree={'g': 'a'}), ref='heads/d')
+        r2.make_commits('c', Commit('1111', tree={'g': 'a'}), ref='heads/d')
+
+    with r1:
+        r1.make_commits('a', Commit('a', tree={'a': 'a'}), ref="heads/pr1")
+        pr1_a = r1.make_pr(target="a", head="pr1")
+        r1.post_status(pr1_a.head, 'success')
+        pr1_a.post_comment('hansen r+', config['role_reviewer']['token'])
+    env.run_crons()
+    with r1, r2:
+        r1.post_status('staging.a', 'success')
+        r2.post_status('staging.a', 'success')
+    env.run_crons()
+
+    # region port forward
+    pr1_a_id = to_pr(env, pr1_a)
+    for branch in 'bc':
+        next_pr = env['runbot_merge.pull_requests'].search([
+            ('source_id', '=', pr1_a_id.id),
+            ('target.name', '=', branch),
+        ])
+        assert next_pr
+        with r1:
+            r1.post_status(next_pr.head, 'success')
+        env.run_crons()
+    # endregion
+    # endregion
+
+
+    pr1_b_id, pr1_c_id, pr1_d_id = pr1_a_id.forwardport_ids[::-1]
+    # new PR must be in fork for labels to actually match
+    with r2, fork2:
+        # branch in fork has no owner prefix, but HEAD for cross-repo PR does
+        fork2.make_commits(r2.commit("c").id, Commit('c', tree={'c': 'c'}), ref=f'heads/{pr1_c_id.refname}')
+        pr2_c = r2.make_pr(title="c", target="c", head=pr1_c_id.label)
+    env.run_crons()
+
+    pr2_c_id = to_pr(env, pr2_c)
+    assert pr2_c_id.batch_id == pr1_c_id.batch_id
+    # since c is the last branch, nothing should happen?
+    assert pr2_c.comments == [
+        seen(env, pr2_c, users),
+    ]
+    pr1_c = r1.get_pr(pr1_c_id.number)
+    with r1, r2:
+        r1.post_status(pr1_c.head, 'success')
+        pr1_c.post_comment('hansen r+', config['role_reviewer']['token'])
+        r2.post_status(pr2_c.head, 'success')
+        pr2_c.post_comment('hansen r+', config['role_reviewer']['token'])
+    env.run_crons()
+
+    with r1, r2:
+        r1.post_status('staging.c', 'success')
+        r2.post_status('staging.c', 'success')
+    env.run_crons()
+    assert pr1_c_id.state == 'merged'
+    assert pr2_c_id.state == 'merged'
+
+    # now add a PR before it
+    with r2, fork2:
+        # branch in fork has no owner prefix, but HEAD for cross-repo PR does
+        fork2.make_commits(r2.commit("b").id, Commit('b', tree={'c': 'c'}), ref=f'heads/{pr1_b_id.refname}')
+        pr2_b = r2.make_pr(title="b", target="b", head=pr1_b_id.label)
+    env.run_crons()
+
+    pr2_b_id = to_pr(env, pr2_b)
+    assert pr2_b_id.batch_id == pr1_b_id.batch_id
+
+    # check that the existing PR was linked to this one for convenience
+    assert pr2_c_id.source_id == pr2_b_id
