@@ -396,7 +396,7 @@ class BuildError(models.Model):
         for record in self:
             record.error_count = len(record.error_content_ids)
 
-    @api.depends('error_content_ids')
+    @api.depends('error_content_ids.random')
     def _compute_random(self):
         for record in self:
             record.random = any(error.random for error in record.error_content_ids)
@@ -958,7 +958,7 @@ class BuildErrorContent(models.Model):
         res = dict(self.env.cr.fetchall())
 
         for build_error_content in self:
-            build_error_content.version_ids = self.env['runbot.version'].browse([v for v in res.get(build_error_content.id, []) if v])
+            build_error_content.version_ids = self.env['runbot.version'].browse([v for v in res.get(build_error_content.id, []) if v]).sorted('number')
 
     @api.depends('build_ids')
     def _compute_trigger_ids(self):
