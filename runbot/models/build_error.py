@@ -200,7 +200,7 @@ def _compute_related_error_content_ids(field_name):
     @api.depends(f'error_content_ids.{field_name}')
     def _compute(self):
         for record in self:
-            record[field_name] = record.error_content_ids[field_name]
+            record[field_name] = record.error_content_ids[field_name].sorted(lambda rec: rec.number if field_name == 'version_ids' else rec.id)
     return _compute
 
 def _search_related_error_content_ids(field_name):
