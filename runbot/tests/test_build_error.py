@@ -2,7 +2,7 @@ import hashlib
 from unittest.mock import patch
 
 from odoo import fields
-from odoo.exceptions import ValidationError
+from odoo.exceptions import AccessError, ValidationError
 from odoo.tests import new_test_user
 
 from .common import RunbotCase
@@ -203,6 +203,21 @@ class TestBuildError(TestBuildErrorCommon):
         self.assertEqual(error_a.test_tags, 'blah')
         self.assertEqual(error_b.test_tags, False)
         self.assertEqual(error_b.active, False)
+
+    def test_merge_pr_ids(self):
+        error_a = self.BuildError.create({
+            'content': 'foo',
+        })
+        error_b = self.BuildError.create({
+            'content': 'bar',
+            'breaking_pr_id': self.dev_pr.id,
+            'fixing_pr_id': self.dev_pr.id,
+        })
+
+        error_a._merge(error_b)
+
+        self.assertEqual(error_a.fixing_pr_id, self.dev_pr)
+        self.assertEqual(error_a.breaking_pr_id, self.dev_pr)
 
     def test_relink_contents(self):
         build_a = self.create_test_build({'local_result': 'ko', 'local_state': 'done'})
@@ -711,6 +726,40 @@ class TestBuildError(TestBuildErrorCommon):
         with patch.object(self.env.registry['runbot.build.error'], 'message_notify') as message_notify:
             innactive_error.responsible = responsible
             message_notify.assert_not_called()
+
+    def test_build_error_acl(self):
+        self.stop_patcher('isfile')  # prevent user creation
+        self.start_patcher('message_notify', 'odoo.addons.mail.models.mail_thread.MailThread.message_notify')
+        test_team = self.env['runbot.team'].create({
+            'name': 'test-team',
+            'project_id': self.project.id,
+        })
+        responsible = new_test_user(self.env, login='fixman', name='fixman', groups='base.group_user')
+        user_lambda = new_test_user(self.env, login='lambda', name='lambda', groups='base.group_user')
+        error_manager = new_test_user(self.env, login='errorman', name='errorman', groups='base.group_user,runbot.group_runbot_error_manager')
+        runbot_manager = new_test_user(self.env, login='runbotman', name='runbotman', groups='base.group_user,runbot.group_runbot_admin')
+
+        error = self.BuildError.create({})
+
+        # check writable fields by any user
+        error.with_user(user_lambda).write({
+            'responsible': responsible.id,
+            'customer': error_manager.id,
+            'fixing_pr_id': self.dev_pr.id,
+            'breaking_pr_id': self.dev_pr.id,
+            'random': True,
+            'team_id': test_team.id,
+        })
+
+        # check other fields for a user lambda
+        with self.assertRaises(AccessError):
+            error.with_user(user_lambda).description = 'test description'
+
+        # now check that an error manager can set a test_tag
+        error.with_user(error_manager).test_tags = 'brol'
+
+        # and the runbot admin user can change it back
+        error.with_user(runbot_manager).test_tags = False
 
 
 class TestErrorMerge(TestBuildErrorCommon):

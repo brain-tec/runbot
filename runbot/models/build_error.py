@@ -13,7 +13,7 @@ from markupsafe import Markup
 from werkzeug.urls import url_join
 
 from odoo import api, fields, models
-from odoo.exceptions import UserError, ValidationError
+from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tools import SQL, lazy, ormcache
 from odoo.fields import Domain
 
@@ -539,6 +539,12 @@ class BuildError(models.Model):
                     if not vals['active'] and build_error.active and build_error.last_seen_date and build_error.last_seen_date + relativedelta(days=1) > datetime.datetime.now():
                         raise UserError("This error broke less than one day ago can only be deactivated by admin")
 
+        writable_fields = ['responsible', 'fixing_pr_id', 'breaking_pr_id', 'customer', 'random', 'team_id', 'manual_team_id']
+        if not self.env.su and not self.env.user.has_groups('runbot.group_runbot_admin,runbot.group_runbot_error_manager'):
+            no_access_fields = vals.keys() - writable_fields
+            if no_access_fields != set():
+                raise AccessError(f"You are not allowed to modify the following field(s): {','.join(no_access_fields)}")
+
         if (responsible_id := vals.get('responsible')) and vals.get('active', True):
             responsible = self.env['res.users'].browse(responsible_id)
             for build_error in self:
@@ -572,6 +578,8 @@ class BuildError(models.Model):
         # TODO xdo split the error id change and other params merge in order to avoid the merge in write and write in merge recursion
         self.ensure_one
         error = self
+        fields_to_merge = ['responsible', 'fixing_pr_id', 'breaking_pr_id']
+        fields_to_copy = ['manual_team_id']
         for previous_error in others:
             # todo, check that all relevant fields are checked and transfered/logged
             if previous_error.test_tags and error.test_tags != previous_error.test_tags:
@@ -586,14 +594,12 @@ class BuildError(models.Model):
                             test_tags.append(tag)
                     error.test_tags = ','.join(test_tags)
                     previous_error.test_tags = False
-            if previous_error.responsible:
-                if error.responsible and error.responsible != previous_error.responsible and not self.env.su:
-                    raise UserError(f"error {error.id} as already a responsible ({error.responsible}) cannot assign {previous_error.responsible}")
-                if not error.responsible:
-                    error.responsible = previous_error.responsible
-            if previous_error.team_id:
-                if not error.team_id:
-                    error.team_id = previous_error.team_id
+            for field in fields_to_merge + fields_to_copy:
+                if previous_error[field]:
+                    if field in fields_to_merge and error[field] and error[field] != previous_error[field] and not self.env.su:
+                        raise UserError(f"error {error.id} as already a {field} ({error[field]}) cannot assign {previous_error[field]}")
+                    if not error[field]:
+                        error[field] = previous_error[field]
             previous_error.error_content_ids.with_context(merging=True).write({'error_id': self})
             previous_error.common_qualifiers = dict()
             previous_error.unique_qualifiers = dict()
@@ -819,6 +825,7 @@ class BuildErrorContent(models.Model):
 
     error_active = fields.Boolean('Active', related='error_id.active')
     error_id = fields.Many2one('runbot.build.error', 'Linked to', index=True, required=True, tracking=True, ondelete='cascade')
+    create_error_id = fields.Many2one('runbot.build.error', 'Original error', index=True)
     error_display_id = fields.Integer(compute='_compute_error_display_id', string="Error id")
     content = fields.Text('Error message', required=True)
     cleaned_content = fields.Text('Cleaned error message')
@@ -895,6 +902,7 @@ class BuildErrorContent(models.Model):
                         'name': name,
                     })
                     vals['error_id'] = error.id
+            vals['create_error_id'] = vals['error_id']
             content = vals.get('content')
             cleaned_content = cleaners._r_sub(content)
             vals.update({
