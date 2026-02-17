@@ -290,7 +290,7 @@
                         <t t-set="required_triggers" t-value="required_triggers - success_trigger"/>
                     </t>
                     <t t-if="required_triggers">
-                        <i class="fa fa-hourglass fa-fw" t-attf-title="Waiting for trigger(s) {{required_triggers.mapped('name').join(', ')}} (click to start anyway)"/>
+                        <i class="fa fa-hourglass fa-fw" t-attf-title="Waiting for trigger(s) {{', '.join(required_triggers.mapped('name'))}} (click to start anyway)"/>
                     </t>
                     <t t-else="">
                         <i class="fa fa-play fa-fw"/>
