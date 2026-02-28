@@ -523,6 +523,7 @@ class BuildResult(models.Model):
             'params_id': self.params_id.copy(param_values).id,
             'parent_id': self.id,
             'build_type': self.build_type,
+            'priority_level': self.priority_level,
             'description': description,
             'orphan_result': orphan,
             'keep_host': self.keep_host,
