@@ -1019,7 +1019,8 @@ class BuildResult(models.Model):
         # network is disabled by default, can be enabled via kwargs['network_enabled'] (run, restore) or config_data['network_enabled'] (external, nightly,...)
         kwargs['network_enabled'] = kwargs.get('network_enabled') or self.params_id.config_data.get('network_enabled') or self.params_id.trigger_id.network_enabled or False
 
-        containers_memory_limit = self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_containers_memory', 0)
+        memory_limit_factor = int(self.params_id.config_data.get('memory_limit_factor', 1))
+        containers_memory_limit = self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_containers_memory', 0) * memory_limit_factor
         if containers_memory_limit and 'memory' not in kwargs:
             kwargs['memory'] = int(float(containers_memory_limit) * 1024 ** 3)
 
