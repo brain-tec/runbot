@@ -1,8 +1,9 @@
 import datetime
 import re
-
 from collections import defaultdict
-from odoo import models, fields, api, tools
+
+from odoo import api, fields, models, tools
+from odoo.fields import Domain
 
 
 class Bundle(models.Model):
@@ -208,17 +209,28 @@ class Bundle(models.Model):
     @api.depends('name', 'branch_ids.head', 'branch_ids.pr_author')
     def _compute_author_ids(self):
         self.author_ids = self.env['res.users'].browse()
-        bundles = self.filtered(lambda b: not b.sticky and not b.is_base and not b.is_staging)
+        bundles = self.filtered(lambda b: not b.is_base and not b.is_staging)
+
+        emails = set(bundles.branch_ids.head.mapped(lambda rec: rec.committer_email and rec.committer_email.strip('<>')))
+        emails.update(set(bundles.branch_ids.head.mapped(lambda rec: rec.author_email and rec.author_email.strip('<>'))))
+
+        user_domain = Domain([('share', '=', False)])
+        github_login_domain = Domain([('github_login', 'in', set(bundles.branch_ids.filtered('is_pr').mapped('pr_author')))])
+        email_domain = Domain([('email', 'in', emails)])
+        user_domain = Domain.AND([user_domain, Domain.OR([email_domain, github_login_domain])])
+
+        users = self.env['res.users'].search(user_domain)
+
         github_logins_by_bundle = {bundle: set(bundle.branch_ids.filtered('is_pr').mapped('pr_author')) for bundle in bundles}
         all_github_logins = set()
         for gl in github_logins_by_bundle.values():
             all_github_logins |= gl
-        user_ids_by_github_login = {u.github_login: u.id for u in self.env['res.users'].search([('share', '=', False), ('github_login', 'in', all_github_logins)])}
+        user_ids_by_github_login = {u.github_login: u.id for u in users}
         for bundle, github_logins in github_logins_by_bundle.items():
             if users_ids := list(filter(None, {user_ids_by_github_login.get(gl) for gl in github_logins})):
                 bundle.author_ids = users_ids
 
-        user_ids_by_email = {u.email: u.id for u in self.env['res.users'].search([('share', '=', False)])}
+        user_ids_by_email = {u.email: u.id for u in users}
         for bundle in bundles:
             emails = set()
             emails.update(bundle.branch_ids.head.mapped(lambda rec: rec.committer_email and rec.committer_email.strip('<>')))
