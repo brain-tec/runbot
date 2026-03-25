@@ -2702,6 +2702,8 @@ class Commit(models.Model):
 
                 if stagings:
                     stagings._notify(c)
+
+                self.env.cr.commit()
             except psycopg2.errors.SerializationFailure:
                 serialization_failures = True
                 _logger.info("Failed to apply commit %s: serialization failure", sha)
@@ -2709,8 +2711,6 @@ class Commit(models.Model):
             except Exception:
                 _logger.exception("Failed to apply commit %s", sha)
                 self.env.cr.rollback()
-            else:
-                self.env.cr.commit()
         if serialization_failures:
             self.env.ref("runbot_merge.process_updated_commits")._trigger()
 
