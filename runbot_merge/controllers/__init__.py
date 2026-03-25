@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Callable
 
+import psycopg2.errors
 import sentry_sdk
 from werkzeug.exceptions import NotFound, UnprocessableEntity
 
@@ -320,8 +321,11 @@ def handle_pr(env, event):
         author = env['res.partner'].search([('github_login', '=', author_name)], limit=1)
         if not author:
             env['res.partner'].create({'name': author_name, 'github_login': author_name})
-        pr_obj = env['runbot_merge.pull_requests']._from_gh(pr)
-        return Response(status=201, mimetype="text/plain", response=f"Tracking PR as {pr_obj.display_name}")
+        try:
+            pr_obj = env['runbot_merge.pull_requests']._from_gh(pr)
+            return Response(status=201, mimetype="text/plain", response=f"Tracking PR as {pr_obj.display_name}")
+        except psycopg2.errors.UniqueViolation:
+            return Response(status=200, mimetype="text/plain", response="Already known")
 
     pr_obj = env['runbot_merge.pull_requests']._get_or_schedule(r, pr['number'], closing=event['action'] == 'closed')
     if not pr_obj:
