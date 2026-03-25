@@ -396,7 +396,7 @@
                         <td class="pr-listing">
                             <ul>
                                 <t t-foreach="staging.batch_ids" t-as="batch">
-                                    <li t-if="batch.prs">
+                                    <li t-if="batch.prs" t-att-data-batch-id="batch.id">
                                         <button t-attf-popovertarget="batch-{{batch.id}}"
                                                 t-attf-style="anchor-name: --anchor-batch-{{batch.id}}"
                                                 t-out="batch.name"/>
