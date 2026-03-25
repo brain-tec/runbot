@@ -68,16 +68,6 @@ window.addEventListener("mouseout", (e) => {
     }
 });
 /* endregion */
-
-/* region dropdowns */
-// If there's an open dropdown and we click outside the dropdown, close the dropdown.
-window.addEventListener("click", e => {
-    const dropdown = document.querySelector('details[name="dropdown"][open]');
-    if (dropdown && !dropdown.contains(e.target)) {
-        dropdown.removeAttribute('open');
-    }
-});
-
 window.addEventListener("click", e => {
     const toggle = e.target.closest('a.dropdown-toggle');
     if (toggle) {
@@ -96,61 +86,10 @@ window.addEventListener("click", e => {
         title.classList.toggle('fold');
     }
 });
-
-/**
- * Only implement flipping up if there's no space below, not the left/right
- * toggling and sliding.
- *
- * TODO: use popper.js instead to get more flexible behaviour?
- */
-function placeDropdown(details) {
-    const viewportHeight = document.documentElement.clientHeight;
-
-    const detailsRect = details.getBoundingClientRect();
-    const dropDown = details.querySelector(':scope > div');
-    const dropdownRect = dropDown.getBoundingClientRect()
-
-    // Amount of clipping in each direction (negative if dropdown is fully inside the viewport)
-    const clippingBottom = (detailsRect.bottom + dropdownRect.height) - viewportHeight;
-    // fastpath
-    if (clippingBottom <= 0 && !dropDown.style.inset) {
-        return;
-    }
-
-    const clippingTop = -(detailsRect.top - dropdownRect.height);
-    let inset;
-    if (clippingBottom <= 0 || clippingBottom <= clippingTop) {
-        inset = `${detailsRect.height}px auto auto 0`;
-    } else {
-        inset = `auto auto ${detailsRect.height}px 0`;
-    }
-    dropDown.style.inset = inset;
-}
-
-window.addEventListener("click", e => {
-    const summary = e.target.closest('summary');
-    const details = summary?.parentNode;
-    if (details && !details.hasAttribute('open') && details.getAttribute('name') === 'dropdown') {
-        summary.nextElementSibling.style.visibility = 'hidden';
+window.addEventListener('touchstart', e => {
+    const title = e.target.tagName !== 'A' && e.target.closest('section>section>h2');
+    if (title) {
+        title.classList.toggle('fold');
+        return false;
     }
 });
-window.addEventListener("toggle", e => {
-    if (e.newState === 'open' && e.target.matches('details[name="dropdown"]')) {
-        placeDropdown(e.target);
-    }
-    e.target.querySelector(':scope>div').style.visibility = '';
-}, {capture: true});
-
-window.addEventListener('scroll', _ => {
-    const openDetails = document.querySelector('details[name="dropdown"][open]');
-    if (openDetails) {
-        placeDropdown(openDetails);
-    }
-});
-window.addEventListener('resize', _ => {
-    const openDetails = document.querySelector('details[name="dropdown"][open]');
-    if (openDetails) {
-        placeDropdown(openDetails);
-    }
-});
-/* endregion */

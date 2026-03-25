@@ -436,13 +436,7 @@ ul.stagings {
     grid-template-columns: repeat(12, minmax( min(11pc + var(--pad1) + var(--pad2), 49vw - var(--gutter-x) * 0.5), 1fr));
     grid-template-rows: repeat(2, auto);
     grid-column-gap: 1px;
-    /*
-    This is Not Awesome, but apparently you can not combine auto in one
-    direction and visible in the other, so you can't have the dropdown
-    get out of the stagings at the bottom while having the stagings
-    horizontally scrollable (at least not without JS scrolling).
-     */
-    overflow-x: clip;
+    overflow-x: auto;
 
     &>li.staging {
         grid-template-rows: subgrid;
@@ -472,11 +466,17 @@ ul.stagings {
                 }
             }
         }
-        &>details {
-            margin: 0.5em 0;
-            &>summary {
-                text-indent: 1em hanging;
-            }
+        /*
+        :open is supposed to work on popovertarget (in supporting browser)
+        but it doesn't seem to work in FF while matching
+        `@supports selector(:has)`, so FF gets neither version therefore
+        just use the legacy one
+        */
+        &>button[popovertarget]:before {
+            content: '▸ ';
+        }
+        &:has([popover]:popover-open) > button[popovertarget]:before {
+            content: "▾ ";
         }
     }
 }
@@ -492,38 +492,48 @@ ul.stagings {
     }
 }
 
-details[name="dropdown"] {
-    position: relative;
-    &>summary {
-        padding: 0 var(--pad1, 0) 0 var(--pad2, 0);
+div.dropdown[popover] {
+    :has(&) {
+        anchor-scope: all;
+    }
+    button:has(+ &) {
+        display: inline-block;
+        background: none;
+        border: none;
         cursor: pointer;
         user-select: none;
+
+        text-align: start;
+        text-indent: 0.8em hanging;
+        margin: 0.5em 0;
+        padding: 0 var(--pad1, 0) 0 var(--pad2, 0);
     }
-    &>div {
-        position: absolute;
-        z-index: 100;
-        max-height: 70vh;
-        min-width: 10rem;
-        overflow: auto;
 
-        color: var(--color-foreground);
-        background-color: var(--color-background);
+    position: absolute;
+    inset: unset;
+    top: anchor(var(--my-anchor) bottom);
+    left: anchor(var(--my-anchor) left);
+    position-try-fallbacks: flip-block, flip-inline;
 
-        padding: 0.5rem 0;
-        border: 1px solid transparent;
-        border-radius: 0.25rem;
+    max-height: 70vh;
+    min-width: 10rem;
+    overflow: auto;
 
-        /*inset: 100% 0 auto auto;*/
+    color: var(--color-foreground);
+    background-color: var(--color-background);
 
-        & > * {
-            display: block;
-            width: 100%;
-            padding: 0.25rem 1rem;
-            white-space: nowrap;
-            color: color-mix(in srgb, var(--link-color) 85%, var(--color-background));
-            &:hover {
-                color: color-mix(in srgb, var(--link-color), var(--color-foreground));
-            }
+    padding: 0.5rem 0;
+    border: 1px solid transparent;
+    border-radius: 0.25rem;
+
+    & > * {
+        display: block;
+        width: 100%;
+        padding: 0.25rem 1rem;
+        white-space: nowrap;
+        color: color-mix(in srgb, var(--link-color) 85%, var(--color-background));
+        &:hover {
+            color: color-mix(in srgb, var(--link-color), var(--color-foreground));
         }
     }
 }

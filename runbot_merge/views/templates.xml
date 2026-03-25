@@ -23,11 +23,17 @@
     </template>
 
     <template id="staging-statuses" name="dropdown statuses list of stagings">
-        <details name="dropdown" t-if="staging.heads">
-            <summary t-attf-title="Staged at {{staging.staged_at}}Z for {{round(staging.staging_duration)}}s">
+        <t t-if="staging.heads">
+            <button t-attf-popovertarget="statuses-{{staging.id}}"
+                    t-attf-style="anchor-name: --anchor-staging-{{staging.id}}"
+                    t-attf-title="Staged at {{staging.staged_at}}Z for {{round(staging.staging_duration)}}s"
+            >
                 <t t-out="0"/>
-            </summary>
-            <div class="staging-statuses">
+            </button>
+            <div class="dropdown staging-statuses" popover=""
+                 t-attf-id="statuses-{{staging.id}}"
+                 t-attf-style="--my-anchor: --anchor-staging-{{staging.id}}"
+            >
                 <a groups="runbot_merge.group_admin"
                    role="menuitem"
                    t-attf-href="/web#id={{staging.id}}&amp;view_type=form&amp;model=runbot_merge.stagings"
@@ -51,7 +57,7 @@
                     </a>
                 </t>
             </div>
-        </details>
+        </t>
     </template>
 
     <template id="alerts">
@@ -390,17 +396,20 @@
                         <td class="pr-listing">
                             <ul>
                                 <t t-foreach="staging.batch_ids" t-as="batch">
-                                    <li class="dropdown" t-if="batch.prs">
-                                        <details name="dropdown" style="padding: 0.25rem 1rem">
-                                            <summary t-out="batch.name"/>
-                                            <div>
-                                                <t t-foreach="batch.prs" t-as="pr">
-                                                    <t t-call="runbot_merge.link-pr">
-                                                        <t t-set="target">_blank</t>
-                                                    </t>
+                                    <li t-if="batch.prs">
+                                        <button t-attf-popovertarget="batch-{{batch.id}}"
+                                                t-attf-style="anchor-name: --anchor-batch-{{batch.id}}"
+                                                t-out="batch.name"/>
+                                        <div class="dropdown" popover=""
+                                             t-attf-id="batch-{{batch.id}}"
+                                             t-attf-style="--my-anchor: --anchor-batch-{{batch.id}}"
+                                        >
+                                            <t t-foreach="batch.prs" t-as="pr">
+                                                <t t-call="runbot_merge.link-pr">
+                                                    <t t-set="target">_blank</t>
                                                 </t>
-                                            </div>
-                                        </details>
+                                            </t>
+                                        </div>
                                     </li>
                                 </t>
                             </ul>
