@@ -1,9 +1,9 @@
 import datetime
 import re
 from collections import defaultdict
+from itertools import chain
 
 from odoo import api, fields, models, tools
-from odoo.fields import Domain
 
 
 class Bundle(models.Model):
@@ -206,42 +206,22 @@ class Bundle(models.Model):
                 parent_bundle = self.env['runbot.bundle'].search([('name', '=', targets.pop())])
                 bundle.all_trigger_custom_ids = parent_bundle.all_trigger_custom_ids
 
-    @api.depends('name', 'branch_ids.head', 'branch_ids.pr_author')
+    @api.depends('name', 'branch_ids.pr_author', 'branch_ids.forwardport_of_id')
     def _compute_author_ids(self):
         self.author_ids = self.env['res.users'].browse()
         bundles = self.filtered(lambda b: not b.is_base and not b.is_staging)
 
-        emails = set(bundles.branch_ids.head.mapped(lambda rec: rec.committer_email and rec.committer_email.strip('<>')))
-        emails.update(set(bundles.branch_ids.head.mapped(lambda rec: rec.author_email and rec.author_email.strip('<>'))))
-
-        user_domain = Domain([('share', '=', False)])
-        github_login_domain = Domain([('github_login', 'in', set(bundles.branch_ids.filtered('is_pr').mapped('pr_author')))])
-        email_domain = Domain([('email', 'in', emails)])
-        user_domain = Domain.AND([user_domain, Domain.OR([email_domain, github_login_domain])])
-
-        users = self.env['res.users'].search(user_domain)
-
-        github_logins_by_bundle = {bundle: set(bundle.branch_ids.filtered('is_pr').mapped('pr_author')) for bundle in bundles}
-        all_github_logins = set()
-        for gl in github_logins_by_bundle.values():
-            all_github_logins |= gl
+        github_logins_by_bundle = {bundle: set(bundle.branch_ids.filtered('is_pr').mapped(lambda br: (br.forwardport_of_id and br.forwardport_of_id.pr_author) or br.pr_author)) for bundle in bundles}
+        github_logins = set(chain.from_iterable(github_logins_by_bundle.values()))
+        users = self.env['res.users'].search([('share', '=', False), ('github_login', 'in', github_logins)])
         user_ids_by_github_login = {u.github_login: u.id for u in users}
         for bundle, github_logins in github_logins_by_bundle.items():
             if users_ids := list(filter(None, {user_ids_by_github_login.get(gl) for gl in github_logins})):
                 bundle.author_ids = users_ids
-
-        user_ids_by_email = {u.email: u.id for u in users}
-        for bundle in bundles:
-            emails = set()
-            emails.update(bundle.branch_ids.head.mapped(lambda rec: rec.committer_email and rec.committer_email.strip('<>')))
-            emails.update(bundle.branch_ids.head.mapped(lambda rec: rec.author_email and rec.author_email.strip('<>')))
-            if users_ids := list(filter(None, {user_ids_by_email.get(e) for e in emails})):
-                bundle.author_ids |= self.env['res.users'].browse(users_ids)
                 bundles -= bundle
 
         valid_bundle_name_re = re.compile(r'^.{3,6}-.*-.{2,5}$')
         bundles = bundles.filtered(lambda b: valid_bundle_name_re.match(b.name))
-
         if not bundles:
             return
 
@@ -263,7 +243,7 @@ class Bundle(models.Model):
         for bundle in self:
             bundle.team_id = bundle.manual_team_id or bundle.auto_team_id
 
-    @api.depends('name')
+    @api.depends('name', 'team_ids')
     def _compute_auto_team_id(self):
         for bundle in self:
             bundle.auto_team_id = bundle.team_ids and bundle.team_ids[0]

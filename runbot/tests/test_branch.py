@@ -348,23 +348,6 @@ class TestBundleTeam(RunbotCase):
         bundle.team_id = other_team
         self.assertEqual(bundle.team_id, other_team)
 
-        # testing the author_ids based on commit author and committers
-        new_commit = self.Commit.create({
-            'name': 'd0d0caca',
-            'tree_hash': 'cacad0d0',
-            'repo_id': self.repo_odoo.id,
-            'author': 'aut',
-            'author_email': author_user.email,
-            'committer': 'test runbot',
-            'committer_email': committer_user.email,
-        })
-
-        branch.head = new_commit
-        self.assertEqual(bundle.team_id, other_team, 'Team should be unchanged as it wa manually set')
-
-        self.assertIn(committer_user, bundle.author_ids)
-        self.assertIn(author_user, bundle.author_ids)
-        self.assertEqual(2, len(bundle.author_ids))
         self.patchers['github_patcher'].return_value = {
             'base': {'ref': 'saas-19.1'},
             'head': {'label': 'dev:saas-19.1-test-tru', 'repo': {'full_name': 'dev/odoo'}},
@@ -382,4 +365,3 @@ class TestBundleTeam(RunbotCase):
 
         self.assertIn(pr_branch, bundle.branch_ids)
         self.assertIn(github_user, bundle.author_ids)
-        self.assertEqual(3, len(bundle.author_ids))
