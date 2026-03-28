@@ -277,7 +277,7 @@ class Bundle(models.Model):
                         warnings.append(('info', 'PR %s targeting a non base branch: %s' % (branch.dname, branch.target_branch_name)))
                     else:
                         warnings.append(('warning' if branch.alive else 'info', 'PR %s targeting wrong version: %s (expecting %s)' % (branch.dname, branch.target_branch_name, self.base_id.name)))
-                elif not branch.is_pr and not branch.name.startswith(self.base_id.name) and not self.defined_base_id:
+                elif not branch.is_pr and not branch.name.startswith(self.base_id.name) and not self.defined_base_id and branch.remote_id.repo_id.enforce_version:
                     warnings.append(('warning', 'Branch %s not starting with version name (%s)' % (branch.dname, self.base_id.name)))
         return warnings
 
@@ -322,7 +322,10 @@ class Bundle(models.Model):
         return self._generate_custom_trigger_action(context)
 
     def action_disable_all_triggers(self):
-        triggers_to_disable = (
+        self.configure_custom_trigger_start_mode('disable')
+
+    def configure_custom_trigger_start_mode(self, mode):
+        triggers_to_create = (
             self.env["runbot.trigger"]
             .search([
                 ("id", "not in", self.trigger_custom_ids.trigger_id.ids),
@@ -335,13 +338,17 @@ class Bundle(models.Model):
             )
         )
         vals = []
-        for trigger in triggers_to_disable:
+        for trigger in triggers_to_create:
             vals.append({
                 'bundle_id': self.id,
                 'trigger_id': trigger.id,
-                'start_mode': 'disabled',
             })
         self.env['runbot.bundle.trigger.custom'].create(vals)
+        for custom_trigger in self.trigger_custom_ids:
+            trigger_mode = mode
+            if mode == 'light' and not custom_trigger.trigger_id.light_config_id:
+                trigger_mode = 'auto'
+            custom_trigger.start_mode = trigger_mode
 
 
 class BundleTag(models.Model):
