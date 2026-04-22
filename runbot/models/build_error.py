@@ -242,6 +242,7 @@ class BuildError(models.Model):
     breaking_bundle_id = fields.Many2one('runbot.bundle', 'Breaking bundle', tracking=True, help="Bundle that introduced the error", related='breaking_pr_id.bundle_id')
     breaking_bundle_url = fields.Char('Breaking bundle url', related='breaking_bundle_id.frontend_url')
     breaking_pr_date = fields.Datetime('Breaking date', related="breaking_pr_id.close_date", help="Date of the merge of the first pr")
+    duplicate_breaking_pr_count = fields.Integer('Same Breaking PR', compute='_compute_duplicate_breaking_pr_count', help='Other errors with same breaking PR')
 
     test_tags = fields.Char(string='Test tags', help="Comma separated list of test_tags to use to reproduce/remove this error", tracking=True)
     canonical_tags = fields.Char('Canonical tag', compute='_compute_canonical_tags', store=True)
@@ -321,6 +322,18 @@ class BuildError(models.Model):
     def _compute_fixing_bundle_id(self):
         for record in self:
             record.fixing_bundle_id = record.fixing_pr_id.bundle_id if record.fixing_pr_id else False
+
+    @api.depends('breaking_pr_id')
+    def _compute_duplicate_breaking_pr_count(self):
+        for record in self:
+            if record.breaking_pr_id:
+                record.duplicate_breaking_pr_count = self.search_count([
+                    ('breaking_pr_id', '=', record.breaking_pr_id.id),
+                    ('id', '!=', record.id),
+                    ('active', '=', True),
+                ])
+            else:
+                record.duplicate_breaking_pr_count = 0
 
     @api.depends('error_content_ids.version_ids')
     def _compute_version_ids(self):
@@ -699,6 +712,19 @@ class BuildError(models.Model):
             'context': {'active_test': False},
             'target': 'current',
             'name': 'Similary Qualified Contents'
+        }
+
+    def action_view_duplicate_breaking_pr(self):
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_window',
+            'res_model': 'runbot.build.error',
+            'domain': [
+                ('breaking_pr_id', '=', self.breaking_pr_id.id),
+                ('active', '=', True),
+            ],
+            'view_mode': 'list,form',
+            'name': 'Errors with same breaking PR',
         }
 
     @api.depends('manual_team_id', 'auto_team_id')

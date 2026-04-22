@@ -56,6 +56,9 @@
                   <field name="breaking_pr_id" options="{'no_create': True}"/>
                   <field name="breaking_pr_url"  widget="pull_request_url" invisible="not breaking_pr_id"/>
                   <field name="breaking_bundle_url" invisible="not breaking_pr_id"/>
+                  <button name="action_view_duplicate_breaking_pr" type="object" class="oe_stat_button" icon="fa-external-link" invisible="duplicate_breaking_pr_count == 0">
+                    <field name="duplicate_breaking_pr_count" widget="statinfo"/>
+                  </button>
                   <field name="first_seen_date" widget="frontend_url" options="{'link_field': 'first_seen_build_id', 'numeric': True}"/>
                   <field name="last_seen_date" widget="frontend_url" options="{'link_field': 'last_seen_build_id', 'numeric': True}"/>
                   <field name="first_seen_build_id" invisible="True"/>
