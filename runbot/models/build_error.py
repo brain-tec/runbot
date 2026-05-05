@@ -325,15 +325,22 @@ class BuildError(models.Model):
 
     @api.depends('breaking_pr_id')
     def _compute_duplicate_breaking_pr_count(self):
+        breaking_counts = self.env["runbot.build.error"]._read_group(
+            domain=[
+                ("breaking_pr_id", "in", self.breaking_pr_id.ids),
+                ("active", "=", True),
+            ],
+            groupby=["breaking_pr_id"],
+            aggregates=["id:count"],
+            having=[('id:count', '>', 1)],
+        )
+
+        count_by_pr = {pr_count[0]: pr_count[1] for pr_count in breaking_counts}
+
         for record in self:
-            if record.breaking_pr_id:
-                record.duplicate_breaking_pr_count = self.search_count([
-                    ('breaking_pr_id', '=', record.breaking_pr_id.id),
-                    ('id', '!=', record.id),
-                    ('active', '=', True),
-                ])
-            else:
-                record.duplicate_breaking_pr_count = 0
+            # remove 1 to not count the current error
+            record.duplicate_breaking_pr_count = count_by_pr.get(record.breaking_pr_id, 1) - 1
+
 
     @api.depends('error_content_ids.version_ids')
     def _compute_version_ids(self):
