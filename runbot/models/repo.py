@@ -264,6 +264,11 @@ class Remote(models.Model):
         for remote in self:
             remote.remote_name = sanitize(remote.short_name)
 
+    def _get_fetch_url(self):
+        if not self.name.startswith('https://') or not self.token:
+            return self.name
+        return self.name.replace('https://', 'https://%s@' % self.token, 1)
+
     def create(self, values_list):
         remote = super().create(values_list)
         if not remote.repo_id.main_remote_id:
@@ -519,17 +524,14 @@ class Repo(models.Model):
 
     def _fetch(self, sha):
         if not self._hash_exists(sha):
-            self._update(force=True)
+            for remote in self.remote_ids:
+                try:
+                    self._git(['fetch', remote.remote_name, sha])
+                    break
+                except subprocess.CalledProcessError:
+                    pass
             if not self._hash_exists(sha):
-                for remote in self.remote_ids:
-                    try:
-                        self._git(['fetch', remote.remote_name, sha])
-                        _logger.info('Success fetching specific head %s on %s', sha, remote)
-                        break
-                    except subprocess.CalledProcessError:
-                        pass
-                if not self._hash_exists(sha):
-                    raise RunbotException("Commit %s is unreachable. Did you force push the branch?" % sha)
+                raise RunbotException("Commit %s is unreachable, most likely because it is not attached to any branch anymore" % sha)
 
     def _hash_exists(self, commit_hash):
         """ Verify that a commit hash exists in the repo """
@@ -685,6 +687,9 @@ class Repo(models.Model):
 
     def _update_git_config(self):
         """ Update repo git config file """
+        if not self:
+            return
+        _logger.info('Updating git config for %s repos', len(self))
         for repo in self:
             if repo.mode == 'disabled':
                 _logger.info(f'skipping disabled repo {repo.name}')
@@ -698,6 +703,7 @@ class Repo(models.Model):
                 _logger.info('Config updated for repo %s' % repo.name)
             else:
                 _logger.info('Repo not cloned, skiping config update for %s' % repo.name)
+        return max(self.mapped('write_date'))
 
     def _git_init(self):
         """ Clone the remote repo if needed """
