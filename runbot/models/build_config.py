@@ -833,7 +833,7 @@ class ConfigStep(models.Model):
         if extra_params:
             cmd.extend(shlex.split(extra_params))
 
-        cmd.finals.extend(self._post_install_commands(build, config_data, py_version))  # coverage post, extra-checks, ...
+        cmd.finals.extend(self._post_install_commands(build, config_data))  # coverage post, extra-checks, ...
 
         if config_data.get('export_database', True):
             self._add_zip_generation(build, cmd, db_name)
@@ -1230,11 +1230,11 @@ class ConfigStep(models.Model):
             message = 'Flamegraph report: [data @icon-download](%s), [svg @icon-eye](%s)'
             build._log('end_job', message, dat_url, svg_url, log_type='markdown')
 
-    def _post_install_commands(self, build, config_data, py_version):
+    def _post_install_commands(self, build, config_data):
         cmds = []
         if config_data.get('coverage_make_report', (self.coverage and self.coverage_make_report)):
-            cmds.append(['python%s' % py_version, "-m", "coverage", "html", "-d", "/data/build/logs/coverage", "--ignore-errors"])
-            cmds.append(['python%s' % py_version, "-m", "coverage", "json", "-o", "/data/build/logs/coverage.json", "--ignore-errors"])
+            cmds.append(['python3', "-m", "coverage", "html", "-d", "/data/build/logs/coverage", "--ignore-errors"])
+            cmds.append(['python3', "-m", "coverage", "json", "-o", "/data/build/logs/coverage.json", "--ignore-errors"])
         if config_data.get('coverage', self.coverage):
             cmds.append(['mv', "/data/build/.coverage", f"/data/build/logs/coverage.{build.id}.{int(time.time())}"])
         return cmds
