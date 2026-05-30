@@ -6,6 +6,7 @@ import logging
 import re
 import subprocess
 import time
+import psutil
 import requests
 import markupsafe
 import shlex
@@ -512,29 +513,45 @@ class Repo(models.Model):
         cmd = self._get_git_command(cmd, errors)
         if not quiet:
             _logger.info("git command: %s", shlex.join(cmd))
-        kwargs = {'stderr': subprocess.STDOUT}
-        if input_data is not None:
-            if isinstance(input_data, str):
-                input_data = input_data.encode('utf-8')
-            kwargs['input'] = input_data
-        output = subprocess.check_output(cmd, **kwargs)
+
+        if input_data is not None and isinstance(input_data, str):
+            input_data = input_data.encode('utf-8')
+
+        stdin = subprocess.PIPE if input_data is not None else None
+        process = subprocess.Popen(cmd, stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+        fetch_timeout = int(self.env['ir.config_parameter'].get_param('runbot.runbot_fetch_timeout', default=30))
+        while True:
+            try:
+                output, _ = process.communicate(input=input_data, timeout=fetch_timeout)
+                break
+            except subprocess.TimeoutExpired:
+                try:
+                    parent = psutil.Process(process.pid)
+                    for child in parent.children(recursive=True):
+                        if 'git-upload-pack' in str(child.cmdline()) and child.status() == psutil.STATUS_SLEEPING:
+                            child.kill()
+                            _logger.info("Killed sleeping git subprocess (pid: %s)", child.pid)
+                except psutil.NoSuchProcess:
+                    pass
+
+        if process.returncode:
+            raise subprocess.CalledProcessError(process.returncode, cmd, output=output)
+
         if raw:
             return output
         return output.decode(errors=errors)
 
     def _fetch(self, sha):
         if not self._hash_exists(sha):
-            self._update(force=True)
+            for remote in self.remote_ids:
+                try:
+                    self._git(['fetch', remote.remote_name, sha])
+                    break
+                except subprocess.CalledProcessError:
+                    pass
             if not self._hash_exists(sha):
-                for remote in self.remote_ids:
-                    try:
-                        self._git(['fetch', remote.remote_name, sha])
-                        _logger.info('Success fetching specific head %s on %s', sha, remote)
-                        break
-                    except subprocess.CalledProcessError:
-                        pass
-                if not self._hash_exists(sha):
-                    raise RunbotException("Commit %s is unreachable. Did you force push the branch?" % sha)
+                raise RunbotException("Commit %s is unreachable, most likely because it is not attached to any branch anymore" % sha)
 
     def _hash_exists(self, commit_hash):
         """ Verify that a commit hash exists in the repo """
