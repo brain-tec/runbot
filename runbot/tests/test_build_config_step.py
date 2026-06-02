@@ -724,11 +724,14 @@ class TestBuildConfigStepDynamic(TestBuildConfigStepCommon):
         )
 
         # 0.2 run standalone l10n script
+        self.config_step.check_exit_status = True
         self.docker_run_calls = []
         build._schedule()()
         self.assertEqual(len(self.docker_run_calls), 1, "One docker run should have been called for install_all step")
         cmd = self.docker_run_calls[0][0]
-        self.assertEqual(cmd.build(), f'odoo/odoo/tests/test_module_operations.py -d {build.dest}-l10n --data-dir /data/build/datadir/ --addons-path odoo/addons,odoo/core/addons,enterprise --standalone all_l10n')
+        expected_cmd = f'odoo/odoo/tests/test_module_operations.py -d {build.dest}-l10n --data-dir /data/build/datadir/ --addons-path odoo/addons,odoo/core/addons,enterprise --standalone all_l10n'
+        expected_cmd += r' ; echo $? > /data/build/logs/running_standalone_exit_status.txt'
+        self.assertEqual(cmd.build(), expected_cmd)
 
         # 0.3. create post install builds
         build._schedule()
@@ -1372,21 +1375,14 @@ def run():
             'job_type': 'install_odoo',
         })
 
-        # by default, network is disabled
-        def first_docker_run(cmd, log_path, *args, **kwargs):
-            self.assertFalse(kwargs['network_enabled'])
-
-        self.docker_run_patch = first_docker_run
         config_step._run_step(self.parent_build)()
-
-        def second_docker_run(cmd, log_path, *args, **kwargs):
-            self.assertTrue(kwargs['network_enabled'])
-
-        self.docker_run_patch = second_docker_run
+        self.assertFalse(self.docker_run_calls[0][3]['network_enabled'])
 
         parent_build_params = self.parent_build.params_id.copy({'config_data': {'network_enabled': True}})
         parent_build = self.parent_build.copy({'params_id': parent_build_params.id})
         config_step._run_step(parent_build)()
+
+        self.assertTrue(self.docker_run_calls[1][3]['network_enabled'])
 
 
     @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
@@ -1428,6 +1424,21 @@ docker_params = dict(cmd=cmd, network_enabled=True)
         tags = self.get_test_tags(params)
         self.assertEqual(tags, '"-at_install,/web/foo.py:WebSuite.test_unit_desktop[@bar/test with spaces],-/web/bar.py[@snafu/other test with spaces]"')
 
+        @patch('odoo.addons.runbot.models.build.BuildResult._checkout')
+        def test_memory_limit(self, mock_checkout):
+            """ test that network can be disabled with config_data """
+            config_step = self.ConfigStep.create({
+                'name': 'default',
+                'job_type': 'install_odoo',
+            })
+            self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_containers_memory', 10)
+            config_step._run_step(self.parent_build)()
+            self.assertEqual(self.docker_run_calls[0][3]['memory'], 10 * 1024 ** 3)
+
+            parent_build_params = self.parent_build.params_id.copy({'config_data': {'memory_limit_factor': 0.9}})
+            parent_build = self.parent_build.copy({'params_id': parent_build_params.id})
+            config_step._run_step(parent_build)()
+            self.assertEqual(self.docker_run_calls[1][3]['memory'], 9 * 1024 ** 3)
 class TestMakeResult(RunbotCase):
 
     def setUp(self):
@@ -1440,6 +1451,7 @@ class TestMakeResult(RunbotCase):
             self.logs.append((level, message))
 
         self.start_patcher('log_patcher', 'odoo.addons.runbot.models.build.BuildResult._log', new=_log)
+        self.start_patcher('get_size', 'odoo.addons.runbot.models.build_config.os.path.getsize', return_value=100)
 
         self.build = self.Build.create({
             'params_id': self.base_params.id,
@@ -1661,3 +1673,112 @@ Initiating shutdown
         mock_make_odoo_results.side_effect = make_warn
         config_step._make_results(build)
         self.assertEqual(build.local_result, 'warn')
+
+    def test_check_exit_status_ok(self):
+        self.config_step.write({'check_exit_status': True})
+        file_content = """
+Loading stuff
+odoo.stuff.modules.loading: Modules loaded.
+Some post install stuff
+Initiating shutdown
+    """
+        exit_status_content = "0\n"
+
+        def mock_open_files(filename, mode='r', *args, **kwargs):
+            if filename.endswith('_exit_status.txt'):
+                return mock_open(read_data=exit_status_content)()
+            return mock_open(read_data=file_content)()
+
+        with patch('builtins.open', mock_open_files):
+            with patch('os.path.exists', return_value=True):
+                self.config_step._make_results(self.build)
+
+        self.assertEqual(self.build.local_result, 'ok')
+
+    def test_check_exit_status_ko(self):
+        self.config_step.write({'check_exit_status': True})
+        file_content = """
+Loading stuff
+odoo.stuff.modules.loading: Modules loaded.
+Some post install stuff
+Initiating shutdown
+    """
+        exit_status_content = "1\n"
+
+        def mock_open_files(filename, mode='r', *args, **kwargs):
+            if filename.endswith('_exit_status.txt'):
+                return mock_open(read_data=exit_status_content)()
+            return mock_open(read_data=file_content)()
+
+        with patch('builtins.open', mock_open_files):
+            with patch('os.path.exists', return_value=True):
+                self.config_step._make_results(self.build)
+
+        self.assertEqual(self.build.local_result, 'ko')
+        self.assertIn(('ERROR', 'Main command exited with status code 1'), self.logs)
+
+    def test_check_exit_status_file_empty(self):
+        self.config_step.write({'check_exit_status': True})
+        file_content = """
+Loading stuff
+odoo.stuff.modules.loading: Modules loaded.
+Some post install stuff
+Initiating shutdown
+    """
+        exit_status_content = ""
+
+        def mock_open_files(filename, mode='r', *args, **kwargs):
+            if filename.endswith('_exit_status.txt'):
+                return mock_open(read_data=exit_status_content)()
+            return mock_open(read_data=file_content)()
+
+        with patch('builtins.open', mock_open_files):
+            with patch('os.path.exists', return_value=True):
+                self.config_step._make_results(self.build)
+
+        self.assertEqual(self.build.local_result, 'ko')
+        self.assertIn(('ERROR', 'Exception or file empty while reading status file "all_exit_status.txt"'), self.logs)
+        self.assertIn(('ERROR', 'Main command exited with status code -241'), self.logs)
+
+    def test_check_exit_status_file_non_integer(self):
+        self.config_step.write({'check_exit_status': True})
+        file_content = """
+Loading stuff
+odoo.stuff.modules.loading: Modules loaded.
+Some post install stuff
+Initiating shutdown
+    """
+        exit_status_content = "d0d0caca"
+
+        def mock_open_files(filename, mode='r', *args, **kwargs):
+            if filename.endswith('_exit_status.txt'):
+                return mock_open(read_data=exit_status_content)()
+            return mock_open(read_data=file_content)()
+
+        with patch('builtins.open', mock_open_files):
+            with patch('os.path.exists', return_value=True):
+                self.config_step._make_results(self.build)
+
+        self.assertEqual(self.build.local_result, 'ko')
+        self.assertIn(('ERROR', 'Status file "all_exit_status.txt" does not contain an integer'), self.logs)
+        self.assertIn(('ERROR', 'Main command exited with status code -242'), self.logs)
+
+    def test_check_exit_status_file_not_found(self):
+        config_step = self.ConfigStep.create({
+            'name': 'test',
+            'job_type': 'install_odoo',
+            'check_exit_status': True,
+        })
+        self.patchers['file_exist'].return_value = False
+        config_step._make_results(self.build)
+        self.assertEqual(self.build.local_result, 'ko')
+        self.assertIn(('ERROR', 'Exit status file "test_exit_status.txt" not found'), self.logs)
+
+    def test_make_result_large_file(self):
+        custom_limit = 1024
+        self.env['ir.config_parameter'].sudo().set_param('runbot.runbot_max_log_size', custom_limit)
+        self.patchers['get_size'].return_value = custom_limit + 1
+        self.config_step._make_results(self.build)
+        self.assertEqual(str(self.build.job_end), '1970-01-01 02:00:00')
+        self.assertIn(('ERROR', 'Log file exceeds %s limit' % custom_limit), self.logs)
+        self.assertEqual(self.build.local_result, 'ko')

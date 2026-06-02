@@ -26,6 +26,7 @@ from ..common import (
     rfind,
     s2human,
     time2str,
+    DEFAULT_MAX_FILE_SIZE,
 )
 from ..container import Command, docker_get_gateway_ip
 
@@ -479,6 +480,9 @@ class ConfigStep(models.Model):
     restore_download_db_suffix = fields.Char('Download db suffix')
     restore_rename_db_suffix = fields.Char('Rename db suffix')
 
+    # TODO change the default to True once we are sure that it works as expected
+    check_exit_status = fields.Boolean('Check exit status', default=False, help='Check exit status of the main command')
+
     semgrep_category = fields.Many2one('runbot.checker_category', string='Semgrep Category', tracking=True)
     custom_link = fields.Char('Custom link for semgrep codes', tracking=True)
     disable_nosem = fields.Boolean('Disable nosem', default=False, tracking=True)
@@ -598,7 +602,7 @@ class ConfigStep(models.Model):
 
             config_data = {**kwargs.get('config_data', {}), **build.params_id.config_data}
             if docker_params['cpu_limit'] and config_data.get('cpu_limit_factor'):
-                docker_params['cpu_limit'] = int(docker_params['cpu_limit'] * min(float(config_data['cpu_limit_factor']), 2))
+                docker_params['cpu_limit'] = int(docker_params['cpu_limit'] * min(float(config_data['cpu_limit_factor']), 3))
 
             container_cpus = float(self.container_cpus or self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_containers_cpus', 0))
             if 'cpus' not in docker_params and container_cpus:
@@ -1282,6 +1286,10 @@ class ConfigStep(models.Model):
         if log_time:
             build.job_end = log_time
 
+        if self.check_exit_status and (exit_status := self._get_exit_status(build)) != 0:
+            build._log('_make_results', f'Main command exited with status code {exit_status}', level='ERROR')
+            build.local_result = 'ko'
+
         if check_logs or expected_logs:
             self._make_custom_result(build, check_logs, expected_logs)
         elif active_job_type == 'python':
@@ -1338,6 +1346,10 @@ class ConfigStep(models.Model):
         log_path = build._path('logs', '%s.txt' % self.sanitized_name(build))
         if not os.path.isfile(log_path):
             build._log('_make_tests_results', "Log file not found at the end of test job", level="ERROR")
+            return 'ko'
+        max_log_file_size = int(self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_max_log_size', DEFAULT_MAX_FILE_SIZE))
+        if os.path.getsize(log_path) > max_log_file_size:
+            build._log('_make_tests_results', f"Log file exceeds {max_log_file_size} limit", level="ERROR")
             return 'ko'
         return 'ok'
 
@@ -1420,6 +1432,21 @@ class ConfigStep(models.Model):
             if result != 'ok':
                 return result
         return 'ok'
+
+    def _get_exit_status(self, build):
+        exit_status_filename = f'{self.sanitized_name(build)}_exit_status.txt'
+        if not os.path.exists(build._path(exit_status_filename)):
+            build._log('_make_tests_results', f'Exit status file "{exit_status_filename}" not found', level="ERROR")
+            return 1
+        res = build._read_file(exit_status_filename)
+        if res:
+            try:
+                return int(res.strip('\n'))
+            except ValueError:
+                build._log('_make_tests_results', f'Status file "{exit_status_filename}" does not contain an integer', level="ERROR")
+                return -242
+        build._log('_make_tests_results', f'Exception or file empty while reading status file "{exit_status_filename}"', level="ERROR")
+        return -241
 
     def _make_custom_result(self, build, enabled_checkers=None, expected_logs=None):
         build._log('run', 'Getting results for build %s' % build.dest)
@@ -1642,6 +1669,9 @@ class ConfigStep(models.Model):
 
             if 'extra_params' in current_step:
                 config_data['extra_params'] = self._parse_dynamic_entry(current_step.get('extra_params'), build, dynamic_vars)
+
+            if 'cpu_limit' in current_step:
+                config_data['cpu_limit'] = int(current_step.get('cpu_limit'))
 
             for key in ('screencast', 'demo_mode', 'enable_auto_tags'):
                 if key in current_step:

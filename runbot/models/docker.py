@@ -145,6 +145,7 @@ class Dockerfile(models.Model):
     dockerfile = fields.Text(compute='_compute_dockerfile', recursive=True, tracking=True)
     in_error = fields.Boolean('In error', help='The last build failed.', default=False)
     to_build = fields.Boolean('To Build', help='Build Dockerfile. Check this when the Dockerfile is ready.', default=True)
+    nocache = fields.Boolean('No Cache', help='Force a full rebuild on next build, bypassing the Docker layer cache. Automatically reset to False after the build.', copy=False)
     always_pull = fields.Boolean('Always pull', help='Always Pull on the hosts, not only at the use time', default=False, tracking=True, copy=False)
     version_ids = fields.One2many('runbot.version', 'dockerfile_id', string='Versions')
     description = fields.Text('Description')
@@ -351,6 +352,7 @@ class Dockerfile(models.Model):
                     destination = add_match.group('destination')
                     # Use the destination name as hardlink name to avoid rebuild if file content is the same but not the url
                     hardlink_name = re.sub(r'[^a-zA-Z0-9]', '_', destination)
+                    lines[i] = f'# CACHED {lines[i + 1]}'
                     lines[i + 1] = f'COPY {hardlink_name} {destination}'
                     cache_file_path = cache_dir / filename
                     if not cache_file_path.exists() or time.time() - cache_file_path.lstat().st_mtime > cache_duration:
@@ -383,7 +385,7 @@ class Dockerfile(models.Model):
             content = self._get_cached_content(docker_build_path)
             with open(self.env['runbot.runbot']._path('docker', tag_dir, 'Dockerfile'), 'w', encoding="utf-8") as Dockerfile:
                 Dockerfile.write(content)
-            result = docker_build(docker_build_path, self.image_future_tag, self.pull_on_build)
+            result = docker_build(docker_build_path, self.image_future_tag, self.pull_on_build, self.nocache)
             duration = result['duration']
             msg = result['msg']
             success = image_id = result.get('image_id')
@@ -427,6 +429,9 @@ class Dockerfile(models.Model):
                 message = f'Build failure, check results for more info ({result.summary})'
                 self.message_post(body=message)
                 _logger.error(message)
+
+        if self.nocache:
+            self.nocache = False
         return image_id
 
 

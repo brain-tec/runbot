@@ -38,6 +38,7 @@ from ..common import (
     sanitize,
     tail,
     transactioncache,
+    DEFAULT_MAX_FILE_SIZE,
 )
 from ..container import Command, docker_pull, docker_run, docker_state, docker_stop
 from ..fields import JsonDictField
@@ -317,7 +318,7 @@ class BuildResult(models.Model):
     active_step = fields.Many2one('runbot.build.config.step', 'Active step')
     job = fields.Char('Active step display name', compute='_compute_job')
     dynamic_active_step_index = fields.Integer('Dynamic active step index')
-
+    cpu_limit = fields.Integer('CPU limit for the current running docker')
     job_start = fields.Datetime('Job start')
     job_end = fields.Datetime('Job end')
     build_start = fields.Datetime('Build start')
@@ -886,7 +887,8 @@ class BuildResult(models.Model):
         else:
             _docker_state = docker_state(build._get_docker_name(), build._path())
             if _docker_state == 'RUNNING':
-                timeout = min(build.active_step.cpu_limit, int(icp.get_param('runbot.runbot_timeout', default=10000)))
+                build_limit = build.cpu_limit or build.active_step.cpu_limit
+                timeout = min(build_limit, int(icp.get_param('runbot.runbot_timeout', default=10000)))
                 if build.local_state != 'running' and build.job_time > timeout:
                     build.active_step._make_stats(build)
                     build._log('_schedule', '%s time exceeded (%ss)' % (build.active_step._get_display_name(self) if build.active_step else "?", build.job_time))
@@ -1040,7 +1042,9 @@ class BuildResult(models.Model):
 
         containers_memory_limit = self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_containers_memory', 0)
         if containers_memory_limit and 'memory' not in kwargs:
-            kwargs['memory'] = int(float(containers_memory_limit) * 1024 ** 3)
+            memory_limit_factor = float(self.params_id.config_data.get('memory_limit_factor', 1))
+            containers_memory_limit = int(float(containers_memory_limit) * 1024 ** 3) * memory_limit_factor
+            kwargs['memory'] = int(containers_memory_limit)
 
         self.docker_start = now()
         if self.job_start:
@@ -1051,6 +1055,8 @@ class BuildResult(models.Model):
         starting_config = self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_default_odoorc')
         if isinstance(cmd, Command):
             rc_content = cmd.get_config(starting_config=starting_config)
+            if step.check_exit_status:
+                cmd.finals = [['echo', r'$?', '>', f'/data/build/logs/{step.sanitized_name(self)}_exit_status.txt']] + cmd.finals
         else:
             rc_content = starting_config
         self._write_file('.odoorc', rc_content)
@@ -1064,6 +1070,7 @@ class BuildResult(models.Model):
         self.env.flush_all()
         env_variables = env_variables or []
         env_variables.append('ODOO_RUNBOT=1')
+        self.cpu_limit = kwargs.get('cpu_limit')
         def start_docker():
             docker_run(
                 cmd=cmd,
@@ -1486,12 +1493,12 @@ class BuildResult(models.Model):
                 return '3'
         return ''
 
-    def _parse_logs(self):
+    def _parse_logs(self, update_tags=False):
         """ Parse build logs to classify errors """
         # only parse logs from builds in error and not already scanned
         builds_to_scan = self.filtered(lambda b: b.local_result in ('ko', 'killed', 'warn') and not b.build_error_link_ids)
         ir_logs = builds_to_scan.log_ids.filtered(lambda l: l.level in ('ERROR', 'WARNING', 'CRITICAL'))
-        return self.env['runbot.build.error']._parse_logs(ir_logs)
+        return self.env['runbot.build.error']._parse_logs(ir_logs, update_tags=update_tags)
 
     def _is_file(self, file, mode='r'):
         file_path = self._path(file)
@@ -1499,6 +1506,10 @@ class BuildResult(models.Model):
 
     def _read_file(self, file, mode='r'):
         file_path = self._path(file)
+        max_log_file_size = int(self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_max_log_size', DEFAULT_MAX_FILE_SIZE))
+        if os.path.getsize(file_path) > max_log_file_size:
+            self._log('readfile', f"File size exceeds {max_log_file_size} limit", level="ERROR")
+            return False
         try:
             with file_open(file_path, mode) as f:
                 return f.read()
