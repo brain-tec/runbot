@@ -37,7 +37,7 @@
                 <div class="container-fluid">
                     <table class="table table-condensed table-group table-filter caption-top text-body-secondary">
                         <caption>
-                            <div class="row">
+                            <div class="row align-items-center">
                                 <h1 class="col-12 col-md-auto text-capitalize">
                                     <t t-out="tag.name"/>
                                     <span class="badge text-bg-primary fs-6 align-middle">
