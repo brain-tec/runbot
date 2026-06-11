@@ -21,6 +21,7 @@ from email.utils import parseaddr
 from typing import Union
 
 from markupsafe import Markup
+import requests
 
 from odoo import models, fields, api
 from odoo.exceptions import ValidationError
@@ -144,6 +145,10 @@ class Patch(models.Model):
     repository = fields.Many2one('runbot_merge.repository', required=True, tracking=True)
     target = fields.Many2one('runbot_merge.branch', required=True, tracking=True)
     commit = fields.Char(size=40, string="commit to cherry-pick, must be in-network", tracking=True)
+    callback_url = fields.Char(
+        "Callback URL",
+        help="If set, a POST request is made to this URL after the patch was either applied or failed.",
+    )
 
     patch = fields.Text(string="unified diff to apply", tracking=True)
     format = fields.Selection([
@@ -335,6 +340,7 @@ class Patch(models.Model):
                     # TODO: do better
                     body=e.args[0] if isinstance(e.args[0], Markup) else Markup("<pre>{}</pre>").format(e),
                 )
+                patch._fire_callback(success=False)
                 continue
 
             # push patch by patch, avoids sync issues and in most cases we have 0~1 patches
@@ -352,10 +358,37 @@ class Patch(models.Model):
                     "Unable to push result of %s (%s)\nout:\n%s\nerr:\n%s",
                     patch, c, res.stdout, res.stderr,
                 )
+                patch._fire_callback(success=False)
             else:
                 info['target_head'] = c
+                patch._fire_callback(success=True)
 
         return True
+
+    def _fire_callback(self, success: bool) -> None:
+        """POST to callback_url (if set) to notify the caller that the patch was applied or failed."""
+        self.ensure_one()
+        # hide from pytest as it's not on the PYTHONPATH
+        from odoo.addons.saas_worker.auth_util import SaasAuth
+        if not self.callback_url:
+            return
+        data = {
+            'jsonrpc': '2.0',
+            'id': None,
+            'method': 'call',
+            'params': {
+                'repository': self.repository.name,
+                'branch': self.target.name,
+                'patch': self.id,
+                'success': success,
+            },
+        }
+        try:
+            res = requests.post(self.callback_url, json=data, auth=SaasAuth(), timeout=30)
+            res.raise_for_status()
+            _logger.info("Patch callback to %s succeeded.", self.callback_url)
+        except requests.RequestException:
+            _logger.error("Patch callback to %s failed.", self.callback_url)
 
     def _apply_commit(self, r: git.Repo, parent: str) -> str:
         r = r.check(True).stdout().with_config(encoding="utf-8")
