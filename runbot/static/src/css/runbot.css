@@ -4,6 +4,7 @@
 	--btn-default-bg: var(--bs-body-bg);
 	--btn-default-border: #ccc;
 	--active-project-color: #777;
+	--text-color-link: #507279;
 }
 
 /*
@@ -29,6 +30,7 @@
 :root[data-bs-theme=dark] {
 	--btn-default-border: #333;
 	--active-project-color: #CCC;
+	--text-color-link: #97d4e0;
 }
 
 [data-bs-theme=legacy] .text-bg-info {
@@ -126,6 +128,10 @@
 
 .table {
 	--bs-table-bg: transparent; /* Forced to white in bootstrap latest version, hides the color of sub builds, batch commits, ...*/
+}
+
+.table-layout-fixed {
+    table-layout: fixed;
 }
 
 /*.accordion-button:not(.collapsed) {
@@ -277,6 +283,11 @@ body, .table {
 .slot_button_group {
 	display: flex;
 	padding: 0 1px;
+}
+
+.slot_link_matched > .slot_name {
+	--bs-btn-color: var(--text-color-link);
+	font-style: italic;
 }
 
 .slot_button_group .btn {
@@ -470,4 +481,40 @@ code {
 
 .log-details td {
 	padding-left: 20px;
+}
+
+[class*="text-bg-color_"] {
+	--runbot-tag-color: var(--bs-primary);
+	--runbot-tag-associated-color: color-mix(in lab, var(--runbot-tag-color), white 90%);
+	color: var(--runbot-tag-color);
+	background-color: var(--runbot-tag-associated-color);
+	
+	:root[data-bs-theme=dark] & {
+		color: var(--runbot-tag-associated-color);
+		background-color: var(--runbot-tag-color);
+	}
+}
+
+.text-bg-color_0 {
+	--runbot-tag-color: #ba0f0f;
+}
+
+.text-bg-color_1 {
+	--runbot-tag-color: #9c4824;
+}
+
+.text-bg-color_2 {
+	--runbot-tag-color: #920c4c;
+}
+
+.text-bg-color_3 {
+	--runbot-tag-color: #172b98;
+}
+
+.text-bg-color_4 {
+	--runbot-tag-color: #2f7b39;
+}
+
+.text-bg-color_5 {
+	--runbot-tag-color: #5221b8;
 }

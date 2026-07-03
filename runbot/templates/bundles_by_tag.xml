@@ -27,7 +27,7 @@
                     <span t-if="done" class="badge text-bg-success" data-tag="done">Done!</span>
                     <span t-else="" class="badge text-bg-secondary" title="Last batch age" t-out="bundle.last_batch._get_formated_age()"/>
                     <t t-foreach="other_tags" t-as="other_tag">
-                        <span class="badge rounded-pill text-bg-primary" t-att-data-tag="other_tag.id" t-out="other_tag.name"/>
+                        <span t-attf-class="badge rounded-pill text-bg-color_{{ other_tag.id % 5 }}" t-att-data-tag="other_tag.id" t-out="other_tag.name"/>
                     </t>
                 </td>
             </tr>
@@ -68,7 +68,7 @@
                         <t t-foreach="sorted(bundles_by_team.keys())" t-as="team">
                             <t t-set="team_bundles" t-value="bundles_by_team.get(team)"/>
                             <t t-set="nb_team_bundles" t-value="len(team_bundles)"/>
-                            <t t-set="nb_team_bundles_done" t-value="len(list(filter(lambda b: not b.has_pr, team_bundles)))"/>
+                            <t t-set="nb_team_bundles_done" t-value="len(list(filter(lambda b: b.has_pr and not b.has_active_pr, team_bundles)))"/>
                             <tbody class="table-group-divider">
                                 <tr class="table-active">
                                     <th colspan="3" class="py-1">
