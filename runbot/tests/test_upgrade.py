@@ -335,8 +335,6 @@ class TestUpgradeFlow(RunbotCase):
         self.nightly_batches_per_version[name] = batch_nigthly
         self.nightly_single_per_version[name] = single_module_build
 
-
-
     @patch('odoo.addons.runbot.models.build.BuildResult._parse_config')
     def test_all(self, *_):
         # Test setup
@@ -351,7 +349,6 @@ class TestUpgradeFlow(RunbotCase):
         master_template_build = master_batch.slot_ids.filtered(lambda slot: slot.trigger_id == self.trigger_template).build_id
         self.assertEqual(sorted(master_batch.reference_batch_ids), sorted(self.batches_per_version.values()))
         master_upgrade_build._schedule()
-        self.start_patcher('fetch_local_logs', 'odoo.addons.runbot.models.host.Host._fetch_local_logs', [])  # the local logs have to be empty
         master_upgrade_build._schedule()
         self.assertEqual(master_upgrade_build.local_state, 'done')
         self.assertEqual(len(master_upgrade_build.children_ids), 2)
@@ -560,7 +557,7 @@ class TestUpgradeFlow(RunbotCase):
                     )
                     self.assertEqual(
                         str(cmd),
-                        'python3 odoo/server.py {addons_path} --no-xmlrpcs --no-netrpc -u all -d {db_name} --stop-after-init --max-cron-threads=0 --upgrade-path upgrade/migrations'.format(
+                        'python3 odoo/server.py {addons_path} -u all -d {db_name} --stop-after-init --max-cron-threads=0 --upgrade-path upgrade/migrations'.format(
                             addons_path='--addons-path enterprise,odoo/addons,odoo/core/addons',
                             db_name=f'{current_build.dest}-{suffix}')
                     )
