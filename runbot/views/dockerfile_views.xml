@@ -14,19 +14,20 @@
                 <field name="active" invisible="1"/>
                 <field name="name" invisible="parent_id" required="not parent_id"/>
                 <field name="name" invisible="not parent_id" required="parent_id" label="Variant Name"/>
-                <field name="parent_id" invisible="variant_ids"/>
+                <field name="is_template"/>
+                <field name="parent_id" invisible="variant_ids or is_template"/>
                 <field name="variant_ids" widget="many2many_tags" readonly="1" invisible="not variant_ids"/>
-                <field name="image_identifier"/>
-                <field name="image_future_identifier"/>
-                <field name="auto_sync"/>
-                <field name="image_tag"/>
-                <field name="pull_on_build"/>
-                <field name="to_build"/>
-                <field name="in_error"/>
-                <field name="nocache"/>
-                <field name="always_pull"/>
-                <field name="version_ids" widget="many2many_tags"/>
-                <field name="project_ids" widget="many2many_tags"/>
+                <field name="image_identifier" invisible="is_template"/>
+                <field name="image_future_identifier" invisible="is_template"/>
+                <field name="auto_sync" invisible="is_template"/>
+                <field name="image_tag" invisible="is_template"/>
+                <field name="pull_on_build" invisible="is_template"/>
+                <field name="to_build" invisible="is_template and not to_build"/>
+                <field name="in_error" invisible="not in_error and is_template"/>
+                <field name="nocache" invisible="is_template"/>
+                <field name="always_pull" invisible="is_template"/>
+                <field name="version_ids" widget="many2many_tags" invisible="is_template"/>
+                <field name="project_ids" widget="many2many_tags" invisible="is_template"/>
                 <field name="public_visibility"/>
                 <field name="description"/>
               </group>
@@ -39,7 +40,7 @@
                   <field name="layer_ids">
                     <list default_order="sequence,id">
                       <field name="sequence" widget="handle"/>
-                      <field name="rendered" decoration-it="layer_type in ('reference_layer', 'reference_file')" decoration-bg-info="layer_type == 'template' or (layer_type == 'reference_layer' and (packages or values))" decoration-bg-success="layer_type == 'raw'"/>
+                      <field name="rendered" decoration-it="layer_type in ('reference_layer', 'reference_file')" decoration-bg-info="layer_type == 'template' or (layer_type == 'reference_layer' and (packages or values))" decoration-bg-success="layer_type == 'raw'" decoration-bg-dark="layer_type == 'file'"/>
                       <field name="reference_count" string="#" decoration="True" decoration-bg-danger="referencing_dockerlayer_ids" decoration-bg-warning="reference_count != 0"/>
                       <field name="referencing_dockerlayer_ids" column_invisible="True"/>
                       <field name="layer_type" column_invisible="True"/>
@@ -104,6 +105,7 @@
             <field name="parent_id"/>
             <field name="to_build" groups="!runbot.group_runbot_admin"/>
             <field name="to_build" widget="boolean_toggle" groups="runbot.group_runbot_admin"/>
+            <field name="is_template"/>
             <field name="in_error" groups="!runbot.group_runbot_admin"/>
             <field name="in_error" widget="boolean_toggle" groups="runbot.group_runbot_admin"/>
             <field name="always_pull" groups="!runbot.group_runbot_admin"/>
@@ -131,9 +133,9 @@
             <separator/>
             <filter string="Variants Only" name="variants_only" domain="[('parent_id', '!=', False)]"/>
             <separator/>
-            <filter string="To Build" name="to_build" domain="[('to_build', '=', True)]"/>
+            <filter string="Enabled" name="to_build" domain="['|', ('to_build', '=', True), ('is_template', '=', True)]"/>
             <separator/>
-            <filter string="Not To Build" name="not_to_build" domain="[('to_build', '=', False)]"/>
+            <filter string="Disabled" name="not_to_build" domain="[('to_build', '=', False), ('is_template', '=', False)]"/>
             <separator/>
             <filter string="Newer Identifier" name="newer_identifier" domain="[('has_future', '=', True)]"/>
             <separator/>
@@ -158,10 +160,11 @@
               <field name="name" readonly="has_xml_id"/>
               <field name="dockerfile_id" invisible="dockerfile_id" readonly="has_xml_id"/>
               <field name="layer_type" readonly="has_xml_id"/>
-              <field name="content" widget="ace" invisible="layer_type not in ('raw', 'template')" readonly="has_xml_id"/>
+              <field name="file_destination" invisible="layer_type not in ('file',)" readonly="has_xml_id"/>
+              <field name="content" widget="ace" invisible="layer_type not in ('raw', 'template', 'file')" readonly="has_xml_id"/>
               <field name="reference_docker_layer_id" invisible="layer_type not in ('reference_layer')" readonly="has_xml_id"/>
               <field name="reference_dockerfile_id"  invisible="layer_type != 'reference_file'" readonly="has_xml_id"/>
-              <field name="values" widget="runbotjsonb" invisible="layer_type not in ('template', 'reference_layer', 'reference_file')" readonly="has_xml_id"/>
+              <field name="values" widget="runbotjsonb" invisible="layer_type not in ('file', 'template', 'reference_layer', 'reference_file')" readonly="has_xml_id"/>
               <field name="packages" widget="ace" invisible="layer_type not in ('template', 'reference_layer', 'reference_file')" readonly="has_xml_id"/>
               <field name="all_referencing_dockerlayer_ids"  widget="many2many_tags" readonly="1"/>
             </group>
@@ -187,7 +190,7 @@
           <field name="values" column_invisible="True"/>
           <field name="reference_count" string="#refs" decoration-danger="referencing_dockerlayer_ids" decoration-warning="reference_count != 0"/>
           <field name="all_referencing_dockerlayer_ids" string="#referencing" widget="many2many_tags"/>
-          <field name="rendered" decoration-warning="layer_type in ('reference_layer', 'reference_file')" decoration-info="layer_type == 'template' or (layer_type == 'reference_layer' and (packages or values))" decoration-success="layer_type == 'raw'"/>
+          <field name="rendered" decoration-it="layer_type in ('reference_layer', 'reference_file')" decoration-bg-info="layer_type == 'template' or (layer_type == 'reference_layer' and (packages or values))" decoration-bg-success="layer_type == 'raw'" decoration-bg-dark="layer_type == 'file'"/>
         </list>
       </field>
     </record>

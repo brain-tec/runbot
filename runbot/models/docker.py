@@ -34,7 +34,9 @@ class DockerLayer(models.Model):
         ('template', "Template"),
         ('reference_layer', "Reference layer"),
         ('reference_file', "Reference file"),
+        ('file', "File"),
     ], string="Layer type", default='raw', tracking=True)
+    file_destination = fields.Char("File destination", help="Destination path of the file in the docker image, only used when layer_type is 'file'", tracking=True)
     content = fields.Text("Content", tracking=True)
     packages = fields.Text("Packages", help="List of package, can be on multiple lines with comments", tracking=True)
     rendered = fields.Text("Rendered", compute="_compute_rendered", recursive=True)
@@ -45,7 +47,6 @@ class DockerLayer(models.Model):
     all_referencing_dockerlayer_ids = fields.One2many('runbot.docker_layer', compute="_compute_references", string='Layers referencing this one', readonly=True)
     reference_count = fields.Integer('Number of references', compute='_compute_references')
     has_xml_id = fields.Boolean(compute='_compute_has_xml_id')
-
 
     @api.depends('referencing_dockerlayer_ids', 'dockerfile_id.referencing_dockerlayer_ids')
     def _compute_references(self):
@@ -61,19 +62,44 @@ class DockerLayer(models.Model):
     @api.depends('layer_type', 'content', 'reference_docker_layer_id.rendered', 'reference_dockerfile_id.layer_ids.rendered', 'values', 'packages', 'name')
     def _compute_rendered(self):
         for layer in self:
-            rendered = layer._render_layer({})
+            if layer.layer_type == 'file':
+                rendered = f'-> FILE {layer.file_destination}\n' + layer._render_file_content(layer._get_values({}))
+            else:
+                rendered = layer._render_layer({})
             layer.rendered = rendered
 
-    def _render_layer(self, custom_values):
+    def _render_file_content(self, values):
+        if not self.content:
+            return f'# No content for file layer {self.name}'
+        content = self._render_template(values, header=False)
+        return content
+
+    def _render_file_layer(self, values):
+        content = self._render_file_content(values)
+        lines = content.splitlines()
+        quoted_lines = ["'" + line.replace("'", "'\"'\"'") + "'" for line in lines]
+
+        rendered = (
+            "RUN printf '%s\\n' \\\n"
+            + " \\\n".join(quoted_lines)
+            + f" \\\n> {self.file_destination}"
+        )
+        return rendered
+
+    def _get_values(self, custom_values=None):
         base_values = {
             'USERUID': USERUID,
             'USERGID': USERGID,
             'USERNAME': USERNAME,
+            ** self.dockerfile_id._get_default_values(),
         }
         if packages := self._parse_packages():
             base_values['$packages'] = packages
 
-        values = {**base_values, **self.values, **custom_values}
+        return {**base_values, **self.values, **(custom_values or {})}
+
+    def _render_layer(self, custom_values):
+        values = self._get_values(custom_values)
 
         if self.layer_type == 'raw':
             rendered = self.content
@@ -84,23 +110,24 @@ class DockerLayer(models.Model):
                 rendered = 'ERROR: no reference_docker_layer_id defined'
         elif self.layer_type == 'reference_file':
             if self.reference_dockerfile_id:
-                rendered = self.reference_dockerfile_id.layer_ids.render_layers(values)
+                rendered = self.reference_dockerfile_id.layer_ids.render_layers(custom_values=values)
             else:
                 rendered = 'ERROR: no reference_docker_layer_id defined'
         elif self.layer_type == 'template':
             rendered = self._render_template(values)
+        elif self.layer_type == 'file':
+            rendered = self._render_file_layer(values)
         if not rendered or rendered[0] != '#':
             rendered = f'# {self.name}\n{rendered}'
         return rendered
 
-    def render_layers(self, values=None):
-        values = values or {}
-        return "\n\n".join(layer._render_layer(values) or "" for layer in self) + '\n'
+    def render_layers(self, custom_values=None):
+        return "\n\n".join(layer._render_layer(custom_values or {}) or "" for layer in self) + '\n'
 
-    def _render_template(self, values):
+    def _render_template(self, values, header=True):
         values = {key: value for key, value in values.items() if f'{key}' in (self.content or '')}  # filter on keys mainly to have a nicer comment. All default must be defined in self.values
         rendered = self.content
-        if self.values.keys() - ['$packages']:
+        if header and self.values.keys() - ['$packages']:
             values_repr = str(values).replace("'", '"')
             rendered = f"# {self.name or 'Rendering'} with values {values_repr}\n{rendered}"
 
@@ -145,6 +172,7 @@ class Dockerfile(models.Model):
     dockerfile = fields.Text(compute='_compute_dockerfile', recursive=True, tracking=True)
     in_error = fields.Boolean('In error', help='The last build failed.', default=False)
     to_build = fields.Boolean('To Build', help='Build Dockerfile. Check this when the Dockerfile is ready.', default=True)
+    is_template = fields.Boolean('Is template', help='This dockerfile is a template and should not be used directly.', default=False)
     nocache = fields.Boolean('No Cache', help='Force a full rebuild on next build, bypassing the Docker layer cache. Automatically reset to False after the build.', copy=False)
     always_pull = fields.Boolean('Always pull', help='Always Pull on the hosts, not only at the use time', default=False, tracking=True, copy=False)
     version_ids = fields.One2many('runbot.version', 'dockerfile_id', string='Versions')
@@ -199,12 +227,13 @@ class Dockerfile(models.Model):
     def _compute_message(self):
         for record in self:
             messages = []
-            if record.in_error:
-                messages.append("The last build failed and this docker image won't be build anymore, remove the in_error flag to reenable.")
-            elif not record.to_build:
-                messages.append("The docker won't be build automatically")
-            if missing_variants := record.get_missing_variants():
-                messages.append(f'This variants is missing on the following docker files: {", ".join(missing_variants.mapped("name"))}')
+            if not record.is_template:
+                if record.in_error:
+                    messages.append("The last build failed and this docker image won't be build anymore, remove the in_error flag to reenable.")
+                elif not record.to_build:
+                    messages.append("The docker won't be build automatically")
+                if missing_variants := record.get_missing_variants():
+                    messages.append(f'This variants is missing on the following docker files: {", ".join(missing_variants.mapped("name"))}')
             record.message = '\n'.join(messages)
 
     def get_missing_variants(self):
@@ -258,15 +287,13 @@ class Dockerfile(models.Model):
         for rec in self:
             content = ''
             layers = rec.layer_ids
-            values = dict(rec.default_values)
             if rec.parent_id:
                 layers = self.env['runbot.docker_layer'].new({
                     'name': 'TEMP LAYER',
                     'layer_type': 'reference_file',
                     'reference_dockerfile_id': rec.parent_id.id,
                 }) + layers
-                values.update(rec.parent_id.default_values)
-            content = layers.render_layers(values)
+            content = layers.render_layers()
             switch_user = f"\nUSER {USERNAME}\n"
             if not content.endswith(switch_user):
                 content = content + switch_user
@@ -276,6 +303,11 @@ class Dockerfile(models.Model):
     @api.onchange('dockerfile')
     def onchange_dockerfile(self):
         self.in_error = False
+
+    @api.onchange('is_template')
+    def onchange_is_template(self):
+        self.in_error = False
+        self.to_build = not self.is_template
 
     @api.depends('name', 'parent_id.image_tag')
     def _compute_image_tag(self):
@@ -306,6 +338,9 @@ class Dockerfile(models.Model):
         for dockerfile in self:
             if dockerfile.image_future_identifier and dockerfile.image_future_identifier != dockerfile.image_identifier:
                 dockerfile.image_identifier = dockerfile.image_future_identifier
+
+    def _get_default_values(self):
+        return {**self.parent_id.default_values, **self.default_values}
 
     def _get_docker_metadata(self, image_id):
         _logger.info(f'Fetching metadata for image {image_id}')
