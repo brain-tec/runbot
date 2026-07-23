@@ -117,8 +117,8 @@ class Branch(models.Model):
             for name in r.findall(fowardport.pr_body):
                 base_candidates.setdefault(name, []).append(fowardport)
         base_candidates_pr = self.search([('is_pr', '=', True), ('name', 'in', tuple(base_candidates.keys())), ('pull_head_name', '!=', False)])
-        if base_candidates:
-            assert base_candidates_pr
+        if base_candidates and not base_candidates_pr:
+            self.env['runbot.runbot']._warning(f'Forwardport found in pr body but no corresponding pr found for {list(base_candidates.keys())}')
 
         for pr in base_candidates_pr:
             for forwardport in base_candidates[pr.name]:
@@ -311,6 +311,7 @@ class RefLog(models.Model):
     _name = 'runbot.ref.log'
     _description = 'Ref log'
     _log_access = False
+    _order = 'id desc'
 
     commit_id = fields.Many2one('runbot.commit', index=True)
     branch_id = fields.Many2one('runbot.branch', index=True)
