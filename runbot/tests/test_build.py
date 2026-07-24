@@ -616,6 +616,11 @@ class TestBuildResult(RunbotCase):
 
         build1_1_2.local_state = 'done'
 
+        # simulate scheduler ran
+        build1_1._update_global_state()
+        build1_2._update_global_state()
+        build1._update_global_state()
+
         self.assertEqual('done', build1.global_state)
         self.assertEqual('done', build1_1.global_state)
         self.assertEqual('done', build1_2.global_state)
@@ -645,6 +650,13 @@ class TestBuildResult(RunbotCase):
 
         build1_1_1.local_result = 'ko'
         build1_1_1.local_state = 'done'
+
+        # simulate scheduler ran
+        build1_1._update_global_state()
+        build1._update_global_state()
+        build1_1._update_global_result()
+        build1._update_global_result()
+
         self.assertEqual('done', build1.global_state)
         self.assertEqual('done', build1_1.global_state)
         self.assertEqual('done', build1_1_1.global_state)
@@ -658,6 +670,12 @@ class TestBuildResult(RunbotCase):
         })
         build1_1_1.orphan_result = True
 
+        # simulate scheduler ran
+        build1_1._update_global_state()
+        build1._update_global_state()
+        build1_1._update_global_result()
+        build1._update_global_result()
+
         self.assertEqual('ok', build1.global_result)
         self.assertEqual('ok', build1_1.global_result)
         self.assertEqual('ko', build1_1_1.global_result)
@@ -668,6 +686,12 @@ class TestBuildResult(RunbotCase):
 
         rebuild1_1_1.local_result = 'ok'
         rebuild1_1_1.local_state = 'done'
+
+        # simulate scheduler ran
+        build1_1._update_global_state()
+        build1._update_global_state()
+        build1_1._update_global_result()
+        build1._update_global_result()
 
         self.assertEqual('ok', build1.global_result)
         self.assertEqual('ok', build1_1.global_result)
@@ -682,26 +706,27 @@ class TestBuildResult(RunbotCase):
         """ test that the faketime command is properly added"""
         self.server_params.config_data = {
             'skip_requirements': True,
-            'faketime': '2024-02-04 02:42 UTC',
+            'faketime': '2024-02-04 02:42:00 UTC',
         }
         self.env.flush_all()
         build = self.Build.create({
             'params_id': self.server_params.id,
         })
         cmd = build._cmd(py_version=3)
-        self.assertIn('faketime "2024-02-04 02:42 UTC" python3 odoo/server.py', str(cmd))
+        self.assertIn('faketime "2024-02-04 02:42:00 UTC" python3 odoo/server.py', str(cmd))
 
         # let's ensure that a time offset is added to a child build
         build.build_start = datetime.datetime(2025, 1, 1, 12, 00)
-        child_build = build._add_child({})
-        child_build.create_date = datetime.datetime(2025, 1, 1, 13, 00)
+        with patch('odoo.addons.runbot.models.build.time') as mock_time:  # ensure build_time has the expected value
+            mock_time.time.return_value = datetime.datetime(2025, 1, 1, 13, 00).timestamp()
+            child_build = build._add_child({})
         child_cmd = child_build._cmd(py_version=3)
-        self.assertIn('faketime "2024-02-04 03:42 UTC" python3 odoo/server.py', str(child_cmd))
+        self.assertIn('faketime "2024-02-04 03:42:00 UTC" python3 odoo/server.py', str(child_cmd))
 
         build.build_end = datetime.datetime(2025, 1, 1, 14, 00)
         second_child = build._add_child({})
         second_child_cmd = second_child._cmd(py_version=3)
-        self.assertIn('faketime "2024-02-04 04:42 UTC" python3 odoo/server.py', str(second_child_cmd))
+        self.assertIn('faketime "2024-02-04 04:42:00 UTC" python3 odoo/server.py', str(second_child_cmd))
 
     def test_format_message(self):
         def get_log(message):
@@ -836,11 +861,13 @@ class TestGithubStatus(RunbotCase):
         with patch('odoo.addons.runbot.models.build.BuildResult._github_status', github_status):
             self.callcount = 0
             self.build.local_state = 'testing'
+            self.assertEqual(self.build.global_state, 'testing')
 
             self.assertEqual(self.callcount, 0, "_github_status shouldn't have been called")
 
             self.callcount = 0
             self.build.local_state = 'running'
+            self.assertEqual(self.build.global_state, 'running')
 
             self.assertEqual(self.callcount, 1, "_github_status should have been called")
 
