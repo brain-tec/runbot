@@ -64,6 +64,20 @@ class ConfigStep(models.Model):
             reviewer_per_file[file] = file_reviewers
         return reviewer_per_file
 
+    def _create_team_review_links(self, build, pr, new_reviewers, reviewer_per_file):
+        teams = self.env['runbot.team'].search([('github_team', 'in', list(new_reviewers))])
+
+        vals_list = []
+        for team in teams:
+            for file in sorted(file for file, file_reviewers in reviewer_per_file.items() if team.github_team in file_reviewers):
+                vals_list.append({
+                    'team_id': team.id,
+                    'branch_id': pr.id,
+                    'build_id': build.id,
+                    'filename': file,
+                })
+        return self.env['runbot.team.review'].create(vals_list)
+
     def _run_codeowner(self, build):
         bundle = build.params_id.create_batch_id.bundle_id
         if bundle.is_base:
@@ -155,5 +169,6 @@ class ConfigStep(models.Model):
                     response = pr.remote_id._github('/repos/:owner/:repo/pulls/%s/requested_reviewers' % pr.name, {"team_reviewers": list(new_reviewers)}, ignore_errors=False)
                     pr._update_branch_infos(response)
                     pr['reviewers'] = ','.join(sorted(reviewers))
+                    self._create_team_review_links(build, pr, new_reviewers, reviewer_per_file)
                 else:
                     build._log('', 'All reviewers are already on pull request [%s](%s)', pr.dname, pr.branch_url, log_type='markdown')

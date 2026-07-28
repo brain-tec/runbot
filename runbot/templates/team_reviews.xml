@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <data>
+    <template id="runbot.team_reviews">
+      <t t-call='runbot.layout'>
+        <div class="container-fluid">
+        </div>
+        <table class="table table-condensed table-group table-filter caption-top text-body-secondary">
+          <caption>
+            <div class="row align-items-center">
+              <h2 class="col-12 col-md-auto">
+                Reviews for team <t t-out="team.name.capitalize()"/>
+                <span t-attf-class="badge fs-6 align-middle text-bg-{{'success' if nb_files_reviewed == nb_files else 'primary'}}"
+                  title="Reviewed files">
+                  <t t-out="nb_files_reviewed"/> / <t t-out="nb_files"/>
+                </span>
+                <button type="button" class="btn btn-sm btn-outline-primary align-middle" data-toggle="table-group-collapse">Collapse all</button>
+              </h2>
+            </div>
+          </caption>
+          <colgroup>
+            <col class="w-0"/>
+            <col class="w-75"/>
+            <col/>
+          </colgroup>
+          <t t-foreach="reviews_by_pr" t-as="pr_reviews">
+            <t t-set="pr" t-value="pr_reviews[0]"/>
+            <t t-set="file_reviews" t-value="pr_reviews[1]"/>
+            <tbody class="table-group-divider">
+              <tr class="table-active">
+                  <th colspan="3">
+                    <a t-att-href="pr.branch_url" title="View on github" target="_blank"><t t-out="pr.pr_title"/><t t-out="pr.name"/></a>
+                    <t t-set="nb_pr_files" t-value="len(file_reviews)"/>
+                    <t t-set="nb_pr_files_reviewed" t-value="len([file_review for file_review in file_reviews if file_review[1][0].reviewed])"/>
+                    <span t-attf-class="badge text-bg-{{'success' if nb_pr_files_reviewed == nb_pr_files else 'primary'}}"
+                      title="Reviewed files">
+                      <t t-out="nb_pr_files_reviewed"/> / <t t-out="nb_pr_files"/>
+                    </span>
+                  </th>
+              </tr>
+              <t t-foreach="file_reviews" t-as="file_review">
+                <t t-set="filename" t-value="file_review[0]"/>
+                <t t-set="reviews" t-value="file_review[1]"/>
+                <t t-set="review" t-value="reviews[0]"/>
+                <tr>
+                  <td>
+                    <span t-if="review.reviewed" class="btn btn-sm btn-default fa fa-check-square-o disabled"
+                      title="Already reviewed"/>
+                    <a t-elif="is_team_member" t-attf-href="/runbot/team_reviews/reviewed/{{review.id}}"
+                      data-runbot="review" role="button"
+                      class="btn btn-sm btn-default fa fa-square-o"
+                      title="Mark as reviewed"/>
+                  </td>
+                  <td>
+                    <code t-out="filename" t-attf-class="{{'text-body-secondary' if review.reviewed else ''}}"/>
+                    <span t-if="review.reviewer_id" class="text-body-secondary">
+                      (<t t-out="review.reviewer_id.name"/>)
+                    </span>
+                  </td>
+                  <td class="text-nowrap">
+                    <a t-if="review.build_id" t-att-href="review.build_id.build_url"
+                      t-attf-title="View triggering build ({{review.build_id.id}})" target="_blank">
+                      <i class="fa fa-external-link"/>
+                    </a>
+                  </td>
+                </tr>
+              </t>
+            </tbody>
+          </t>
+        </table>
+      </t>
+    </template>
+  </data>
+</odoo>

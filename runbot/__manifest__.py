@@ -40,6 +40,7 @@
         'templates/batches_by_date.xml',
         'templates/commit_link_details.xml',
         'templates/bundles_by_tag.xml',
+        'templates/team_reviews.xml',
         'templates/versions.xml',
         'templates/tree_hash.xml',
 

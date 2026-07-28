@@ -37,6 +37,7 @@ class RunbotTeam(models.Model):
     )
     module_ownership_ids = fields.One2many('runbot.module.ownership', 'team_id')
     codeowner_ids = fields.One2many('runbot.codeowner', 'team_id')
+    review_link_ids = fields.One2many('runbot.team.review', 'team_id', string='Team Review Links')
     trigger_ids = fields.Many2many('runbot.trigger', string='Followed triggers')
     upgrade_exception_ids = fields.One2many('runbot.upgrade.exception', 'team_id', string='Team Upgrade Exceptions')
     github_team = fields.Char('Github team', tracking=True)
@@ -112,6 +113,19 @@ class RunbotTeam(models.Model):
                 team_members_logins = set(team.user_ids.mapped('github_login'))
                 members = [member['login'] for member in members if member['login'] not in team_members_logins]
                 team.github_logins = ','.join(sorted(members))
+
+
+class TeamReviewLink(models.Model):
+    _name = 'runbot.team.review'
+    _description = 'Team Pull Request Extended Relation'
+    _order = 'branch_id desc'
+
+    team_id = fields.Many2one('runbot.team', 'Team', required=True, index=True)
+    branch_id = fields.Many2one('runbot.branch', domain=[('is_pr', '=', True), ('alive', '=', True)], required=True, string='Pull Request')
+    build_id = fields.Many2one('runbot.build', string='Triggering Build')
+    filename = fields.Char(string='Modified triggering file')
+    reviewed = fields.Boolean('Reviewed', default=False)
+    reviewer_id = fields.Many2one('res.users', 'Reviewed by', domain=[('share', '=', False), ('active', '=', True)])
 
 
 class Module(models.Model):

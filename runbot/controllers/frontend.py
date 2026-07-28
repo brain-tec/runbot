@@ -553,6 +553,51 @@ class Runbot(Controller):
         }
         return request.render('runbot.team', qctx)
 
+    @route(['/runbot/team_reviews/<int:team_id>'], type='http', auth='user', website=True, sitemap=False)
+    def team_reviews(self, team_id=None, **kwargs):
+        team = request.env['runbot.team'].browse(team_id).exists()
+        if not team:
+            raise NotFound()
+
+        reviews_by_pr = defaultdict(lambda: defaultdict(lambda: request.env['runbot.team.review']))
+        reviews = request.env['runbot.team.review'].search([
+            ('team_id', '=', team.id),
+            ('branch_id.alive', '=', True),
+        ])
+        for review in reviews:
+            reviews_by_pr[review.branch_id][review.filename] |= review
+
+        sorted_reviews_by_pr = [
+            (pr, sorted(reviews_by_file.items(), key=lambda file_reviews: (file_reviews[1][0].reviewed, file_reviews[0] or '')))
+            for pr, reviews_by_file in reviews_by_pr.items()
+        ]
+
+        context = {
+            'team': team,
+            'reviews_by_pr': sorted_reviews_by_pr,
+            'nb_files': len(reviews),
+            'nb_files_reviewed': len(reviews.filtered(lambda rec: rec.reviewed)),
+            'is_team_member': team in request.env.user.runbot_team_ids,
+        }
+        return request.render('runbot.team_reviews', context)
+
+    @route(['/runbot/team_reviews/reviewed/<int:review_id>'], type='http', auth='user', methods=['POST'], csrf=False, sitemap=False)
+    def team_review_reviewed(self, review_id=None, **kwargs):
+        review = request.env['runbot.team.review'].browse(review_id).exists()
+        if not review:
+            raise NotFound()
+        if review.team_id not in request.env.user.runbot_team_ids:
+            raise Forbidden('Only members of the team can check this file as reviewed')
+
+        reviews = request.env['runbot.team.review'].search([
+            ('team_id', '=', review.team_id.id),
+            ('branch_id', '=', review.branch_id.id),
+            ('filename', '=', review.filename),
+            ('reviewed', '=', False),
+        ])
+        reviews.write({'reviewed': True, 'reviewer_id': request.env.user.id})
+        return str(len(reviews))
+
     @route(['/runbot/dashboards/<model("runbot.dashboard"):dashboard>'], type='http', auth='user', website=True, sitemap=False)
     def dashboards(self, dashboard=None, hide_empty=False, **kwargs):
         qctx = {
