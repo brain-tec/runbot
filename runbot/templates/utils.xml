@@ -376,7 +376,7 @@
                             <i class="fa fa-fw fa-sign-in"/> Database selector
                         </a>
                     </li>
-                    <t groups="runbot.group_user">
+                    <t groups="base.group_user">
                         <li t-attf-t-if="global_state in ['done','running'] or to_kill">
                             <button type="button" class="dropdown-item" data-runbot="rebuild" data-runbot-build="{{id}}" title="Retry this build, usefull for false positive">
                                 <i class="fa fa-fw fa-refresh"/> Rebuild
@@ -402,13 +402,13 @@
                                 <i class="fa fa-fw fa-coffee"/> Waking up <i class="fa fa-spinner fa-spin"/>
                             </span>
                         </li>
-                        <li t-attf-t-if="host and log_list[0]"><hr class="dropdown-divider"/></li>
-                        <li t-attf-t-if="host" t-attf-t-foreach="log_list" t-attf-t-as="log_name">
-                            <a class="dropdown-item" href="http://{{host}}/runbot/static/build/{{dest}}/logs/{{log_name}}.txt">
-                                <i class="fa fa-fw fa-file-text-o"/> Full {{log_name}} logs
-                            </a>
-                        </li>
                     </t>
+                    <li t-attf-t-if="host and log_list"><hr class="dropdown-divider"/></li>
+                    <li t-attf-t-if="host" t-attf-t-foreach="log_list" t-attf-t-as="log_name">
+                        <a class="dropdown-item" href="http://{{host}}/runbot/static/build/{{dest}}/logs/{{log_name}}.txt">
+                            <i class="fa fa-fw fa-file-text-o"/> Full {{log_name}} logs
+                        </a>
+                    </li>
                     <t groups="runbot.group_runbot_advanced_user">
                         <li><hr class="dropdown-divider"/></li>
                         <li>
@@ -443,7 +443,7 @@
                 t-att-data-bundle_id="bu.create_batch_id.bundle_id.id or ''"
                 t-att-data-description="bu.description or ''"
                 t-att-data-log_list="json.dumps(bu.log_list.split(',') if bu.log_list else [])"
-                t-att-data-host="bu.host"
+                t-att-data-host="bu.host or ''"
             >
                 <i t-attf-class="fa {{'fa-spinner' if bu.global_state == 'pending' else 'fa-cog'}} fa-fw"/>
             </build-options-dropdown>
