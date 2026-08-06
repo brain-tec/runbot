@@ -41,7 +41,7 @@ NAME
 \tgit-fw - Apply the changes introduced by some existing PR
 
 SYNOPSYS
-\tgit fw redo <pr>
+\tgit fw redo [--exact] <pr>
 \tgit fw (--continue | --skip | --abort | --quit)
 
 DESCRIPTION
@@ -50,8 +50,16 @@ DESCRIPTION
 \tproviding the ability to interactively fix conflicts then push the result
 \tback onto the forward-port branch.
 
-\tIf used with the git-cherry-pick(1) subcommands, forwards them to the
-\tcurrent cherry-pick.
+\tBy default, the forward-port is redone on the current state of the target
+\tbranch (on the remote, not locally, so may include changes which have not
+\tbeen fetched yet), the conflicts might be different but it includes
+\teverything that would otherwise have to be rebased on.
+
+\t--exact can be passed to redo the forward-port exactly as it was done
+\toriginally instead.
+
+\tSupports the git-cherry-pick(1) subcommands so that it can properly rewrite
+\tcommit messages when resuming.
 """
 
 
@@ -60,11 +68,13 @@ def main() -> int:
     match sys.argv[1:]:
         # case ['do', pr]:
         #     return do(pr)
-        case ["redo", pr]:
+        case ["redo", *flags, pr]:
             threading.Thread(target=check_version, args=(__file__,), daemon=True).start()
-            return redo(pr)
+            exit(redo(pr, exact='--exact' in flags))
         case [("--continue" | "--skip" | "--abort" | "--quit") as subcommand]:
-            r = run(["git", "cherry-pick", subcommand], env=ENV)
+            r = run(["git", "cherry-pick", subcommand], env=ENV, stderr=PIPE)
+            if r.stderr:
+                sys.stderr.buffer.write(r.stderr.replace(b'git cherry-pick', b'git fw'))
             exit(r.returncode)
         case ["edit", msgpath]:
             return edit(msgpath)
@@ -78,13 +88,13 @@ def main() -> int:
             exit(0)
 
 
-def redo(pr: str) -> int:
+def redo(pr: str, *, exact: bool = False) -> int | str:
     repo, number = parse_pr(pr)
 
     print(f"Resolving {repo}#{number}")
     res = info(f"https://mergebot.odoo.com/{repo}/pull/{number}.json")
     if not res["parent"]:
-        exit("not a forward port")
+        return "not a forward port"
     print(".", end="", flush=True)
     parent = info(res["parent"])
     print(".", end="", flush=True)
@@ -106,7 +116,7 @@ def redo(pr: str) -> int:
         devname = res['repository'].replace('odoo/', 'odoo-dev/')
         dev_url, reflist = ls_remote(devname, res['ref'])
         if not reflist:
-            exit(f"\nunable to find ref {res['ref']!r} in {res['repository']!r} or {devname!r}")
+            return f"\nunable to find ref {res['ref']!r} in {res['repository']!r} or {devname!r}"
 
     urls = tuple(
         f"{root}{devname}{ext}"
@@ -119,7 +129,7 @@ def redo(pr: str) -> int:
             remotename = name
             break
     else:
-        exit(f"\nfound {res['ref']!r} in {devname!r} but no configured remote for it")
+        return f"\nfound {res['ref']!r} in {devname!r} but no configured remote for it"
     print(".", end="", flush=True)
 
     r = run(
@@ -127,7 +137,7 @@ def redo(pr: str) -> int:
         stdout=DEVNULL,
     )
     if r.returncode:
-        exit(f"\nunable to retrieve commits of interest from {remotename!r}")
+        return f"\nunable to retrieve commits of interest from {remotename!r}"
     print(".", end="", flush=True)
 
     # list the source's commits
@@ -144,14 +154,17 @@ def redo(pr: str) -> int:
         encoding="utf-8",
     )
     if r.returncode:
-        exit(r.returncode)
+        return r.returncode
     print(".")
     commits = r.stdout.splitlines(keepends=False)
+    commitsmap = GIT_DIR.joinpath("FW_CMAP")
     if cm:
         # remap commits to forward port to those which got merged
         commits = [cm[c] for c in commits]
-        with GIT_DIR.joinpath("FW_CMAP").open("w", encoding="utf-8") as f:
+        with commitsmap.open("w", encoding="utf-8") as f:
             json.dump(cm, f)
+    else:
+        commitsmap.unlink(missing_ok=True)
 
     run(["git", "switch", "--guess", res["ref"]], check=True)
     run(["git", "branch", "--set-upstream-to", f"{remotename}/{res['ref']}"], check=True, stdout=DEVNULL)
@@ -161,11 +174,18 @@ def redo(pr: str) -> int:
         encoding="utf-8",
         check=True,
     )
-    run(["git", "reset", "--hard", merge_base.stdout.strip()], check=True)
-    return run(
+    if exact:
+        replay_base = merge_base.stdout.strip()
+    else:
+        replay_base = refs[f"refs/heads/{res['target']}"]
+    run(["git", "reset", "--hard", replay_base], check=True)
+    r = run(
         ["git", "cherry-pick", "-e", f"{commits[0]}~..{commits[-1]}"],
-        env=ENV,
-    ).returncode
+        env=ENV, stderr=PIPE,
+    )
+    if r.stderr:
+        sys.stderr.buffer.write(r.stderr.replace(b'git cherry-pick', b'git fw'))
+    return r.returncode
 
 
 def parse_pr(pr: str) -> tuple[str, str]:

@@ -486,15 +486,19 @@
             <li t-att-class="'ok' if pr._approved else 'fail'">
                 Review
             </li>
-            <li t-att-class="'ok' if pr.state not in ('opened', 'approved') else ''">
+            <li t-att-class="
+                'ok' if pr.batch_id.skipchecks or pr.status == 'success'
+                else 'failure' if pr.status == 'failure'
+                else ''
+            ">
                 CI
-                <ul class="todo">
+                <ul class="todo" t-if="not pr.batch_id.skipchecks">
                     <t t-foreach="pr.repository.status_ids._for_pr(pr)" t-as="ci">
                         <t t-set="st" t-value="statuses.get(ci.context.strip())"/>
                         <t t-set="result">
-                            <t t-if="not st or st['state'] == 'pending'"></t>
+                            <t t-if="not st">lazy</t>
+                            <t t-elif="st['state'] == 'success'">ok</t>
                             <t t-elif="st['state'] in ('error', 'failure')">fail</t>
-                            <t t-else="">ok</t>
                         </t>
                         <li t-if="ci.prs == 'required' or st" t-att-class="result">
                             <a t-att-href="st.get('target_url') if st else None"><t t-out="ci.context.strip()"/></a><t t-if="st and st.get('description')">: <t t-out="st['description']"/></t>
@@ -691,9 +695,9 @@ action = batches
                         <td t-if="ps['prs']"
                             t-att-title="'detached' if detached else None"
                             t-attf-class="{{
-                                'table-active' if ps['active'] else ''
-                            }} {{
-                                'detached' if detached else ''
+                                'table-active ' if ps['active'] else ''
+                            }}{{
+                                'detached ' if detached else ''
                             }}{{stateclass}}">
                             <!--
                             there should be only one PR per (repo, target) but
@@ -713,7 +717,19 @@ action = batches
                                    t-attf-class="fa fa-external-link"
                                    t-att-href="p['backend_url']"
                                 />
-                                <sup t-if="not p['checked']" class="text-danger">missing statuses</sup>
+                                <t t-if="not p['checked'] and p['pr'].status != 'success'">
+                                    <sup t-if="p['pr'].status == 'pending'" class="text-warning">
+                                        missing statuses
+                                    </sup>
+                                    <sup t-else="" class="text-danger">
+                                        <t t-out="' '.join(
+                                            ci.context
+                                            for ci, st in p['pr'].expected_statuses()
+                                            if ci.prs == 'required'
+                                            if st['state'] in ('error', 'failure')
+                                        )"/>
+                                    </sup>
+                                </t>
                                 <sup t-if="not p['reviewed']" class="text-danger">missing r+</sup>
                                 <sup t-if="not p['attached']"
                                      t-attf-title="detached: {{p['pr'].detach_reason}}"

@@ -187,6 +187,7 @@ def config(users_file: pathlib.Path) -> dict[str, dict[str, str]]:
             'login': k,
             'token': (e.get('token') or [None])[0],
         }
+        val.setdefault('name', k)
         match r := e.get('role'):
             case 'user' | 'owner':
                 cnf[f'role_{r}'] = val
@@ -211,10 +212,10 @@ def rolemap(request, config):
     # only fetch github logins once per session
     rolemap = {}
     for k, data in config.items():
-        if not data['token']:
+        if not k.startswith('role_'):
             continue
 
-        r = _rate_limited(lambda: requests.get('https://api.github.com/user', headers={'Authorization': f'token {data["token"]}'}))
+        r = _rate_limited(lambda: requests.get(f'https://api.github.com/users/{data["login"]}'))
         r.raise_for_status()
 
         user = rolemap[k[5:]] = r.json()
@@ -314,7 +315,7 @@ def http_proxy(pytestconfig: pytest.Config, users_file: pathlib.Path) -> Iterato
         cleanup.callback(gh.wait, 30)
         cleanup.callback(gh.terminate)
 
-        gh_port = waitfile(portfile, lambda f: int(f.read_text()), ValueError)
+        gh_port = waitfile(portfile, lambda f: int(f.read_text()), ValueError, 300)
         gh_url = f'http://localhost:{gh_port}/'
 
         proxy = cleanup.enter_context(subprocess.Popen([
@@ -394,6 +395,14 @@ def shared_dir(
     # level up to deref it
     return shared_dir.parent
 
+@contextlib.contextmanager
+def xdist_lock(file: pathlib.Path) -> Generator[io.TextIOBase]:
+    lockfile = os.open(file, os.O_CREAT | os.O_RDWR)
+    fcntl.flock(lockfile, fcntl.LOCK_EX)
+
+    with os.fdopen(lockfile, mode="r+", encoding='utf-8') as f:
+        yield f
+
 @pytest.fixture(scope='session')
 def template_db(
         shared_dir: pathlib.Path,
@@ -402,19 +411,12 @@ def template_db(
     """ Creates template DB once per run, then just duplicates it before
     starting odoo and running the testcase
     """
-    with contextlib.ExitStack() as atexit:
-        f = atexit.enter_context(os.fdopen(os.open(
-            shared_dir / f'template',
-            os.O_CREAT | os.O_RDWR
-        ), mode="r+", encoding='utf-8'))
-        fcntl.lockf(f, fcntl.LOCK_EX)
-        atexit.callback(fcntl.lockf, f, fcntl.LOCK_UN)
-
+    with xdist_lock(shared_dir / 'template') as f:
         db = f.read()
         if db:
             return db
 
-        d = (shared_dir / f'shared')
+        d = (shared_dir / 'shared')
         try:
             d.mkdir()
         except FileExistsError:
@@ -449,7 +451,22 @@ def db(
         tmp_path: pathlib.Path,
 ) -> Iterator[str]:
     rundb = f'mergebot-{secrets.token_hex(16)}'
-    subprocess.run(['createdb', '-T', template_db, rundb], check=True)
+    # createdb sometimes fails with "source database is being accessed by other
+    # users". *We* have no connection (`template_db` has completed and the mutex
+    # seems to work fine), and fetching the connected clients doesn't return
+    # anything. This also is not consistent in time (relative to where we are
+    # in the test suite). So I think this is something `postgres does
+    # internally, for an instant, when creating a database from a template, and
+    # if a concurrenty createdb starts at just the wrong time they conflict.
+    #
+    # In every occurrence I saw, the following attempt worked, so just attempt
+    # it a few times.
+    for _ in range(5):
+        # createdb just returns 0/1 no details
+        if subprocess.run(['createdb', '-T', template_db, rundb]).returncode == 0:
+            break
+    else:
+        raise Exception("Failed to create test database")
     share = tmp_path.joinpath('share')
     share.mkdir()
     shutil.copytree(shared_dir / f'shared', share, dirs_exist_ok=True)
@@ -639,39 +656,6 @@ def reviewer_admin(env, partners):
         ],
     })
 
-VARCHAR = "[0-9a-z_]|%[0-9a-f]{2}"
-VARNAME = fr"(?:(?:{VARCHAR})(?:\.|{VARCHAR})*)"
-VARLIST = fr"{VARNAME}(?:\,{VARNAME})*"
-TEMPLATE = re.compile(fr'''
-\{{
-    # op level 2/3/reserved
-    (?P<operator>[+\#./;?&=,!@|])?
-    (?P<varlist>{VARLIST})
-    # modifier level 4
-    (:? (?P<prefix>:[0-9]+) | (?P<explode>\*) )
-\}}
-''', flags=re.VERBOSE | re.IGNORECASE)
-def template(tmpl, **params):
-    # FIXME: actually implement RFC 6570 cleanly
-    # see https://stackoverflow.com/a/76276177/8182118 for the expansions github
-    # seems to be using (except it's missing + so probably incomplete...)
-    def replacer(m):
-        esc = lambda v: quote(v, safe="")
-        match m['operator']:
-            case None: # simple
-                pass
-            case '+': # allowReserved
-                esc = lambda v: v
-            case s:
-                raise NotImplementedError(f"Operator {s!r} is not supported")
-
-        v = params[m['varlist']]
-        if not isinstance(v, str):
-            raise TypeError(f"Unsupported parameter type {type(v).__name__!r}")
-        return esc(v)
-
-    return TEMPLATE.sub(replacer, tmpl)
-
 def check(response):
     assert response.ok, response.text or response.reason
     return response
@@ -741,7 +725,7 @@ def make_repo(
             }))
             time.sleep(1)
 
-        check(github.put(template(r['contents_url'], path='a'), json={
+        check(github.put(r['contents_url'].replace('{+path}', 'a'), json={
             'path': 'a',
             'message': 'github returns a 409 (Git Repository is Empty) if trying to create a tree in a repo with no objects',
             'content': base64.b64encode(b'whee').decode('ascii'),
@@ -845,25 +829,13 @@ class Repo:
         r = self._session.get(
             f'https://api.github.com/repos/{self.name}/hooks')
         assert 200 <= r.status_code < 300, r.text
-        [hook] = r.json()
-
-        r = self._session.patch(f'https://api.github.com/repos/{self.name}/hooks/{hook["id"]}', json={
-            'config': {**hook['config'], 'secret': secret},
-        })
-        assert 200 <= r.status_code < 300, r.text
+        for hook in r.json():
+            r = self._session.patch(f'https://api.github.com/repos/{self.name}/hooks/{hook["id"]}', json={
+                'config': {**hook['config'], 'secret': secret},
+            })
+            assert 200 <= r.status_code < 300, r.text
 
     def get_ref(self, ref):
-        # differs from .commit(ref).id for the sake of assertion error messages
-        # apparently commits/{ref} returns 422 or some other fool thing when the
-        # ref' does not exist which sucks for asserting "the ref' has been
-        # deleted"
-        # FIXME: avoid calling get_ref on a hash & remove this code
-        if re.match(r'[0-9a-f]{40}', ref):
-            # just check that the commit exists
-            r = self._session.get(f'https://api.github.com/repos/{self.name}/git/commits/{ref}')
-            assert 200 <= r.status_code < 300, r.reason or http.client.responses[r.status_code]
-            return r.json()['sha']
-
         if ref.startswith('refs/'):
             ref = ref[5:]
         if not ref.startswith('heads'):
@@ -1498,12 +1470,10 @@ class Model:
         'create': (True, True),
         'exists': (False, True),
         'fields_get': (True, False),
-        'name_create': (False, True),
         'name_search': (True, False),
         'search': (True, True),
         'search_count': (True, False),
         'search_read': (True, False),
-        'filtered': (False, True),
     }
 
     def browse(self, ids):
@@ -1626,6 +1596,3 @@ class Model:
             return NotImplemented
 
         return Model(self._env, self._model, tuple(id_ for id_ in self._ids if id_ in other._ids), fields=self._fields)
-
-    def invalidate_cache(self, fnames=None, ids=None):
-        pass # not a concern when every access is an RPC call

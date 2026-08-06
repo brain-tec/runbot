@@ -8,7 +8,6 @@ from datetime import datetime, timedelta
 from typing import Callable
 
 import psycopg2.errors
-import sentry_sdk
 from werkzeug.exceptions import NotFound, UnprocessableEntity
 
 from odoo.api import Environment
@@ -105,15 +104,7 @@ class MergebotController(Controller):
     def index(self) -> Response:
         req = request.httprequest
         event = req.headers['X-Github-Event']
-        with sentry_sdk.configure_scope() as scope:
-            if scope.transaction:
-                # only in 1.8.0 (or at least 1.7.2
-                if hasattr(scope, 'set_transaction_name'):
-                    scope.set_transaction_name(f"webhook {event}")
-                else: # but our servers use 1.4.3
-                    scope.transaction = f"webhook {event}"
-
-        github._gh.info(self._format(req))
+        github._gh.getChild('hook').info(self._format(req))
 
         env = request.env(user=1)
         data = request.get_json_data()
@@ -142,7 +133,12 @@ class MergebotController(Controller):
                 )
                 return Response(status=403, mimetype="text/plain")
         elif req.headers.get('X-Hub-Signature-256'):
-            _logger.info("No secret for %s but received a signature in:\n%s", repo, req.headers)
+            _logger.warning(
+                "Ignored hook %s with signature but no secret on %s",
+                req.headers.get('X-Github-Delivery'),
+                repo,
+            )
+            return Response(status=501, mimetype="text/plain")
         else:
             _logger.info("No secret or signature for %s", repo)
 
@@ -155,22 +151,15 @@ class MergebotController(Controller):
                 response="Not setup to receive event.",
             )
 
-        sentry_sdk.set_context('webhook', data)
         return c(env, data)
 
     def _format(self, request):
-        return """{r.method} {r.full_path}
+        headers = '\n'.join('\t%s: %s' % entry for entry in request.headers.items())
+        action = f".{a}" if (a := request.json.get('action')) else ""
+        return f"""{request.headers['x-github-event']}{action}
 {headers}
-
-{body}
-vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\
-""".format(
-            r=request,
-            headers='\n'.join(
-                '\t%s: %s' % entry for entry in request.headers.items()
-            ),
-            body=request.get_data(as_text=True),
-        )
+{request.get_data(as_text=True)}
+"""
 
 def handle_pr(env, event):
     pr = event['pull_request']

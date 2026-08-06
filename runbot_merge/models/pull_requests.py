@@ -22,7 +22,6 @@ from operator import itemgetter
 from typing import Optional, Union, List, Iterator, Tuple
 
 import psycopg2.errors
-import sentry_sdk
 import werkzeug
 import werkzeug.urls
 from markupsafe import Markup, escape
@@ -1371,6 +1370,12 @@ For your own safety I've ignored *everything in your entire comment*.
         # user is probably always False on a forward port
         return ACL(False, False, self.author == user)
 
+    def expected_statuses(self, statuses = None):
+        if statuses is None:
+            statuses = json.loads(self.statuses_full)
+        for ci in self.repository.status_ids._for_pr(self):
+            yield ci, statuses.get(ci.context) or {'state': ci._default_pr_state}
+
     def _validate(self, statuses):
         # could have two PRs (e.g. one open and one closed) at least
         # temporarily on the same head, or on the same head with different
@@ -1379,11 +1384,9 @@ For your own safety I've ignored *everything in your entire comment*.
         updateable.statuses = statuses or '{}'
         for pr in updateable:
             if pr.status == "failure":
-                statuses = json.loads(pr.statuses_full)
-                for ci in pr.repository.status_ids._for_pr(pr).mapped('context'):
-                    status = statuses.get(ci) or {'state': 'pending'}
+                for ci, status in pr.expected_statuses():
                     if status['state'] in ('error', 'failure'):
-                        pr._notify_ci_new_failure(ci, status)
+                        pr._notify_ci_new_failure(ci.context, status)
         self.batch_id._schedule_fp_followup()
 
     def modified(self, fnames, create=False, before=False):
@@ -1431,8 +1434,8 @@ For your own safety I've ignored *everything in your entire comment*.
                 continue
 
             st = 'success'
-            for ci in pr.repository.status_ids._for_pr(pr):
-                v = (statuses.get(ci.context) or {'state': ci._default_pr_state})['state']
+            for _, status in pr.expected_statuses(statuses):
+                v = status['state']
                 if v in ('error', 'failure'):
                     st = 'failure'
                     break
@@ -1560,6 +1563,8 @@ For your own safety I've ignored *everything in your entire comment*.
             batch = batches.get(batch_key)
             if batch is None:
                 batch = batches[batch_key] = self._get_batch(target=vals['target'], label=vals['label'])
+                repo = self.env['runbot_merge.repository'].browse(vals['repository'])
+                batch.prs[:1].unstage("%s#%s joined to batch", repo.name, vals['number'])
             vals['batch_id'] = batch.id
 
             if 'limit_id' not in vals:
@@ -1669,8 +1674,7 @@ For your own safety I've ignored *everything in your entire comment*.
                     pr.target.display_name,
                     self.env['runbot_merge.branch'].browse(t).display_name,
                 )
-                if (
-                    'batch_id' not in vals
+                if ('batch_id' not in vals
                 and (other_batch := self._get_batch(target=t, label=vals.get('label') or pr.label, create=False))
                 and other_batch != pr.batch_id
                 and not any(p.repository == pr.repository for p in other_batch.prs)
@@ -1678,9 +1682,10 @@ For your own safety I've ignored *everything in your entire comment*.
                     assert len(self) == 1, \
                         "unable to migrate multiple PRs to the same batch"
                     vals['batch_id'] = other_batch.id
+                    other_batch.prs[:1].unstage("%s joined to batch", pr.display_name)
 
             if 'message' in vals:
-                merge_method = vals['merge_method'] if 'merge_method' in vals else pr.merge_method
+                merge_method = vals.get('merge_method', pr.merge_method)
                 if merge_method not in (False, 'rebase-ff') and pr.message != vals['message']:
                     pr.unstage("merge message updated")
 
@@ -1690,10 +1695,11 @@ For your own safety I've ignored *everything in your entire comment*.
                     vals['reviewed_by'] = False
                     remover.create([{'pr_id': pr.id}])
                 case False if pr.closed and not pr.batch_id:
-                    vals['batch_id'] = self._get_batch(
+                    b = vals['batch_id'] = self._get_batch(
                         target=vals.get('target') or pr.target.id,
                         label=vals.get('label') or pr.label,
                     )
+                    b.prs[:1].unstage("%s joined to batch", pr.display_name)
                     remover.search([('pr_id', '=', pr.id)]).unlink()
 
         # if the PR's head is updated, detach (should split off the FP lines as this is not the original code)
@@ -2932,10 +2938,7 @@ class Stagings(models.Model):
             FOR UPDATE
             ''', [tuple(self.mapped('batch_ids.prs.id'))])
             try:
-                with sentry_sdk.start_span(description="merge staging") as span:
-                    span.set_tag("staging", self.id)
-                    span.set_tag("branch", self.target.name)
-                    self._safety_dance()
+                self._safety_dance()
             except exceptions.FastForwardError as e:
                 logger.warning(
                     "Could not fast-forward successful staging on %s:%s: %s",

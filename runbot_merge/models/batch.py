@@ -333,7 +333,7 @@ class Batch(models.Model):
                 )
 
         gh = requests.Session()
-        gh.headers['Authorization'] = 'token %s' % proj.fp_github_token
+        gh.headers['Authorization'] = f'token {proj.fp_github_token}'
         has_conflicts = any(conflicts.values())
         # could create a batch here but then we'd have to update `_from_gh` to
         # take a batch and then `create` to not automatically resolve batches,
@@ -346,7 +346,7 @@ class Batch(models.Model):
             root = pr.root_id
 
             message = source.message + '\n\n' + '\n'.join(
-                "Forward-Port-Of: %s" % p.display_name
+                f"Forward-Port-Of: {p.display_name}"
                 for p in root | source
             )
 
@@ -487,7 +487,6 @@ class Batch(models.Model):
                 continue
 
             if n := self.with_context(active_test=False).search([
-                ('target', '=', next_target.id),
                 ('parent_id', '=', batch.id),
             ], limit=1):
                 _logger.info('-> already forward-ported %s => %s', ident, n)
