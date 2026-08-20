@@ -321,9 +321,13 @@ body, .table {
 }
 
 .batch_slots {
-	display: flex;
-	flex-wrap: wrap;
+	display: grid;
+	grid-template-columns: 1fr;
 	padding: 6px;
+
+	@media (min-width: 576px) {
+		grid-template-columns: repeat(auto-fill, minmax(100px, 50%));
+	}
 }
 
 .batch_commits {
@@ -332,13 +336,6 @@ body, .table {
 
 
 .batch_row .slot_container {
-	flex: 1 0 200px;
-	padding: 0 4px;
-}
-
-.batch_row .slot_filler {
-	width: 100px;
-	height: 0px;
 	flex: 1 0 200px;
 	padding: 0 4px;
 }
@@ -352,10 +349,6 @@ body, .table {
 }
 
 .bundle_row .slot_container {
-	flex: 1 0 50%;
-}
-
-.bundle_row .slot_filler {
 	flex: 1 0 50%;
 }
 
