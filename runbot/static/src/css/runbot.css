@@ -1,10 +1,20 @@
 :root {
-	--gray:  #6c757d; /* used for batch limitation */
-	--btn-default-color: var(--bs-body-color);
-	--btn-default-bg: var(--bs-body-bg);
-	--btn-default-border: #ccc;
-	--active-project-color: #777;
-	--text-color-link: #507279;
+	--rb-gray: #6c757d; /* used for batch limitation */
+	--rb-btn-default-color: var(--bs-body-color);
+	--rb-btn-default-bg: var(--bs-body-bg);
+	--rb-btn-default-border: #ccc;
+	--rb-active-project-color: #777;
+	--rb-text-color-link: #507279;
+	--rb-killed-bg: #aaa;
+	--rb-info-text: #096b72;
+
+	--bs-font-sans-serif: "Helvetica Neue", Helvetica, Arial, sans-serif;
+	--bs-body-font-size: 0.875rem;
+	--bs-link-color: #00a09d;
+	--bs-link-color-rgb: 0, 160, 157;
+	--bs-link-decoration: none;
+	--bs-link-hover-color: #005452;
+	--bs-link-hover-color-rgb: 0, 84, 82;
 }
 
 /*
@@ -28,9 +38,9 @@
 }
 
 :root[data-bs-theme=dark] {
-	--btn-default-border: #333;
-	--active-project-color: #CCC;
-	--text-color-link: #97d4e0;
+	--rb-btn-default-border: #333;
+	--rb-active-project-color: #ccc;
+	--rb-text-color-link: #97d4e0;
 }
 
 [data-bs-theme=legacy] .text-bg-info {
@@ -72,27 +82,27 @@
 }
 
 .btn-default {
-	--bs-btn-color: var(--btn-default-color);
-	--bs-btn-bg: var(--btn-default-bg);
-	--bs-btn-border-color: var(--btn-default-border);
-	--bs-btn-hover-color: var(--btn-default-color);
-	--bs-btn-hover-bg: color-mix(in lab, var(--btn-default-bg), black 15%);
-	--bs-btn-hover-border-color: color-mix(in lab, var(--btn-default-border), black 10%);
+	--bs-btn-color: var(--rb-btn-default-color);
+	--bs-btn-bg: var(--rb-btn-default-bg);
+	--bs-btn-border-color: var(--rb-btn-default-border);
+	--bs-btn-hover-color: var(--rb-btn-default-color);
+	--bs-btn-hover-bg: color-mix(in lab, var(--rb-btn-default-bg), black 15%);
+	--bs-btn-hover-border-color: color-mix(in lab, var(--rb-btn-default-border), black 10%);
 	--bs-btn-focus-shadow-rgb: 60, 153, 110;
-	--bs-btn-active-color: var(--btn-default-color);
-	--bs-btn-active-bg: color-mix(in lab, var(--btn-default-bg), black 20%);
-	--bs-btn-active-border-color: color-mix(in lab, var(--btn-default-border), black 15%);
+	--bs-btn-active-color: var(--rb-btn-default-color);
+	--bs-btn-active-bg: color-mix(in lab, var(--rb-btn-default-bg), black 20%);
+	--bs-btn-active-border-color: color-mix(in lab, var(--rb-btn-default-border), black 15%);
 	--bs-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
-	--bs-btn-disabled-color: var(--btn-default-color);
-	--bs-btn-disabled-bg: var(--btn-default-bg);
-	--bs-btn-disabled-border-color: var(--btn-default-border);
+	--bs-btn-disabled-color: var(--rb-btn-default-color);
+	--bs-btn-disabled-bg: var(--rb-btn-default-bg);
+	--bs-btn-disabled-border-color: var(--rb-btn-default-border);
 }
 
 [data-bs-theme=dark] .btn-default {
-	--bs-btn-hover-bg: color-mix(in lab, var(--btn-default-bg), white 15%);
-	--bs-btn-hover-border-color: color-mix(in lab, var(--btn-default-border), white 10%);
-	--bs-btn-active-bg: color-mix(in lab, var(--btn-default-bg), white 20%);
-	--bs-btn-active-border-color: color-mix(in lab, var(--btn-default-border), white 15%);
+	--bs-btn-hover-bg: color-mix(in lab, var(--rb-btn-default-bg), white 15%);
+	--bs-btn-hover-border-color: color-mix(in lab, var(--rb-btn-default-border), white 10%);
+	--bs-btn-active-bg: color-mix(in lab, var(--rb-btn-default-bg), white 20%);
+	--bs-btn-active-border-color: color-mix(in lab, var(--rb-btn-default-border), white 15%);
 }
 
 .btn-info {
@@ -112,6 +122,9 @@
     --bs-btn-disabled-border-color: #17a2b8;
 }
 
+a, .btn-link {
+	text-decoration: none; /* until --bs-link-decoration is actually used, see twbs/bootstrap#41737 */
+}
 
 .accordion {
 	--bs-accordion-btn-padding-y: 0.3rem; /* more condensed build error views */
@@ -123,40 +136,21 @@
 }
 
 .table-responsive {
-	display: block;  /* more condensed table, to replace */
+	/* Existing templates apply this class directly to tables. */
+	display: block;
 }
 
 .table {
-	--bs-table-bg: transparent; /* Forced to white in bootstrap latest version, hides the color of sub builds, batch commits, ...*/
+	--bs-table-bg: transparent; /* Lets sub-build and batch colors show through. */
 }
 
 .table-layout-fixed {
     table-layout: fixed;
 }
 
-/*.accordion-button:not(.collapsed) {
-	background-color: transparent; /* remove crappy color
-}*/
-
 .active_project {
-	color: var(--active-project-color);
+	color: var(--rb-active-project-color);
 	margin-left: 15px;
-}
-
-body {
-	margin: 0;
-    font-size: 0.875rem;
-    font-weight: 400;
-    line-height: 1.5;
-    text-align: left;
-}
-
-form {
-    margin: 0;
-}
-
-table {
-    font-size: 0.875rem;
 }
 
 dialog.modal {
@@ -175,26 +169,8 @@ dialog.modal {
     }
 }
 
-.fa {
-	line-height: inherit; /* reset fa icon line height to body height*/
-}
-
-a {
-	color: #00A09D;
-    text-decoration: none;
-}
-
-a:hover {
-    color: #005452;
-}
-
-a.slots_infos:hover {
-    text-decoration: none;
-}
-
-
 .breadcrumb-item.active a {
-	color: #6c757d;
+	color: var(--rb-gray);
 }
 
 .breadcrumb {
@@ -210,27 +186,24 @@ a.slots_infos:hover {
 	border-top: 0.2em solid #666;
 }
 
-body, .table {
-	font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-}
-
-
 .btn-sm, .btn-group-sm > .btn {
-	padding: 0.25rem 0.5rem;
-	font-size: 0.89rem;
-	line-height: 1.5;
-	border-radius: 0.2rem;
+	--bs-btn-padding-y: 0.25rem;
+	--bs-btn-padding-x: 0.5rem;
+	--bs-btn-font-size: 0.89rem;
+	--bs-btn-line-height: 1.5;
+	--bs-btn-border-radius: 0.2rem;
 }
 
 .btn-ssm, .btn-group-ssm > .btn {
-	padding: 0.22rem 0.4rem;
-	font-size: 0.82rem;
-	line-height: 1;
-	border-radius: 0.2rem;
+	--bs-btn-padding-y: 0.22rem;
+	--bs-btn-padding-x: 0.4rem;
+	--bs-btn-font-size: 0.82rem;
+	--bs-btn-line-height: 1;
+	--bs-btn-border-radius: 0.2rem;
 }
 
-.killed, .bg-killed, .bg-killed-light {
-	background-color: #aaa;
+.killed, .bg-killed, .bg-killed-light, .text-bg-killed {
+	background-color: var(--rb-killed-bg);
 }
 
 .dropdown-toggle:after {
@@ -253,7 +226,7 @@ body, .table {
 }
 
 .text-info {
-	color: #096b72 !important;
+	color: var(--rb-info-text) !important;
 }
 
 .build_subject_buttons {
@@ -262,14 +235,6 @@ body, .table {
 
 .build_buttons {
 	margin-left: auto;
-}
-
-.bg-killed {
-	background-color: #aaa;
-}
-
-.text-bg-killed {
-	background-color: #aaa;
 }
 
 .table-condensed td {
@@ -286,7 +251,7 @@ body, .table {
 }
 
 .slot_link_matched > .slot_name {
-	--bs-btn-color: var(--text-color-link);
+	--bs-btn-color: var(--rb-text-color-link);
 	font-style: italic;
 }
 
@@ -344,7 +309,7 @@ body, .table {
 }
 
 .bundle_row {
-	border-bottom: 1px solid var(--gray);
+	border-bottom: 1px solid var(--rb-gray);
 }
 
 .bundle_row .batch_commits {
@@ -362,23 +327,6 @@ body, .table {
 .bundle_row .more .batch_commits {
 	display: block;
 }
-
-/*.bundle_row .nomore .batch_commits {
-	display: none;
-	padding: 8px;
-}
-
-.bundle_row .nomore.batch_tile:hover .batch_commits {
-	display: block;
-	position: absolute;
-	bottom: 1px;
-	transform: translateY(100%);
-	z-index: 100;
-	border: 1px solid rgba(0, 0, 0, 0.125);
-	border-radius: 0.2rem;
-	box-sizing: border-box;
-	margin-left: -1px;
-}*/
 
 .chart-legend {
 	max-height: calc(100vh - 160px);
@@ -457,7 +405,7 @@ code {
 
 .pre {
 	display: block;
-    font-family: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+	font-family: var(--bs-font-monospace);
     white-space: pre;
 	overflow: auto;
 	font-size: 0.875em;
