@@ -143,6 +143,8 @@ class Config(models.Model):
     default_dynamic_config = fields.Text('Default Dynamic Config File', tracking=True)
     dynamic_config_extension = fields.Text('Dynamic Config Extend File', tracking=True)
 
+    use_extra_slot = fields.Boolean('Use extra slot', default=False, tracking=True, help="Allow to use an extra slot for this config, if available")
+
     @api.constrains('default_dynamic_config', 'dynamic_config_extension')
     def _check_dynamic_config(self):
         for record in self:
@@ -486,7 +488,7 @@ class ConfigStep(models.Model):
     upgrade_to_above = fields.Boolean('Upgrade to above', help="Will behave as a complement", default=True, tracking=True)
     upgrade_from_base = fields.Boolean('Upgrade from base', help="Allow upgrade from base version to current", default=False, tracking=True)
     allow_similar_build_quick_result = fields.Boolean('Allow similar build quick result', help="Allow to find result on a similar build with the same parameters, and mark the result and state when creating the child build", default=False, tracking=True)
-
+    allow_build_link = fields.Boolean('Allow build link', help="Allow to use link instead of parent_id for leaf builds", default=True, tracking=True)
     upgrade_flat = fields.Boolean("Flat", help="Take all decisions in on build")
 
     upgrade_config_id = fields.Many2one('runbot.build.config', string='Upgrade Config', tracking=True, index=True)
@@ -789,7 +791,7 @@ class ConfigStep(models.Model):
             python_params = ['-m', 'flamegraph', '-o', self._perfs_data_path(build)]
         cmd = build._cmd(python_params, py_version, sub_command=self.sub_command, enable_log_db=self.enable_log_db)
         # create db if needed
-        db_suffix = config_data.get('db_name') or (build.params_id.dump_db.db_suffix if not self.create_db else False) or self._get_db_name(build)
+        db_suffix = config_data.get('db_name') or ((build.params_id.restore_db_suffix or build.params_id.dump_db.db_suffix) if not self.create_db else False) or self._get_db_name(build)
         db_suffix = re.sub(r'[^a-z0-9\-_]', '_', db_suffix.lower())
         db_name = '%s-%s' % (build.dest, db_suffix)
         if modules_to_install and self.create_db:
@@ -899,7 +901,8 @@ class ConfigStep(models.Model):
         Create subbuilds with parameters defined for a step of type test_upgrade:
             - upgrade_to_build_id
             - upgrade_from_build_id
-            - dump_db
+            - restore_db_suffix
+            - reference_build_id
             - config_id (upgrade_config_id)
 
         If upgrade_flat is False, a level of child will be create for target, source and dbs
@@ -1010,7 +1013,7 @@ class ConfigStep(models.Model):
                     return
                 source_builds_by_target[target_build] = source_builds
 
-        assert not param.dump_db
+        assert not param.reference_build_id
         # we need to define the correct upgrade commits to use. They are not always the upgrade commits from the build itself
         additional_commits_links = self.env['runbot.commit.link']
         single_version_repos = (build.trigger_id.repo_ids | build.trigger_id.dependency_ids).filtered('single_version')
@@ -1037,45 +1040,50 @@ class ConfigStep(models.Model):
             # small note: in master additional_commits_links and target_commits_link both comme from the current batch
             target_commits_link |= additional_commits_links
             for source in sources:
-                valid_databases = []
-                if not self.upgrade_dbs:  # TODO cleanup
-                    valid_databases = source.database_ids
+                valid_databases_refs = []
+                if not self.upgrade_dbs:
+                    for db in source.database_ids:
+                        valid_databases_refs += [(source, db.db_suffix)]
                 for upgrade_db in self.upgrade_dbs:
+                    if not '*' in upgrade_db.db_pattern and source.config_id == upgrade_db.config_id:
+                        valid_databases_refs += [(source, upgrade_db.db_pattern)]
+                        continue
+                    # this case is only used for nightly, to restore all single app test. In this case the source build must be finished before running configure
                     config_id = upgrade_db.config_id
                     dump_builds = build.search([('id', 'child_of', source.id), ('params_id.config_id', '=', config_id.id), ('orphan_result', '=', False)])
                     # this search is not optimal
                     if not dump_builds:
                         build._log('_run_configure_upgrade', 'No build found with config %s in %s' % (config_id.name, source.id), level='ERROR')
                     dbs = dump_builds.database_ids.sorted('db_suffix')
-                    valid_databases += list(self._filter_upgrade_database(dbs, upgrade_db.db_pattern))
+                    valid_databases = list(self._filter_upgrade_database(dbs, upgrade_db.db_pattern))
+                    for database in valid_databases:
+                        valid_databases_refs += [(database.build_id, database.db_suffix)]
+
                     if not valid_databases:
                         build._log('_run_configure_upgrade', 'No database found for pattern %s' % (upgrade_db.db_pattern), level='ERROR')
 
-                for db in valid_databases:
+                for db_build, db_suffix in valid_databases_refs:
+                    source_description = source.params_id.version_id.name
+                    target_description = target.params_id.version_id.name
+                    description = 'Testing migration from **%s** to **%s** using db %s' % (
+                        source_description,
+                        target_description,
+                        db_suffix,
+                    )
                     child = build._add_child({
                         'upgrade_to_build_id': None,
                         'upgrade_from_build_id': source.id,
-                        'dump_db': db.id,
+                        'reference_build_id': db_build.id,
+                        'restore_db_suffix': db_suffix,
                         'config_id': self.upgrade_config_id,
                         'builds_reference_ids': False,  # remove builds_reference_ids since now upgrade_to_build_id and upgrade_from_build_id are set
                         'commit_link_ids': target_commits_link.ids,
                         'version_id': target.params_id.version_id.id,
                         'trigger_id': None,
                         'dockerfile_id': target.params_id.dockerfile_id.id,
-                    })
-                    source_description = source.params_id.version_id.name
-                    target_description = target.params_id.version_id.name
-                    if source in build.create_batch_id.slot_ids.build_id:
-                        source_description += ' (current)'
-                    if target in build.create_batch_id.slot_ids.build_id:
-                        target_description += ' (current)'
-                    child.description = 'Testing migration from **%s** to **%s** using db %s' % (
-                        source_description,
-                        target_description,
-                        db.name,
-                    )
+                    }, link=self.allow_build_link, description=description)
 
-                    if self.allow_similar_build_quick_result:
+                    if not self.allow_build_link and self.allow_similar_build_quick_result:  # TODO cleanup remove allow_similar_build_quick_result
                         existing_done_build = next((build for build in child.params_id.build_ids.sorted('id') if build.global_state == 'done' and build.global_result == 'ok'), None)
                         if not existing_done_build and not build.create_batch_id.bundle_id.is_staging:
                             existing_done_build = next((build for build in child.params_id.build_ids.sorted('id') if build.global_state == 'done' and build.local_result not in ('skipped', 'killed') and not build.orphan_result), None)
@@ -1083,6 +1091,7 @@ class ConfigStep(models.Model):
                             child._log('', 'A similar [build](%s) has been found, marking as done directly', existing_done_build.build_url, log_type='markdown')
                             child.local_state = 'done'
                             child.local_result = existing_done_build.local_result
+
 
     def _filter_upgrade_database(self, dbs, pattern):
         pat_list = pattern.split(',') if pattern else []
@@ -1104,7 +1113,7 @@ class ConfigStep(models.Model):
         build = build.with_context(defined_commit_ids=target_commit_ids)
         exports = build._checkout()
 
-        db_suffix = build.params_id.config_data.get('db_name') or build.params_id.dump_db.db_suffix
+        db_suffix = build.params_id.config_data.get('db_name') or build.params_id.restore_db_suffix or build.params_id.dump_db.db_suffix
         migrate_db_name = '%s-%s' % (build.dest, db_suffix)  # only ok if restore does not force db_suffix
 
         migrate_cmd = build._cmd(enable_log_db=self.enable_log_db)
@@ -1171,8 +1180,14 @@ class ConfigStep(models.Model):
                 download_db_suffix = dump_db.db_suffix
                 dump_build = dump_db.build_id
             else:
-                download_db_suffix = config_data.get('dump_suffix', self.restore_download_db_suffix or 'all')
                 dump_build = params.reference_build_id or build.parent_id  # TODO cleanup parent_id
+                download_db_suffix = config_data.get('dump_suffix', build.params_id.restore_db_suffix or self.restore_download_db_suffix)
+                if not download_db_suffix:
+                    if dump_build and len(dump_build.database_ids) == 1:
+                        download_db_suffix = dump_build.database_ids[0].db_suffix
+                    else:
+                        download_db_suffix = 'all'
+
             if not (download_db_suffix and dump_build):
                 build._log('_run_restore', 'No dump suffix or reference build specified', level='ERROR')
                 build._kill(result='ko')
@@ -1243,7 +1258,7 @@ class ConfigStep(models.Model):
         args = [self._get_display_name(build), s2human(build.job_time)]
         log_type = 'runbot'
         if database_exported:
-            db_suffix = config_data.get('db_name') or (build.params_id.dump_db.db_suffix if not self.create_db else False) or self._get_db_name(build)
+            db_suffix = config_data.get('db_name') or ((build.params_id.restore_db_suffix or build.params_id.dump_db.db_suffix) if not self.create_db else False) or self._get_db_name(build)
             db_suffix = re.sub(r'[^a-z0-9\-_]', '_', db_suffix.lower())
             message += ' [@icon-download](%s%s-%s.zip)'
             args += [build._http_log_url(), build.dest, db_suffix]
