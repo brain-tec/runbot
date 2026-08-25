@@ -167,11 +167,6 @@
                               <i t-attf-class="fa fa-{{category.icon}}"/>
                             </span>
                           </td>
-                          <td t-foreach="build.children_ids" t-as="child">
-                            <span t-attf-class="badge text-bg-{{slot.build_id._get_color_class()}}">
-                              <t t-out="child.params_id.config_id.name[:4]"/>
-                            </span>
-                          </td>
                         </tr>
                       </t>
                     </table>
@@ -187,7 +182,7 @@
     <template id="runbot.default_dashboard_tile_view">
       <div class="col-md-3 col-lg-2 p-2">
         <div class="card">
-          <div class="card-header limited-height-toggle" t-attf-onclick="$('#tile_{{tile.id}}').toggleClass('limited-height')">
+          <div class="card-header" data-toggle="limited-height" t-attf-data-target="#tile_{{tile.id}}">
             <t t-out="tile.display_name"/> <t t-if="tile.build_ids"> (<t t-out="len(tile.build_ids)"/>)</t>
           </div>
           <div class="card-body limited-height" t-attf-id="tile_{{tile.id}}">
