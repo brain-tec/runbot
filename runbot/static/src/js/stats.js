@@ -34,14 +34,12 @@ var config = {
   },
 };
 
-var shifted = false;
-
 config.options.onClick = function(event, activeElements) {
     if (activeElements.length === 0){
       return
     }
     const build_id = config.data.builds[activeElements[0].index];
-    if (shifted){ 
+    if (event.native.shiftKey){
       config.searchParams['center_build_id'] = build_id;
       fetchUpdateChart();
     } else {
@@ -186,24 +184,32 @@ function fetchUpdateChart() {
 }
 
 function generateLegend() {
-  var legend = $("<ul></ul>");
-  for (data of config.data.datasets) {
-    var legendElement = $(`<li><span class="color" style="border: 2px solid ${data.borderColor};"></span><span class="label" title="${data.label}">${data.label}<span></li>`)
-    if (data.hidden){
-      legendElement.addClass('disabled')
+    const legend = document.createElement("ul");
+    for (const data of config.data.datasets) {
+        const legendElement = document.createElement("li");
+        const color = document.createElement("span");
+        color.className = "color";
+        color.style.border = `2px solid ${data.borderColor}`;
+        const label = document.createElement("span");
+        label.className = "label";
+        label.title = data.label;
+        label.textContent = data.label;
+        legendElement.append(color, label);
+        if (data.hidden){
+            legendElement.classList.add("disabled");
+        }
+        legend.append(legendElement);
     }
-    legend.append(legendElement)
-  }
-  $("#js-legend").html(legend);
-  $("#js-legend > ul > li").on("click",function(e){
-    var index = $(this).index();
-    //$(this).toggleClass("disabled")
-    var curr = window.statsChart.data.datasets[index];
-    curr.hidden = !curr.hidden;
-    config.searchParams.nb_dataset=-1; 
-    config.searchParams.visible_keys = window.statsChart.data.datasets.filter(dataset => !dataset.hidden).map(dataset => dataset.label).join('-')
-    updateChart();
-  })
+    document.getElementById("js-legend").replaceChildren(legend);
+    document.querySelectorAll("#js-legend > ul > li").forEach((element, index) => {
+        element.addEventListener("click", () => {
+            const curr = window.statsChart.data.datasets[index];
+            curr.hidden = !curr.hidden;
+            config.searchParams.nb_dataset=-1;
+            config.searchParams.visible_keys = window.statsChart.data.datasets.filter((dataset) => !dataset.hidden).map((dataset) => dataset.label).join("-");
+            updateChart();
+        });
+    });
 }
 
 function updateForm() {
@@ -284,8 +290,6 @@ window.onload = function() {
     for([key, value] of new URLSearchParams(window.location.hash.replace("#","?"))){
       config.searchParams[key] = value;
     }
-
-    $(document).on('keyup keydown', function(e){shifted = e.shiftKey} );
 
     document.getElementById('backward_button').onclick = function(){
       config.searchParams['center_build_id'] = Object.keys(config.result)[0];

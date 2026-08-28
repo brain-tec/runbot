@@ -6,7 +6,7 @@
         <div class="container-fluid">
           <div class="row">
             <div class='col-md-12'>
-              <div class="navbar navbar-default">
+              <div class="navbar">
                 <h3>
                   <span class="text-muted"><t t-out="branch.remote_id.short_name"/>:</span><t t-out="branch.name"/> <i t-if="not branch.alive" title="deleted/closed" class="fa fa-ban text-danger"/>
                   <div class="btn-group" role="group">
@@ -16,7 +16,7 @@
                   </div>
                 </h3>
               </div>
-              <table class="table table-condensed table-responsive">
+              <table class="table table-sm d-block overflow-x-auto">
                 <tr>
                   <td>Remote:</td>
                   <td t-out="branch.remote_id.name"></td>
@@ -58,7 +58,7 @@
                   </tr>
                 </t>
               </table>
-                <table t-if="branch.reflog_ids" class="table table-condensed table-striped" style="table-layout: initial;">
+                <table t-if="branch.reflog_ids" class="table table-sm table-striped" style="table-layout: initial;">
                   <thead>
                       <tr>
                           <th>Ref Date</th>

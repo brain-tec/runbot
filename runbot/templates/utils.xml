@@ -66,14 +66,11 @@
                                             </li>
                                         </t>
                                     </t>
-                                    <li class="nav-item divider"/>
-
                                     <li class="nav-item">
                                         <button command="show-modal" commandfor="collapsePreference" type="button" class="nav-link">
                                             <i class="fa fa-gear"/>
                                         </button>
                                     </li>
-                                    <li class="nav-item divider" t-ignore="true"/>
                                     <t t-if="not user_id._is_public()">
                                         <t t-if="env.user.has_group('runbot.group_runbot_admin')">
                                             <t t-set="docker_files" t-value="env['runbot.dockerfile'].search([])"/>
@@ -103,15 +100,15 @@
                                                     <span t-out="user_id.name[:23] + '...' if user_id.name and len(user_id.name) &gt; 25 else user_id.name"/>
                                                 </b>
                                             </a>
-                                            <div class="dropdown-menu dropdown-menu-end js_usermenu" role="menu">
-                                                <a class="dropdown-item" id="o_logout" role="menuitem" t-attf-href="/web/session/logout?redirect=/">Logout</a>
-                                                <a class="dropdown-item" role="menuitem" t-attf-href="/odoo">Backend</a>
-                                                <div t-if="user_id.runbot_team_ids" class="dropdown-divider"/>
-                                                <div t-if="user_id.runbot_team_ids" class="dropdown-header">Teams</div>
-                                                <a t-foreach="user_id.runbot_team_ids" t-as="team" class="dropdown-item" role="menuitem" t-attf-href="/runbot/teams/{{team.id}}">
+                                            <ul class="dropdown-menu dropdown-menu-end js_usermenu" role="menu">
+                                                <li><a class="dropdown-item" id="o_logout" role="menuitem" t-attf-href="/web/session/logout?redirect=/">Logout</a></li>
+                                                <li><a class="dropdown-item" role="menuitem" t-attf-href="/odoo">Backend</a></li>
+                                                <li><div t-if="user_id.runbot_team_ids" class="dropdown-divider"/></li>
+                                                <li><div t-if="user_id.runbot_team_ids" class="dropdown-header">Teams</div></li>
+                                                <li><a t-foreach="user_id.runbot_team_ids" t-as="team" class="dropdown-item" role="menuitem" t-attf-href="/runbot/teams/{{team.id}}">
                                                     <t t-out="team.name.capitalize()"/>
-                                                </a>
-                                            </div>
+                                                </a></li>
+                                            </ul>
                                         </li>
                                     </t>
                                     <t t-else="">
@@ -227,7 +224,6 @@
 
         <template id="runbot.build_errors_link">
             <t t-if="nb_assigned_errors">
-                <li class="nav-item divider"/>
                 <li class="nav-item">
                     <a href="/runbot/errors" class="nav-link text-danger" t-attf-title="You have {{nb_assigned_errors}} random bug assigned">
                         <i class="fa fa-bug"/>
@@ -237,7 +233,6 @@
                 </li>
             </t>
             <t t-elif="nb_team_errors">
-                <li class="nav-item divider"/>
                 <li class="nav-item">
                     <a href="/runbot/errors" class="nav-link text-warning" t-attf-title="Your team has {{nb_team_errors}} random bug assigned">
                         <i class="fa fa-bug"/>
@@ -246,7 +241,6 @@
                 </li>
             </t>
             <t t-elif="nb_build_errors">
-                <li class="nav-item divider"/>
                 <li class="nav-item">
                     <a href="/runbot/errors" class="nav-link" title="Random Bugs"><i class="fa fa-bug"/></a>
                 </li>
@@ -314,7 +308,7 @@
         </template>
 
         <template id="runbot.build_button">
-            <div t-attf-class="pull-right">
+            <div t-attf-class="float-end">
                 <div t-attf-class="btn-group {{klass}}">
                     <a t-if="bu.local_state == 'running' and bu.database_ids" t-attf-href="/runbot/run/{{bu.id}}" class="btn btn-info" title="Sign in on this build" aria-label="Sign in on this build">
                         <i class="fa fa-sign-in"/>
@@ -452,16 +446,15 @@
         <template id="runbot.branch_github_menu">
           <button t-attf-class="{{btn_classes or 'btn btn-default btn-ssm'}} dropdown-toggle" data-bs-toggle="dropdown" title="Github links" aria-label="Github links" aria-expanded="false">
             <i t-attf-class="fa fa-github {{'text-primary' if any(branch_id.is_pr and branch_id.alive for branch_id in bundle.branch_ids) else 'text-secondary' if all(not branch_id.alive for branch_id in bundle.branch_ids) else ''}}"/>
-            <span class="caret"/>
           </button>
-          <div  class="dropdown-menu" role="menu">
-            <t t-foreach="bundle.branch_ids.sorted(key=lambda b: (not b.alive, b.remote_id.repo_id.sequence, b.remote_id.repo_id.id, b.is_pr, b.id))" t-as="branch">
+          <ul class="dropdown-menu" role="menu">
+            <li t-foreach="bundle.branch_ids.sorted(key=lambda b: (not b.alive, b.remote_id.repo_id.sequence, b.remote_id.repo_id.id, b.is_pr, b.id))" t-as="branch">
               <t t-set="link_title" t-value="'View %s %s on Github' % ('PR' if branch.is_pr else 'Branch', branch.name)"/>
               <a t-att-href="branch.branch_url" class="dropdown-item" t-att-title="link_title">
                 <span class="fst-italic text-muted" t-out="branch.remote_id.short_name"/> <span t-att-class="'' if branch.alive else 'line-through'" t-out="branch.name"/> <i t-if="not branch.alive" title="deleted/closed" class="fa fa-ban text-danger"/>
               </a>
-            </t>
-          </div>
+            </li>
+          </ul>
         </template>
 
         <template id="runbot.branch_copy_button">

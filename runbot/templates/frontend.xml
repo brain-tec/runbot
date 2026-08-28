@@ -4,8 +4,8 @@
     <template id="runbot.bundles">
       <t t-call='runbot.layout'>
         <t t-set="nav_form">
-          <form class="form-inline my-2 my-lg-0" role="search" t-att-action="qu(search='')" method="get">
-            <div class="input-group md-form form-sm form-2 ps-0">
+          <form class="my-2 my-lg-0" role="search" t-att-action="qu(search='')" method="get">
+            <div class="input-group ps-0">
               <input class="form-control my-0 py-1" type="text" placeholder="Search" aria-label="Search" name="search" t-att-value="search" autofocus="autofocus"/>
               <a t-if="has_pr" class="btn btn-primary" title="All" t-att-href="qu(has_pr=None)">
                 <i class="fa fa-github"/>
@@ -22,7 +22,7 @@
         <div class="container-fluid frontend">
           <div class="row">
             <div class='col-md-12'>
-              <span  class="pull-right" >
+              <span  class="float-end" >
                 <t t-call="runbot.slots_infos"/>
               </span>
             </div>
@@ -36,7 +36,7 @@
               <div t-else="">
                 <div t-foreach="bundles" t-as="bundle" class="row bundle_row">
                   <div class="col-md-3 col-lg-2 cell">
-                    <div class="one_line">
+                    <div class="text-truncate">
                       <i t-if="bundle.sticky" class="fa fa-star" style="color: #f0ad4e" />
                       <a t-attf-href="/runbot/bundle/#{bundle.id}" t-attf-title="View Bundle #{bundle.name}">
                         <b t-out="bundle.name"/>
@@ -59,7 +59,9 @@
                         </t></div>
                       <div class="btn-group" role="group">
                         <t t-if="not bundle.sticky" t-call="runbot.branch_copy_button"/>
-                        <t t-call="runbot.branch_github_menu"/>
+                        <div class="btn-group" role="group">
+                          <t t-call="runbot.branch_github_menu"/>
+                        </div>
                       </div>
                     </div>
                     <div t-if="bundle.host_id">
@@ -124,7 +126,6 @@
                 </t>
               </t>
             </t>
-            <div class="slot_filler" t-foreach="range(10)" t-as="x"/>
           </div>
           <div t-if='more' class="batch_commits">
             <div t-foreach="batch.commit_link_ids.sorted(lambda cl: (cl.commit_id.repo_id.sequence, cl.commit_id.repo_id.id))" t-as="commit_link" class="one_line">
