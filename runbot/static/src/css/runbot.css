@@ -379,6 +379,10 @@ code {
     display: contents !important;
 }
 
+preferences-form {
+    display: block;
+}
+
 .hide-success tr.bg-success-subtle {
     display: none;
 }

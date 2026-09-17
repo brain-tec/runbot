@@ -3,7 +3,6 @@ import functools
 import logging
 from collections import OrderedDict, defaultdict
 from subprocess import CalledProcessError
-from urllib.parse import urlsplit
 
 import werkzeug
 import werkzeug.urls
@@ -151,6 +150,7 @@ class Runbot(Controller):
                 'project': project,
                 'triggers': triggers,
                 'trigger_display': trigger_display,
+                'default_trigger_display': '-'.join(sorted(str(i) for i in triggers.filtered(lambda t: not t.hide and not t.manual).ids)),
                 'has_pr': has_pr,
                 'search': search,
             })
@@ -449,28 +449,6 @@ class Runbot(Controller):
             'title': 'monitoring',
         }
         return request.render(view_id if view_id else "runbot.monitoring", qctx)
-
-    @o_route([
-        '/runbot/submit',
-    ], type='http', auth="public", methods=['GET', 'POST'], csrf=False)
-    def submit(self, redirect='/', update_triggers=False, **kwargs):
-        assert redirect.startswith('/')
-        response = werkzeug.utils.redirect('/' + urlsplit(redirect)._replace(scheme='', netloc='').geturl().lstrip('/\\'))
-        if update_triggers:
-            enabled_triggers = []
-            project_id = int(update_triggers)
-            for key in kwargs:
-                if key.startswith('trigger_'):
-                    enabled_triggers.append(key.replace('trigger_', ''))
-
-            key = 'trigger_display_%s' % project_id
-            default_trigger_ids = set(request.env['runbot.trigger'].search([('hide', '=', False), ('project_id', '=', project_id), ('manual', '=', False)]).ids)
-            selected_trigger_ids = set(map(int, enabled_triggers))
-            if default_trigger_ids == selected_trigger_ids:
-                response.delete_cookie(key)
-            else:
-                response.set_cookie(key, '-'.join(enabled_triggers), expires=datetime.datetime.now() + datetime.timedelta(days=365 * 10))
-        return response
 
     @route(['/runbot/errors/assign/<int:build_error_id>',
             ], type='http', auth='user', methods=['POST'], csrf=False, sitemap=False)

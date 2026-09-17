@@ -130,13 +130,13 @@
                     </header>
                     <t t-set="not_default_category" t-value="active_category_id and default_category != active_category_id"/>
                     <t t-set="not_default_filter_mode" t-value="filter_mode and filter_mode not in ('default', 'all')"/>
-                    <div class="container-fluid" t-if="not_default_category or not_default_filter_mode">
-                    <div class="row">
+                    <preferences-form class="container-fluid" t-if="not_default_category or not_default_filter_mode">
+                    <form class="row">
                         <div class="col-12">
                             <t t-if="not_default_category">
                                 <div class="text-nowrap btn-group btn-group-sm" role="group" aria-label="Category">
                                     <t t-foreach="categories" t-as="category">
-                                        <input type="radio" class="btn-check" autocomplete="off" name="banner_category" t-attf-id="banner_category_{{category.id}}"
+                                        <input type="radio" class="btn-check" autocomplete="off" data-toggle="submit" name="banner_category" t-attf-id="banner_category_{{category.id}}"
                                             data-setting="category" t-att-value="category.id" t-att-checked="category.id == active_category_id"/>
                                         <label class="btn btn-outline-primary" t-attf-for="banner_category_{{category.id}}" t-out="category.name"/>
                                     </t>
@@ -144,36 +144,36 @@
                             </t>
                             <t t-if="not_default_filter_mode">
                                 <div class="text-nowrap btn-group btn-group-sm" role="group" aria-label="Sticky">
-                                    <input type="radio" class="btn-check" autocomplete="off" name="banner_filter_mode" id="banner_filter_mode_default"
+                                    <input type="radio" class="btn-check" autocomplete="off" data-toggle="submit" name="banner_filter_mode" id="banner_filter_mode_default"
                                         data-setting="filter_mode" value="default" t-att-checked="filter_mode == 'default'"/>
                                     <label class="btn btn-outline-primary" for="banner_filter_mode_default" title="Only display sticky except if searching">Default</label>
-                                    <input type="radio" class="btn-check" autocomplete="off" name="banner_filter_mode" id="banner_filter_mode_all"
+                                    <input type="radio" class="btn-check" autocomplete="off" data-toggle="submit" name="banner_filter_mode" id="banner_filter_mode_all"
                                         data-setting="filter_mode" value="all" t-att-checked="filter_mode == 'all'"/>
                                     <label class="btn btn-outline-primary" for="banner_filter_mode_all">All</label>
-                                    <input type="radio" class="btn-check" autocomplete="off" name="banner_filter_mode" id="banner_filter_mode_sticky"
+                                    <input type="radio" class="btn-check" autocomplete="off" data-toggle="submit" name="banner_filter_mode" id="banner_filter_mode_sticky"
                                         data-setting="filter_mode" value="sticky" t-att-checked="filter_mode == 'sticky'"/>
                                     <label class="btn btn-outline-primary" for="banner_filter_mode_sticky">Sticky only</label>
-                                    <input type="radio" class="btn-check" autocomplete="off" name="banner_filter_mode" id="banner_filter_mode_nosticky"
+                                    <input type="radio" class="btn-check" autocomplete="off" data-toggle="submit" name="banner_filter_mode" id="banner_filter_mode_nosticky"
                                         data-setting="filter_mode" value="nosticky" t-att-checked="filter_mode == 'nosticky'"/>
                                     <label class="btn btn-outline-primary" for="banner_filter_mode_nosticky">Dev only</label>
                                 </div>
                             </t>
                         </div>
-                    </div></div>
+                    </form>
+                    </preferences-form>
                     <dialog id="collapsePreference" class="modal modal-xl">
-                        <div class="modal-dialog">
-                            <form class="modal-content" method="post" action="/runbot/submit" id="preferences_form">
+                        <preferences-form class="modal-dialog">
+                            <form class="modal-content" id="preferences_form">
                                 <header class="modal-header">
                                     <h5 class="modal-title">Preferences</h5>
                                     <button type="button" class="btn-close" command="close" commandfor="collapsePreference"/>
                                 </header>
                                 <div class="modal-body">
-                                    <input type="hidden" name="redirect" t-att-value="current_path"/>
                                     <div class="row">
                                         <div class="col-12">
                                             <div class="form-check form-switch">
                                                 <label for="more" class="form-check-label" >More info</label>
-                                                <input class="form-check-input" type="checkbox" role="switch" id="more" data-setting="more" t-att-checked="more"/>
+                                                <input class="form-check-input" type="checkbox" role="switch" id="more" data-setting="more" data-toggle="submit" t-att-checked="more"/>
                                             </div>
                                         </div>
                                     </div>
@@ -181,16 +181,16 @@
                                         <div id="label_pref_theme" class="col-md-1">Theme</div>
                                         <div class="col-md-11">
                                             <div class="text-nowrap btn-group btn-group-sm" role="group" aria-labelledby="label_pref_theme">
-                                                <input type="radio" class="btn-check" autocomplete="off" name="pref_theme" id="pref_theme_legacy"
+                                                <input type="radio" class="btn-check" autocomplete="off" data-toggle="submit" name="pref_theme" id="pref_theme_legacy"
                                                     data-setting="theme" value="legacy" t-att-checked="theme == 'legacy'"/>
                                                 <label class="btn btn-outline-primary" for="pref_theme_legacy">Legacy</label>
-                                                <input type="radio" class="btn-check" autocomplete="off" name="pref_theme" id="pref_theme_dark"
+                                                <input type="radio" class="btn-check" autocomplete="off" data-toggle="submit" name="pref_theme" id="pref_theme_dark"
                                                     data-setting="theme" value="dark" t-att-checked="theme == 'dark'"/>
                                                 <label class="btn btn-outline-primary" for="pref_theme_dark">Dark</label>
-                                                <input type="radio" class="btn-check" autocomplete="off" name="pref_theme" id="pref_theme_light"
+                                                <input type="radio" class="btn-check" autocomplete="off" data-toggle="submit" name="pref_theme" id="pref_theme_light"
                                                     data-setting="theme" value="light" t-att-checked="theme == 'light'"/>
                                                 <label class="btn btn-outline-primary" for="pref_theme_light">Light</label>
-                                                <input type="radio" class="btn-check" autocomplete="off" name="pref_theme" id="pref_theme_red404"
+                                                <input type="radio" class="btn-check" autocomplete="off" data-toggle="submit" name="pref_theme" id="pref_theme_red404"
                                                     data-setting="theme" value="red404" t-att-checked="theme == 'red404'"/>
                                                 <label class="btn btn-outline-primary" for="pref_theme_red404">Red404</label>
                                             </div>
@@ -200,16 +200,16 @@
                                         <div id="label_pref_filter_mode" class="col-md-1">Sticky</div>
                                         <div class="col-md-11">
                                             <div class="text-nowrap btn-group btn-group-sm" role="group" aria-labelledby="label_pref_filter_mode">
-                                                <input type="radio" class="btn-check" autocomplete="off" name="pref_filter_mode" id="pref_filter_mode_default"
+                                                <input type="radio" class="btn-check" autocomplete="off" data-toggle="submit" name="pref_filter_mode" id="pref_filter_mode_default"
                                                     data-setting="filter_mode" value="default" t-att-checked="filter_mode == 'default'"/>
                                                 <label class="btn btn-outline-primary" for="pref_filter_mode_default" title="Only display sticky except if searching">Default</label>
-                                                <input type="radio" class="btn-check" autocomplete="off" name="pref_filter_mode" id="pref_filter_mode_all"
+                                                <input type="radio" class="btn-check" autocomplete="off" data-toggle="submit" name="pref_filter_mode" id="pref_filter_mode_all"
                                                     data-setting="filter_mode" value="all" t-att-checked="filter_mode == 'all'"/>
                                                 <label class="btn btn-outline-primary" for="pref_filter_mode_all">All</label>
-                                                <input type="radio" class="btn-check" autocomplete="off" name="pref_filter_mode" id="pref_filter_mode_sticky"
+                                                <input type="radio" class="btn-check" autocomplete="off" data-toggle="submit" name="pref_filter_mode" id="pref_filter_mode_sticky"
                                                     data-setting="filter_mode" value="sticky" t-att-checked="filter_mode == 'sticky'"/>
                                                 <label class="btn btn-outline-primary" for="pref_filter_mode_sticky">Sticky only</label>
-                                                <input type="radio" class="btn-check" autocomplete="off" name="pref_filter_mode" id="pref_filter_mode_nosticky"
+                                                <input type="radio" class="btn-check" autocomplete="off" data-toggle="submit" name="pref_filter_mode" id="pref_filter_mode_nosticky"
                                                     data-setting="filter_mode" value="nosticky" t-att-checked="filter_mode == 'nosticky'"/>
                                                 <label class="btn btn-outline-primary" for="pref_filter_mode_nosticky">Dev only</label>
                                             </div>
@@ -220,7 +220,7 @@
                                         <div class="col-md-11">
                                             <div class="text-nowrap btn-group btn-group-sm" role="group" aria-labelledby="label_pref_category">
                                                 <t t-foreach="categories" t-as="category">
-                                                    <input type="radio" class="btn-check" autocomplete="off" name="pref_category" t-attf-id="pref_category_{{category.id}}"
+                                                    <input type="radio" class="btn-check" autocomplete="off" data-toggle="submit" name="pref_category" t-attf-id="pref_category_{{category.id}}"
                                                         data-setting="category" t-att-value="category.id" t-att-checked="category.id == active_category_id"/>
                                                     <label class="btn btn-outline-primary" t-attf-for="pref_category_{{category.id}}" t-out="category.name"/>
                                                 </t>
@@ -229,8 +229,9 @@
                                     </div>
 
                                     <hr class="separator"/>
-                                    <div t-if="triggers" class="d-contents">
-                                        <input type="hidden" name="update_triggers" t-att-value="project.id"/>
+                                    <fieldset t-if="triggers" class="d-contents"
+                                        t-attf-data-setting="trigger_display_{{project.id}}"
+                                        t-att-data-setting-default="default_trigger_display">
                                         <t t-foreach="categories" t-as="category">
                                             <t t-set="category_triggers" t-value="triggers.filtered(lambda t: not t.manual and t.category_id == category)"/>
                                             <t t-if="category_triggers">
@@ -238,29 +239,23 @@
                                                 <div class="row">
                                                     <t t-foreach="category_triggers" t-as="trigger">
                                                         <div class="col-md-3 text-nowrap">
-                                                            <input t-attf-class="trigger_selection {{'trigger_selection_hide' if trigger.hide else 'trigger_selection_show'}}" type="checkbox" t-attf-name="trigger_{{trigger.id}}" t-attf-id="trigger_{{trigger.id}}" t-att-checked="not trigger.hide if trigger_display is None else trigger.id in trigger_display"/>
+                                                            <input type="checkbox" t-attf-name="trigger_display_{{project.id}}" t-att-value="trigger.id" t-attf-id="trigger_{{trigger.id}}" t-att-checked="not trigger.hide if trigger_display is None else trigger.id in trigger_display"/>
                                                             <label t-attf-for="trigger_{{trigger.id}}" t-out="trigger.name"/>
                                                         </div>
                                                     </t>
                                                 </div>
                                             </t>
                                         </t>
-                                    </div>
+                                    </fieldset>
                                 </div>
                                 <footer class="modal-footer">
-                                    <button
-                                        onclick="Array.from(document.getElementsByClassName('trigger_selection_show')).forEach((element) => element.checked = true); Array.from(document.getElementsByClassName('trigger_selection_hide')).forEach((element) => element.checked = false); event.preventDefault();"
-                                        class="btn btn-secondary">Reset to default</button>
-                                    <button
-                                        onclick="Array.from(document.getElementsByClassName('trigger_selection')).forEach((element) => element.checked = true); event.preventDefault();"
-                                        class="btn btn-secondary">All</button>
-                                    <button
-                                        onclick="Array.from(document.getElementsByClassName('trigger_selection')).forEach((element) => element.checked = false); event.preventDefault();"
-                                        class="btn btn-secondary">None</button>
+                                    <button type="button" class="btn btn-secondary" data-toggle="preset" value="default">Reset to default</button>
+                                    <button type="button" class="btn btn-secondary" data-toggle="preset" value="all">All</button>
+                                    <button type="button" class="btn btn-secondary" data-toggle="preset" value="none">None</button>
                                     <button type="submit" class="btn btn-primary">Save</button>
                                 </footer>
                             </form>
-                        </div>
+                        </preferences-form>
                     </dialog>
                     <t t-call="runbot.build_menu"/>
                     <t t-out="0"/>
