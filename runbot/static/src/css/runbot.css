@@ -375,6 +375,10 @@ code {
     display: none !important;
 }
 
+.d-contents {
+    display: contents !important;
+}
+
 .hide-success tr.bg-success-subtle {
     display: none;
 }
