@@ -453,10 +453,9 @@ class Runbot(Controller):
     @o_route([
         '/runbot/submit',
     ], type='http', auth="public", methods=['GET', 'POST'], csrf=False)
-    def submit(self, more=False, redirect='/', update_triggers=False, **kwargs):
+    def submit(self, redirect='/', update_triggers=False, **kwargs):
         assert redirect.startswith('/')
         response = werkzeug.utils.redirect('/' + urlsplit(redirect)._replace(scheme='', netloc='').geturl().lstrip('/\\'))
-        response.set_cookie('more', '1' if more else '0', expires=datetime.datetime.now() + datetime.timedelta(days=365 * 10))
         if update_triggers:
             enabled_triggers = []
             project_id = int(update_triggers)
