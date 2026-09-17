@@ -8,9 +8,8 @@ class SettingsManager extends CookieStorage {}
 export const settings = new SettingsManager();
 
 /**
- * Applies the setting declared by `data-setting` on a toggled input.
- * A `data-setting-value` gives the value to store when the input is checked,
- * otherwise the input is a boolean and stores `1` or `0`.
+ * Applies the setting named by `data-setting` on a toggled input: a checkbox
+ * stores whether it is checked, any other input stores its value once checked.
  * Immediately applied with a reload.
  */
 document.addEventListener("change", (e) => {
@@ -18,11 +17,10 @@ document.addEventListener("change", (e) => {
     if (!el) {
         return;
     }
-    const { setting, settingValue } = el.dataset;
-    if (settingValue === undefined) {
-        settings.set(setting, el.checked ? "1" : "0");
+    if (el.type === "checkbox") {
+        settings.set(el.dataset.setting, el.checked ? "1" : "0");
     } else if (el.checked) {
-        settings.set(setting, settingValue);
+        settings.set(el.dataset.setting, el.value);
     } else {
         return;
     }
