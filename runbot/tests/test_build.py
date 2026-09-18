@@ -186,6 +186,22 @@ class TestBuildParams(RunbotCaseMinimalSetup):
             self.assertEqual(batch.state, 'done')
             sp.rollback()
 
+        with self.env.cr.savepoint() as sp:
+            # same failure, but the dependant trigger opts in to start anyway
+            self.trigger_server.starts_after_failure = True
+            minimal_check_build.local_result = 'ko'
+            minimal_check_build.local_state = 'done'
+            batch._process()
+            all_builds = batch.slot_ids.build_id
+            self.assertEqual(
+                all_builds.trigger_id.mapped('name'),
+                ['minimal_check', 'Server trigger'],
+                'Server trigger should have started despite the failed dependency',
+            )
+            self.assertEqual(all_builds.mapped('local_state'), ['done', 'pending'])
+            self.assertEqual(batch.state, 'ready')
+            sp.rollback()
+
         minimal_check_build.local_result = 'ok'
         minimal_check_build.local_state = 'done'
         batch._process()
@@ -378,14 +394,13 @@ class TestBuildResult(RunbotCase):
 
         self.assertEqual(modules_to_test, sorted(['other_mod_2']))
 
-    def test_build_cmd_log_db(self):
+    def test_build_cmd_log_config(self):
         """ test that the log_db parameter is set in the .odoorc file """
         build = self.Build.create({
             'params_id': self.server_params.id,
         })
         cmd = build._cmd(py_version=3)
-        self.assertIn('log_db = runbot_logs', cmd.get_config())
-
+        self.assertIn('log_config = /data/build/logconfig.json', cmd.get_config())
 
     def test_build_cmd_custom_pre_post(self):
         """ test that the log_db parameter is set in the .odoorc file """
@@ -617,11 +632,60 @@ class TestBuildResult(RunbotCase):
 
         build1_1_2.local_state = 'done'
 
+        # simulate scheduler ran
+        build1_1._update_globals()
+        build1_2._update_globals()
+        build1._update_globals()
+
         self.assertEqual('done', build1.global_state)
         self.assertEqual('done', build1_1.global_state)
         self.assertEqual('done', build1_2.global_state)
         self.assertEqual('done', build1_1_1.global_state)
         self.assertEqual('done', build1_1_2.global_state)
+
+    def test_rebuild_sent_status(self):
+        # setup everything to ensure status are created
+        # TODO rework default setup to have a consistent state for all tests
+        bundle = self.dev_bundle
+        self.trigger_addons.unlink()  # TODO should not be needed, but will generate a warning without that
+        batch = bundle._force()
+        batch._prepare()
+        bundle.last_batch = batch
+        self.server_params.trigger_id = self.trigger_server
+        self.trigger_server.ci_context = 'ci/test'
+        batch.commit_link_ids[0].match_type = 'head'
+        batch.commit_link_ids[0].commit_id = self.server_params.commit_link_ids[0].commit_id
+
+        current_max = self.env['runbot.commit.status'].search([], order='id desc', limit=1).id or 0
+        build1 = self.Build.create({
+            'params_id': self.server_params.id,
+        })
+        batch.slot_ids[0].build_id = build1
+
+        build1_1 = self.Build.create({
+            'params_id': self.server_params.id,
+            'parent_id': build1.id,
+        })
+        build1.local_state = 'done'
+        build1.local_result = 'ok'
+        build1_1.local_state = 'done'
+        build1_1.local_result = 'ko'
+        build1_1._update_globals()
+        build1._update_globals()
+        self.assertEqual('ko', build1.global_result)
+        self.assertEqual('done', build1.global_state)
+        self.cr.precommit.run()
+
+        new_status = self.env['runbot.commit.status'].search([('id', '>', current_max)], order='id')
+        current_max = new_status[-1].id
+        self.assertEqual(new_status.mapped('state'), ['error'])
+        new_build = build1_1._rebuild()
+        self.assertEqual('ok', build1.global_result)
+        self.assertEqual('waiting', build1.global_state)
+
+        self.cr.precommit.run()
+        new_status = self.env['runbot.commit.status'].search([('id', '>', current_max)], order='id')
+        self.assertEqual(new_status.mapped('state'), ['pending'])        
 
     def test_rebuild_sub_sub_build(self):
         build1 = self.Build.create({
@@ -646,6 +710,11 @@ class TestBuildResult(RunbotCase):
 
         build1_1_1.local_result = 'ko'
         build1_1_1.local_state = 'done'
+
+        # simulate scheduler ran
+        build1_1._update_globals()
+        build1._update_globals()
+
         self.assertEqual('done', build1.global_state)
         self.assertEqual('done', build1_1.global_state)
         self.assertEqual('done', build1_1_1.global_state)
@@ -659,6 +728,10 @@ class TestBuildResult(RunbotCase):
         })
         build1_1_1.orphan_result = True
 
+        # simulate scheduler ran
+        build1_1._update_globals()
+        build1._update_globals()
+
         self.assertEqual('ok', build1.global_result)
         self.assertEqual('ok', build1_1.global_result)
         self.assertEqual('ko', build1_1_1.global_result)
@@ -669,6 +742,10 @@ class TestBuildResult(RunbotCase):
 
         rebuild1_1_1.local_result = 'ok'
         rebuild1_1_1.local_state = 'done'
+
+        # simulate scheduler ran
+        build1_1._update_globals()
+        build1._update_globals()
 
         self.assertEqual('ok', build1.global_result)
         self.assertEqual('ok', build1_1.global_result)
@@ -683,26 +760,27 @@ class TestBuildResult(RunbotCase):
         """ test that the faketime command is properly added"""
         self.server_params.config_data = {
             'skip_requirements': True,
-            'faketime': '2024-02-04 02:42 UTC',
+            'faketime': '2024-02-04 02:42:00 UTC',
         }
         self.env.flush_all()
         build = self.Build.create({
             'params_id': self.server_params.id,
         })
         cmd = build._cmd(py_version=3)
-        self.assertIn('faketime "2024-02-04 02:42 UTC" python3 odoo/server.py', str(cmd))
+        self.assertIn('faketime "2024-02-04 02:42:00 UTC" python3 odoo/server.py', str(cmd))
 
         # let's ensure that a time offset is added to a child build
         build.build_start = datetime.datetime(2025, 1, 1, 12, 00)
-        child_build = build._add_child({})
-        child_build.create_date = datetime.datetime(2025, 1, 1, 13, 00)
+        with patch('odoo.addons.runbot.models.build.time') as mock_time:  # ensure build_time has the expected value
+            mock_time.time.return_value = datetime.datetime(2025, 1, 1, 13, 00).timestamp()
+            child_build = build._add_child({})
         child_cmd = child_build._cmd(py_version=3)
-        self.assertIn('faketime "2024-02-04 03:42 UTC" python3 odoo/server.py', str(child_cmd))
+        self.assertIn('faketime "2024-02-04 03:42:00 UTC" python3 odoo/server.py', str(child_cmd))
 
         build.build_end = datetime.datetime(2025, 1, 1, 14, 00)
         second_child = build._add_child({})
         second_child_cmd = second_child._cmd(py_version=3)
-        self.assertIn('faketime "2024-02-04 04:42 UTC" python3 odoo/server.py', str(second_child_cmd))
+        self.assertIn('faketime "2024-02-04 04:42:00 UTC" python3 odoo/server.py', str(second_child_cmd))
 
     def test_format_message(self):
         def get_log(message):
@@ -834,17 +912,19 @@ class TestGithubStatus(RunbotCase):
         def github_status(build):
             self.callcount += 1
 
-        with patch('odoo.addons.runbot.models.build.BuildResult._github_status', github_status):
+        with patch('odoo.addons.runbot.models.build.BuildResult._prepare_github_status', github_status):
             self.callcount = 0
             self.build.local_state = 'testing'
+            self.assertEqual(self.build.global_state, 'testing')
 
-            self.assertEqual(self.callcount, 0, "_github_status shouldn't have been called")
+            self.assertEqual(self.callcount, 0, "_prepare_github_status shouldn't have been called")
 
             self.callcount = 0
             self.build.local_state = 'running'
+            self.assertEqual(self.build.global_state, 'running')
 
-            self.assertEqual(self.callcount, 1, "_github_status should have been called")
+            self.assertEqual(self.callcount, 1, "_prepare_github_status should have been called")
 
             self.callcount = 0
             self.build.local_state = 'done'
-            self.assertEqual(self.callcount, 0, "_github_status shouldn't have been called")
+            self.assertEqual(self.callcount, 0, "_prepare_github_status shouldn't have been called")

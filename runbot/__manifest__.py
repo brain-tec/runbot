@@ -2,11 +2,11 @@
 {
     'name': "runbot",
     'summary': "Runbot",
-    'description': "Runbot for Odoo 17.0",
+    'description': "Runbot for Odoo 19.0",
     'author': "Odoo SA",
     'website': "http://runbot.odoo.com",
     'category': 'Website',
-    'version': '5.17',
+    'version': '5.18',
     'application': True,
     'depends': ['base', 'base_automation', 'website', 'auth_oauth'],
     'data': [
@@ -21,7 +21,7 @@
         'data/runbot_data.xml',
         'data/runbot_error_regex_data.xml',
         'data/website_data.xml',
-
+        'data/gc_cron.xml',
 
         'templates/utils.xml',
         'templates/badge.xml',
@@ -41,6 +41,7 @@
         'templates/commit_link_details.xml',
         'templates/bundles_by_tag.xml',
         'templates/versions.xml',
+        'templates/tree_hash.xml',
 
         'views/branch_views.xml',
         'views/build_error_link_views.xml',
@@ -76,6 +77,9 @@
             'runbot/static/src/js/fields/*',
             'runbot/static/src/js/components/*',
         ],
+        'web.assets_tests': [
+            'runbot/static/tests/tours/*.js',
+        ],
         'runbot.assets_frontend': [
             'web/static/lib/odoo_ui_icons/style.css',
             'runbot/static/lib/bootstrap/css/bootstrap.css',
@@ -83,9 +87,12 @@
             'runbot/static/src/css/table_group.css',
             'runbot/static/src/css/runbot.css',
 
-            'runbot/static/src/js/polyfill_command_api.js',
-            'runbot/static/lib/jquery/jquery.js',
+            'web/static/src/module_loader.js',
+            'web/static/src/core/py_js/*.js',
             'runbot/static/lib/bootstrap/js/bootstrap.bundle.js',
+            'runbot/static/src/js/polyfill_command_api.js',
+            'runbot/static/src/js/utils/*',
+            'runbot/static/src/js/elements/*',
             'runbot/static/src/js/table_filter.js',
             'runbot/static/src/js/table_group.js',
             'runbot/static/src/js/runbot.js',

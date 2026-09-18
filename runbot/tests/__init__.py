@@ -4,6 +4,7 @@ from . import test_repo
 from . import test_build_error
 from . import test_branch
 from . import test_build
+from . import test_build_link
 from . import test_schedule
 from . import test_build_config_step
 from . import test_event
@@ -15,3 +16,4 @@ from . import test_commit
 from . import test_upgrade
 from . import test_dockerfile
 from . import test_host
+from . import test_ui

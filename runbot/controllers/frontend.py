@@ -104,7 +104,7 @@ class Runbot(Controller):
                 domain.append(('no_build', '=', False))
 
             if has_pr is not None:
-                domain.append(('has_pr', '=', bool(has_pr)))
+                domain.append(('has_active_pr', '=', bool(has_pr)))
 
             filter_mode = request.httprequest.cookies.get('filter_mode', 'default')
             if filter_mode == 'sticky':
@@ -230,7 +230,7 @@ class Runbot(Controller):
     @route(['/runbot/batch/slot/<model("runbot.batch.slot"):slot>/build'], auth='user', type='http')
     def slot_create_build(self, slot=None, **kwargs):
         build = slot.sudo()._create_missing_build()
-        return werkzeug.utils.redirect('/runbot/build/%s' % build.id)
+        return werkzeug.utils.redirect(f'/runbot/batch/{slot.batch_id.id}/build/{build.id}')
 
     @route([
         '/runbot/commit/<model("runbot.commit"):commit>',
@@ -271,6 +271,30 @@ class Runbot(Controller):
             _logger.info('github status %s resent by %s', status_id, request.env.user.name)
         return werkzeug.utils.redirect('/runbot/commit/%s' % status.commit_id.id)
 
+    @route([
+        '/runbot/tree_hash/<string(minlength=6, maxlength=40):tree_hash>',
+        '/runbot/<model("runbot.project"):project>/tree_hash/<string(minlength=6, maxlength=40):tree_hash>',
+    ], website=True, auth='public', type='http', sitemap=False)
+    def tree_hash(self, tree_hash=None, project=None, **kwargs):
+        if not project:
+            project = self.env.ref('runbot.main_project')
+        if tree_hash:
+            ref_logs = self.env["runbot.ref.log"].search([
+                ("commit_id.repo_id.project_id", "=", project.id),
+                ("commit_id.tree_hash", "=", tree_hash),
+            ])
+            if ref_logs:
+                batches = self.env['runbot.batch'].search([('commit_link_ids.commit_id.tree_hash', '=', tree_hash)], order='create_date desc')
+                context = {
+                    'tree_hash': tree_hash,
+                    'ref_logs': ref_logs,
+                    'batches': batches,
+                    'project': project,
+                    'repo': ref_logs[0].branch_id.repo_id,
+                }
+                return request.render('runbot.tree_hash', context)
+        raise NotFound
+
     @o_route([
         '/runbot/build/<int:build_id>/<operation>',
     ], type='http', auth="user", methods=['POST'], csrf=False)
@@ -292,9 +316,11 @@ class Runbot(Controller):
     ], type='http', auth="public", website=True, sitemap=False)
     def build(self, build_id, search=None, from_batch=None, **post):
         build = request.env['runbot.build'].browse(build_id)
+        route = None
         if from_batch:
             from_batch = request.env['runbot.batch'].browse(int(from_batch))
-            if build.top_parent not in from_batch.with_context(active_test=False).slot_ids.build_id and build.create_batch_id != from_batch:
+            route = build._get_route_from_batch(from_batch)
+            if not route:
                 # the url may have been forged replacing the build id, redirect to hide the batch
                 return werkzeug.utils.redirect('/runbot/build/%s' % build_id)
 
@@ -304,7 +330,11 @@ class Runbot(Controller):
         build = Build.browse(build_id)
         if not build.exists():
             return request.not_found()
-        siblings = (build.parent_id.children_ids if build.parent_id else from_batch.slot_ids.build_id if from_batch else build).sorted('id')
+        parent = (route and (route[-2] if len(route) > 1 else build.parent_id)) or build.parent_id
+        if parent:
+            siblings = (parent.children_ids | parent.linked_children_build_ids).sorted('id')
+        else:
+            siblings = (from_batch.slot_ids.build_id if from_batch else build).sorted('id')
         context = {
             'build': build,
             'from_batch': from_batch,
@@ -347,6 +377,17 @@ class Runbot(Controller):
         }
 
         return request.render('runbot.build_search', context)
+
+    @route(['/runbot/build/<int:build_id>/routes'], type='http', auth='public', website=True, sitemap=False)
+    def build_routes(self, build_id, limit=200, **post):
+        build = request.env['runbot.build'].browse(build_id)
+        if not build.exists():
+            return request.not_found()
+        return request.render('runbot.build_routes', {
+            'build': build,
+            'routes': build._get_routes(limit=int(limit)),
+            'title': 'Routes to build %s' % build.id,
+        })
 
     @route([
         '/runbot/branch/<model("runbot.branch"):branch>',
@@ -481,6 +522,7 @@ class Runbot(Controller):
             'build_errors': build_errors,
             'title': 'Build Errors',
             'sort_order_choices': sort_order_choices,
+            'sort_order': sort_order,
             'page': page,
             'pager': pager,
         }
@@ -569,6 +611,7 @@ class Runbot(Controller):
             return {}
 
         builds = builds.search([('id', 'child_of', builds.ids)])
+        builds = builds | builds.linked_children_build_ids
 
         parents = {b.id: b.top_parent.id for b in builds.with_context(prefetch_fields=False)}
         dates = {b.top_parent.id: b.create_date for b in builds.with_context(prefetch_fields=False)}
@@ -605,6 +648,7 @@ class Runbot(Controller):
         all_builds = bundle.last_done_batch.slot_ids.build_id
         all_builds |= bundle.with_context(category_id=request.env.ref('runbot.nightly_category').id).last_done_batch.slot_ids.build_id
         all_builds = request.env['runbot.build'].search([('id', 'child_of', all_builds.ids)])
+        all_builds = all_builds | all_builds.linked_children_build_ids
         all_stats = all_builds.sudo().stat_ids
         category_per_trigger = {}
         step_per_trigger_category = {}
@@ -612,14 +656,17 @@ class Runbot(Controller):
         all_steps = set()
         all_triggers = set()
         for stat in all_stats:
-            stat_trigger = stat.build_id.params_id.trigger_id
-            if not stat_trigger.has_stats:  # skip, most likely a multi build or other noisy trigger
-                continue
-            all_categories.add(stat.category)
-            all_steps.add(stat.dynamic_step_name or stat.config_step_id.name)
-            all_triggers.add(stat_trigger)
-            category_per_trigger.setdefault(stat_trigger, set()).add(stat.category)
-            step_per_trigger_category.setdefault((stat_trigger, stat.category), set()).add(stat.dynamic_step_name or stat.config_step_id.name)
+            stat_triggers = stat.build_id.params_id.trigger_id | stat.build_id.linked_parent_build_ids.params_id.trigger_id
+            has_stats = False
+            for stat_trigger in stat_triggers:
+                if stat_trigger.has_stats:
+                    has_stats = True
+                    all_triggers.add(stat_trigger)
+                    category_per_trigger.setdefault(stat_trigger, set()).add(stat.category)
+                    step_per_trigger_category.setdefault((stat_trigger, stat.category), set()).add(stat.dynamic_step_name or stat.config_step_id.name)
+            if has_stats:
+                all_categories.add(stat.category)
+                all_steps.add(stat.dynamic_step_name or stat.config_step_id.name)
         all_triggers = sorted(all_triggers, key=lambda t: (t.category_id.id, t.sequence, t.id))
         main_trigger = all_triggers[0] if all_triggers else None
         context = {
@@ -908,13 +955,10 @@ class Runbot(Controller):
         if not project and projects:
             project = projects[0]
         bundles_by_team = defaultdict(list)
-        nb_bundles_done = 0
         bundles = self.env['runbot.bundle'].search([('tag_ids', 'in', bundle_tag_id.id)])
+        nb_bundles_done = len(bundles.filtered(lambda b: b.has_pr and not b.has_active_pr))
         for bundle in bundles:
             bundles_by_team[bundle.team_id.name or 'No Team Defined'].append(bundle)
-            bundle_prs = bundle.branch_ids.filtered(lambda rec: rec.is_pr)
-            if any(bundle_prs) and not any(bundle_prs.mapped('alive')):
-                nb_bundles_done += 1
 
         qctx = {
             'tag': bundle_tag_id,

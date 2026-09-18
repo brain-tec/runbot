@@ -1,3 +1,5 @@
+import datetime
+import json
 import logging
 
 from collections import defaultdict
@@ -49,6 +51,8 @@ class Host(models.Model):
     is_leader = fields.Boolean('Is leader', help='This host is the leader of the cluster', default=False)
     is_builder = fields.Boolean('Is builder', help='This host is a builder of the cluster', default=True)
     is_registry = fields.Boolean('Is docker registry', help='This host is a docker regisrty', default=False)
+    is_backup = fields.Boolean('Is backup', help='This host backup the most important databases', default=False)
+    is_assigner = fields.Boolean('Is assigner', help='This host will assign builds to other hosts', default=False)
     send_status = fields.Boolean('Send status', help='If leader, this host will send status updates, disable to use the status service', default=True)
 
     use_remote_docker_registry = fields.Boolean('Use remote Docker Registry', default=False, help="Use docker registry for pulling images")
@@ -70,6 +74,17 @@ class Host(models.Model):
         for host in self:
             host.build_ids = self.env['runbot.build'].search([('host', '=', host.name), ('local_state', 'in', ('pending', 'testing', 'running'))])
 
+    def _static_url(self):
+        use_ssl = self.env['ir.config_parameter'].get_param('runbot.use_ssl', default=True)
+        scheme = 'https' if use_ssl else 'http'
+        return f'{scheme}://{self.name}/runbot/static/'
+
+    def _build_url(self, build):
+        return f'{self._static_url()}build/{build.dest}/'
+
+    def _backup_url(self):
+        return f'{self._static_url()}backups/'
+
     @api.model_create_multi
     def create(self, vals_list):
         for vals in vals_list:
@@ -78,6 +93,7 @@ class Host(models.Model):
         return super().create(vals_list)
 
     def _bootstrap_local_logs_db(self):
+        # TODO cleanup remove
         """ bootstrap a local database that will collect logs from builds """
         logs_db_name = self.env['ir.config_parameter'].get_param('runbot.logdb_name')
         if logs_db_name not in list_local_dbs():
@@ -171,7 +187,7 @@ class Host(models.Model):
         else:
             _logger.info('Building docker images...')
             # as variants depend on their parent we want to build the parents first
-            for dockerfile in self.env['runbot.dockerfile'].search([('to_build', '=', True)], order='parent_id nulls first'):
+            for dockerfile in self.env['runbot.dockerfile'].search([('to_build', '=', True), ('is_template', '=', False)], order='parent_id nulls first'):
                 future_identifier = None
                 if not dockerfile.in_error:
                     future_identifier = dockerfile._build(self)
@@ -183,19 +199,16 @@ class Host(models.Model):
                     docker_tag(dockerfile.image_previous_identifier, dockerfile.image_previous_tag)
                     docker_tag(dockerfile.image_identifier, dockerfile.image_tag)
                     docker_tag(dockerfile.image_future_identifier, dockerfile.image_future_tag)
-                    for tag in [dockerfile.image_tag, dockerfile.image_future_tag]:
-                        try:
-                            docker_push(tag)  # for now, always push locally
-                            if is_main_registry:
-                                docker_registry_url = self.docker_registry_url
-                                if self.docker_registry_url:
-                                    docker_registry_url = self.docker_registry_url
-                                else:
-                                    docker_registry_url = icp.get_param('runbot.docker_registry_url', default='').strip('/')
-                                if docker_registry_url:
+                    tags_to_push = [dockerfile.image_tag, dockerfile.image_future_tag]
+                    docker_registry_url = self._get_docker_registry_url()
+                    if docker_registry_url:
+                        self.env.cr.commit()
+                        for tag in tags_to_push:
+                            try:
+                                if is_main_registry or docker_registry_url == self.docker_registry_url:
                                     docker_push(tag, docker_registry_url)
-                        except ImageNotFound:
-                            _logger.warning("Image tag `%s` not found. Skipping push", tag)
+                            except ImageNotFound:
+                                _logger.warning("Image tag `%s` not found. Skipping push", tag)
                 else:
                     if future_identifier:
                         docker_tag(future_identifier, dockerfile.image_tag) # for a setup without registry
@@ -260,54 +273,106 @@ class Host(models.Model):
         if nb_reserved < (nb_hosts / 2):
             self.assigned_only = True
 
-    def _fetch_local_logs(self, build_ids=None):
-        """ fetch build logs from local database """
-        logs_db_name = self.env['ir.config_parameter'].get_param('runbot.logdb_name')
-        with local_pg_cursor(logs_db_name) as local_cr:
-            res = []
-            where_clause = "WHERE split_part(dbname, '-', 1) IN %s" if build_ids else ''
-            query = f"""
-                    SELECT *
-                    FROM (
-                            SELECT id, create_date, name, level, dbname, func, path, line, type, message, split_part(dbname, '-', 1) as build_id, metadata
-                            FROM ir_logging
-                            )
-                        AS ir_logs
-                    {where_clause}
-                ORDER BY id
-                LIMIT 10000
-                """
-            if build_ids:
-                build_ids = [tuple(str(build) for build in build_ids)]
-            local_cr.execute(query, build_ids)
-            col_names = [col.name for col in local_cr.description]
-            for row in local_cr.fetchall():
-                res.append({name:value for name, value in zip(col_names, row)})
-            return res
+    def _fetch_local_logs(self, builds=None):
+        res = []
+        cleanups = []
+        for build in builds:
+            if build._is_file('odoo_log.seek'):
+                new_seek = seek = int(build._read_file('odoo_log.seek'))
+                log_file_path = 'logs/%s_logs.json' % build.active_step.sanitized_name(build)
+                if not build._is_file(log_file_path):
+                    continue
+                with open(build._path(log_file_path), encoding='utf-8') as f:
+                    f.seek(seek)
+                    for line in f.readlines():
+                        try:
+                            json_log = json.loads(line)
+                            faketime_offset = build._get_faketime_offset() or datetime.timedelta()
+                            log_data = {
+                                'create_date': datetime.datetime.fromtimestamp(float(json_log['created'])) - faketime_offset if json_log.get('created') else datetime.datetime.now(),
+                                'level': str(json_log.get('levelname', 'INFO')),
+                                'name': str(json_log.get('name', '')),
+                                'dbname': str(json_log.get('dbname', '')),
+                                'func': str(json_log.get('funcName', '')),
+                                'path': str(json_log.get('pathname', '')),
+                                'line': str(json_log.get('lineno', '')),
+                                'type': 'server',
+                                'message': str(json_log.get('message', '')),
+                                'build_id': build.id,
+                            }
+                            if json_log.get('test'):
+                                log_data['metadata'] = {'test': json_log.get('test')}
+                            if json_log.get('exc_info'):
+                                log_data['message'] = f'{log_data["message"]}\n{json_log["exc_info"]}'
 
-    def _process_logs(self, build_ids=None):
+                            new_seek = f.tell()
+                            res.append(log_data)
+                        except (KeyError, json.JSONDecodeError):
+                            _logger.exception('Failed to parse log line:')
+                            break
+
+                if new_seek != seek:
+                    def cleanup(build=build, new_seek=new_seek):
+                        build._write_file('odoo_log.seek', str(new_seek))
+                    cleanups.append(cleanup)
+                continue
+
+            # TODO cleanup remove
+            log_to_delete = []
+            build_ids = build.ids
+            logs_db_name = self.env['ir.config_parameter'].get_param('runbot.logdb_name')
+            with local_pg_cursor(logs_db_name) as local_cr:
+                where_clause = "WHERE split_part(dbname, '-', 1) IN %s" if build_ids else ''
+                query = f"""
+                        SELECT *
+                        FROM (
+                                SELECT id, create_date, name, level, dbname, func, path, line, type, message, metadata
+                                FROM ir_logging
+                                )
+                            AS ir_logs
+                        {where_clause}
+                    ORDER BY id
+                    LIMIT 10000
+                    """
+                build_ids = [tuple(str(build) for build in build_ids)]
+                local_cr.execute(query, build_ids)
+                col_names = [col.name for col in local_cr.description]
+                for row in local_cr.fetchall():
+                    vals = dict(zip(col_names, row))
+                    res.append(vals)
+                    log_to_delete.append(int(vals.pop('id')))
+            if log_to_delete:
+                def cleanup(log_to_delete=log_to_delete):
+                    logs_db_name = self.env['ir.config_parameter'].get_param('runbot.logdb_name')
+                    with local_pg_cursor(logs_db_name) as local_cr:
+                        local_cr.execute("DELETE FROM ir_logging WHERE id in %s", [tuple(log_to_delete)])
+                cleanups.append(cleanup)
+
+        return res, cleanups
+
+    def _process_logs(self, testing_builds):
         """move logs from host to the leader"""
-        ir_logs = self._fetch_local_logs()
+        ir_logs, cleanups = self._fetch_local_logs(testing_builds)
         logs_by_build_id = defaultdict(list)
 
         local_log_ids = []
         for log in ir_logs:
-            if log['dbname'] and '-' in log['dbname']:
+            if not log.get('build_id'):  # TODO cleanup remove condition, not needed once using only json log
                 try:
-                    logs_by_build_id[int(log['dbname'].split('-', maxsplit=1)[0])].append(log)
-                except ValueError:
-                    pass
-            else:
-                local_log_ids.append(log['id'])
-
-        builds = self.env['runbot.build'].browse(logs_by_build_id.keys())
+                    log['build_id'] = int(log['dbname'].split('-', maxsplit=1)[0])
+                except (ValueError, AttributeError, KeyError):
+                    if log.get('id'):
+                        local_log_ids.append(log['id'])  # TODO cleanup remove not needed once using only json log
+            if log.get('build_id'):
+                logs_by_build_id[log['build_id']].append(log)
 
         logs_to_send = []
-        for build in builds.exists():
+        for build in testing_builds:
             log_counter = build.log_counter
             build_logs = logs_by_build_id[build.id]
             for ir_log in build_logs:
-                local_log_ids.append(ir_log['id'])
+                if 'id' in ir_log:  # TODO cleanup
+                    local_log_ids.append(ir_log['id'])
                 ir_log['type'] = 'server'
                 log_counter -= 1
                 if log_counter == 0:
@@ -322,16 +387,15 @@ class Host(models.Model):
                         ir_log['message'] = ir_log['message'][:10000] + "\n ...<message too long, truncated>"
 
                 ir_log['build_id'] = build.id
-                logs_to_send.append({k:ir_log[k] for k in ir_log if k != 'id'})
+                logs_to_send.append(ir_log)
             build.log_counter = log_counter
 
         if logs_to_send:
             self.env['ir.logging'].create(logs_to_send)
         self.env.cr.commit()  # we don't want to remove local logs that were not inserted in main runbot db
-        if local_log_ids:
-            logs_db_name = self.env['ir.config_parameter'].get_param('runbot.logdb_name')
-            with local_pg_cursor(logs_db_name) as local_cr:
-                local_cr.execute("DELETE FROM ir_logging WHERE id in %s", [tuple(local_log_ids)])
+
+        for cleanup in cleanups:
+            cleanup()
 
     def _get_build_domain(self, domain=None):
         domain = domain or []

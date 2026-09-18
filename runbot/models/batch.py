@@ -106,19 +106,17 @@ class Batch(models.Model):
                 build = slot.build_id
                 if build.global_state in ('running', 'done'):
                     continue
-                testing_slots = build.params_id.slot_ids.filtered(lambda s: not s.skipped)
-                if not testing_slots:
+                other_batches = build.params_id.slot_ids.filtered(lambda s: not s.skipped).mapped('batch_id')
+                if any(other_batches.bundle_id.mapped('is_base')):
+                    continue
+                testing_batches = other_batches.filtered(lambda b: b.state in ('preparing', 'ready'))
+                valid_batches = testing_batches.bundle_id.last_batch & testing_batches
+                if not valid_batches:
                     if build.global_state == 'pending':
                         build._skip('Newer build found')
                     elif build.global_state in ('waiting', 'testing'):
                         if not build.killable:
                             build.killable = True
-                elif slot.link_type == 'created':
-                    batches = testing_slots.mapped('batch_id')
-                    _logger.info('Cannot skip build %s build is still in use in batches %s', build.id, batches.ids)
-                    bundles = batches.mapped('bundle_id') - batch.bundle_id
-                    if bundles:
-                        batch._log('Cannot kill or skip build %s, build is used in another bundle: %s', build.id, bundles.mapped('name'))
 
     def _process(self):
         processed = self.browse()
@@ -180,7 +178,21 @@ class Batch(models.Model):
 
         slot.link_type = link_type
         slot.build_id = build
-        build._github_status()
+        build._prepare_github_status()
+
+    def _get_latest_batch_per_version(self, skip_versions):
+        return self.env['runbot.batch'].browse(result[1] for result in self.env['runbot.batch']._read_group(
+            domain=[
+                ('state', '=', 'done'),
+                ('bundle_id.project_id', '=', self.bundle_id.project_id.id),
+                ('bundle_id.is_base', '=', True),
+                ('bundle_id.sticky', '=', True),
+                ('category_id', '=', self.category_id.id),
+                ('bundle_id.version_id', 'not in', skip_versions.ids),
+            ],
+            groupby=['bundle_id'],
+            aggregates=['id:max'],
+        ))
 
     def _prepare(self, auto_rebase=False, use_base_commits=False):
         _logger.info('Preparing batch %s', self.id)
@@ -273,24 +285,16 @@ class Batch(models.Model):
         # 1.2 FIND merge_base info for those commits
         #  use last not preparing batch to define previous repos_heads instead of branches heads:
         #  Will allow to have a diff info on base bundle, compare with previous bundle
-        last_base_batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.base_id.id), ('state', '!=', 'preparing'), ('category_id', '=', self.category_id.id), ('id', '!=', self.id)], order='id desc', limit=1)
+        last_base_batch = self.env['runbot.batch'].search([('bundle_id', '=', bundle.base_id.id), ('state', 'in', ('ready', 'done')), ('category_id', '=', self.category_id.id), ('id', '!=', self.id)], order='id desc', limit=1)
         if last_base_batch:
             base_head_per_repo = {commit.repo_id.id: commit for commit in last_base_batch.commit_ids}
             self._update_commits_infos(base_head_per_repo)  # set base_commit, diff infos, ...
 
         # 2. FIND missing commit in a compatible base bundle
         if bundle.is_base or auto_rebase:
-            self.reference_batch_ids = self.env['runbot.batch'].browse(result[1] for result in self.env['runbot.batch']._read_group(
-                domain=[
-                    ('state', '=', 'done'),
-                    ('bundle_id.project_id', '=', bundle.project_id.id),
-                    ('bundle_id.is_base', '=', True),
-                    ('bundle_id.sticky', '=', True),
-                    ('category_id', '=', self.category_id.id),
-                ],
-                groupby=['bundle_id'],
-                aggregates=['id:max'],
-            ))
+            existing = self.reference_batch_ids
+            existing_versions = existing.mapped('bundle_id.version_id')
+            self.reference_batch_ids = self.reference_batch_ids | self._get_latest_batch_per_version(skip_versions=existing_versions)
         if not bundle.is_base:
             merge_base_commits = self.commit_link_ids.mapped('merge_base_commit_id')
             if self.base_reference_batch_id:
@@ -455,6 +459,8 @@ class Batch(models.Model):
         self.ensure_one()
         bundle = self.bundle_id
         bundle_repos = bundle.branch_ids.filtered('alive').mapped('remote_id.repo_id')
+        started_trigger = self.slot_ids.filtered(lambda s: s.build_id).trigger_id
+        finished_trigger = self.slot_ids.filtered(lambda s: s.build_id.global_state in ('running', 'done')).trigger_id
         success_trigger = self.slot_ids.filtered(lambda s: s.build_id.global_state in ('running', 'done') and s.build_id.global_result == "ok").trigger_id
         trigger_customs = {}
         for trigger_custom in self.bundle_id.all_trigger_custom_ids:
@@ -462,12 +468,13 @@ class Batch(models.Model):
 
         should_start_triggers_ids = set()
         is_dev = not bundle.is_staging and not bundle.is_base
-        for trigger in self.slot_ids.trigger_id:
+        for slot in self.slot_ids:
+            trigger = slot.trigger_id
             enable_on_bundle = (trigger.on_staging and bundle.is_staging) or (trigger.on_base and bundle.is_base) or (trigger.on_dev and is_dev)
             common_repo = (trigger.repo_ids & bundle_repos)
             if self.build_all and not common_repo:
                 common_repo = (trigger.dependency_ids & bundle_repos)
-            if (common_repo or bundle.build_all or bundle.sticky) and enable_on_bundle:
+            if (common_repo or bundle.build_all or bundle.sticky or (slot.params_id.create_batch_id.bundle_id == bundle and slot.params_id.build_ids)) and enable_on_bundle:
                 should_start_triggers_ids.add(trigger.id)
 
         disabled_triggers = self.bundle_id.all_trigger_custom_ids.filtered(lambda tc: tc.start_mode == 'disabled').trigger_id
@@ -476,7 +483,12 @@ class Batch(models.Model):
                 continue
             trigger = slot.trigger_id
             trigger_custom = trigger_customs.get(trigger, self.env['runbot.bundle.trigger.custom'])
-            missing_triggers = trigger.starts_after_ids - success_trigger
+            if trigger.starts_after_pending:
+                missing_triggers = trigger.starts_after_ids - started_trigger
+            elif trigger.starts_after_failure:
+                missing_triggers = trigger.starts_after_ids - finished_trigger
+            else:
+                missing_triggers = trigger.starts_after_ids - success_trigger
             if missing_triggers:
                 if not trigger_custom or (missing_triggers - disabled_triggers):
                     continue
@@ -517,9 +529,9 @@ class Batch(models.Model):
                     continue
 
                 # diff. Iter on --numstat, easier to parse than --shortstat summary
-                diff = commit.repo_id._git(['diff', '--numstat', merge_base_sha, commit.name]).strip()
-                if diff:
-                    for line in diff.split('\n'):
+                diff_stat = commit.repo_id._git(['diff', '--numstat', merge_base_sha, commit.name]).strip()
+                if diff_stat:
+                    for line in diff_stat.split('\n'):
                         link_commit.file_changed += 1
                         add, remove, _ = line.split(None, 2)
                         try:
@@ -527,6 +539,8 @@ class Batch(models.Model):
                             link_commit.diff_remove += int(remove)
                         except ValueError:  # binary files
                             pass
+                if link_commit.file_changed <= (self.bundle_id.file_limit or 450) and link_commit.base_ahead <= (self.bundle_id.commit_limit or 50):
+                    link_commit.diff = commit.repo_id._git(['diff', f'{merge_base_sha}..{commit.name}', '--', '*'], errors='ignore')
             except subprocess.CalledProcessError:
                 self._warning('Commit info failed between %s and %s', commit.name, base_head.name)
 
@@ -578,6 +592,7 @@ class BatchLog(models.Model):
 
 
 fa_link_types = {'created': 'hashtag', 'matched': 'link', 'rebuild': 'refresh'}
+fa_results = {'ok': 'check', 'warn': 'exclamation-triangle', 'skipped': 'ban', 'ko': 'times'}
 
 class BatchSlot(models.Model):
     _name = 'runbot.batch.slot'
@@ -605,6 +620,11 @@ class BatchSlot(models.Model):
 
     def _fa_link_type(self):
         return fa_link_types.get(self.link_type, 'exclamation-triangle')
+
+    def _fa_result(self):
+        #if self.build_id.global_result == "ok" and self.build_id.global_state != "done":
+        #    return 'spinner fa-spin'
+        return fa_results.get(self.build_id.global_result, '')
 
     def _create_missing_build(self):
         """Create a build when the slot does not have one"""

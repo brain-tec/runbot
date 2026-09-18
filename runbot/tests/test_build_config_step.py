@@ -315,6 +315,8 @@ class TestBuildConfigStepCreate(TestBuildConfigStepCommon):
             child_build.local_result = 'ko'
             self.assertEqual(child_build.global_result, 'ko')
 
+        # simulate sheduler ran
+        self.parent_build._update_globals()
 
         self.assertEqual(self.parent_build.global_result, 'ko')
 
@@ -1642,7 +1644,6 @@ Initiating shutdown
         ])
         self.assertEqual(str(self.build.job_end), '1970-01-01 02:00:00')
         self.assertEqual(self.build.local_result, 'warn')
-
 
     @patch('odoo.addons.runbot.models.build_config.ConfigStep._make_odoo_results')
     def test_make_python_result(self, mock_make_odoo_results):

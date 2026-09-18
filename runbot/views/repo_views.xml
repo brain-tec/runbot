@@ -19,6 +19,7 @@
                   <field name="config_id"/>
                   <field name="light_config_id"/>
                   <field name="network_enabled"/>
+                  <field name="backup_databases"/>
                   <field name="config_data" widget="runbotjsonb"/>
                   <field name="report_view_id"/>
                   <field name="has_stats"/>
@@ -48,6 +49,8 @@
                       domain="[('category_id', '=', category_id), ('manual', '=', False), ('project_id', '=', project_id), ('id', '!=', id), ('id', 'not in', starts_before_ids)]"
                       widget="many2many_tags">
                   </field>
+                  <field name="starts_after_pending" invisible="manual or not starts_after_ids"/>
+                  <field name="starts_after_failure" invisible="manual or not starts_after_ids and not starts_after_pending"/>
                 </group>
                 <group string="Starts before" invisible="manual" colspan="2">
                   <field 

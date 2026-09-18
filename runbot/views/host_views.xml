@@ -13,9 +13,11 @@
                         <field name="active"/>
                         <field name="use_remote_docker_registry"/>
                         <field name="is_leader"/>
+                        <field name="is_assigner"/>
                         <field name="send_status" invisible="not is_leader"/>
                         <field name="is_builder"/>
                         <field name="is_registry"/>
+                        <field name="is_backup"/>
                         <field name="docker_registry_url"/>
                         <field name="last_start_loop" readonly='1' options="{'numeric': true}"/>
                         <field name="last_end_loop" readonly='1' options="{'numeric': true}"/>
@@ -61,8 +63,10 @@
                 <field name="nb_worker"/>
                 <field name="nb_run_slot"/>
                 <field name="is_leader"/>
+                <field name="is_assigner"/>
                 <field name="is_builder"/>
                 <field name="is_registry"/>
+                <field name="is_backup"/>
 
             </list>
         </field>

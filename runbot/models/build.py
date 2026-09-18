@@ -27,7 +27,6 @@ from ..common import (
     dest_reg,
     dt2time,
     findall,
-    grep,
     list_local_dbs,
     local_pgadmin_cursor,
     markdown_escape,
@@ -101,6 +100,8 @@ class BuildParameters(models.Model):
 
     build_ids = fields.One2many('runbot.build', 'params_id')
     builds_reference_ids = fields.Many2many('runbot.build', relation='runbot_build_params_references', copy=True)
+    reference_build_id = fields.Many2one('runbot.build', 'Reference Build', index=True)
+    restore_db_suffix = fields.Char('Restore DB Suffix', help='Suffix of the database to restore from reference build')
     modules = fields.Char('Modules')
 
     upgrade_to_build_id = fields.Many2one('runbot.build', index=True)  # use to define sources to use with upgrade script
@@ -146,6 +147,8 @@ class BuildParameters(models.Model):
                 'dockerfile_id': param.dockerfile_id.id,
                 'skip_requirements': param.skip_requirements,
             }
+            if param.reference_build_id:
+                cleaned_vals['reference_build_id'] = param.reference_build_id.id
             if param.upgrade_to_build_id:
                 cleaned_vals['upgrade_to_build_dockerfile_id'] = param.upgrade_to_build_id.params_id.dockerfile_id.id
                 cleaned_vals['upgrade_to_build_commits'] = get_commit_links_ident(param.upgrade_to_build_id.params_id.commit_link_ids)
@@ -161,6 +164,8 @@ class BuildParameters(models.Model):
                 cleaned_vals['dynamic_config_position'] = param.dynamic_config_position
             if param.dynamic_config.dict:
                 cleaned_vals['dynamic_config'] = param.dynamic_config.dict
+            if param.restore_db_suffix:
+                cleaned_vals['restore_db_suffix'] = param.restore_db_suffix
 
             param.fingerprint = hashlib.sha256(str(cleaned_vals).encode('utf8')).hexdigest()
 
@@ -292,9 +297,9 @@ class BuildResult(models.Model):
     priority_level = fields.Integer('Priority', related='create_batch_id.priority_level', store=True, index=True)
 
     # state machine
-    global_state = fields.Selection(make_selection(state_order), string='Status', compute='_compute_global_state', store=True, recursive=True)
+    global_state = fields.Selection(make_selection(state_order), string='Status', default='pending')
     local_state = fields.Selection(make_selection(state_order), string='Build Status', default='pending', required=True, index=True)
-    global_result = fields.Selection(make_selection(result_order), string='Result', compute='_compute_global_result', store=True, recursive=True)
+    global_result = fields.Selection(make_selection(result_order), string='Result', default='ok')
     local_result = fields.Selection(make_selection(result_order), string='Build Result', default='ok')
 
     requested_action = fields.Selection([('wake_up', 'To wake up'), ('deathrow', 'To kill')], string='Action requested', index=True)
@@ -326,8 +331,10 @@ class BuildResult(models.Model):
     docker_time = fields.Integer('Docker time', default=0, help='Accumulated time spent in Docker containers')
     job_time = fields.Integer(compute='_compute_job_time', string='Job time')
     build_time = fields.Integer(compute='_compute_build_time', string='Build time')
+    final_build_time = fields.Integer(string='Final Build time')
     wait_time = fields.Integer(compute='_compute_wait_time', string='Wait time')
     load_time = fields.Integer(compute='_compute_load_time', string='Load time')
+    real_load_time = fields.Integer(compute='_compute_real_load_time', string='Real Load time')
     last_update = fields.Datetime(compute='_compute_last_update', string='Last update')
 
     gc_date = fields.Datetime('Local cleanup date', compute='_compute_gc_date')
@@ -347,10 +354,16 @@ class BuildResult(models.Model):
                                   string='Build type')
 
     parent_id = fields.Many2one('runbot.build', 'Parent Build', index=True)
+    parent_link_ids = fields.One2many('runbot.build.link', 'child_id', string='Used in links')
+    linked_parent_build_ids = fields.Many2many('runbot.build', compute='_compute_linked_parent_build_ids', string='All parent builds')
+
+    child_link_ids = fields.One2many('runbot.build.link', 'parent_id', string='Child links')
+    linked_children_build_ids = fields.Many2many('runbot.build', compute='_compute_linked_children_build_ids', string='All child builds')
+
     parent_path = fields.Char('Parent path', index=True)
     top_parent = fields.Many2one('runbot.build', compute='_compute_top_parent')
+    top_parents_ids = fields.Many2many('runbot.build', compute='_compute_top_parent_ids')
     ancestors = fields.Many2many('runbot.build', compute='_compute_ancestors')
-    # should we add a has children stored boolean?
     children_ids = fields.One2many('runbot.build', 'parent_id')
     all_children_ids = fields.One2many('runbot.build', compute='_compute_all_children_ids')
 
@@ -362,6 +375,7 @@ class BuildResult(models.Model):
     build_error_link_ids = fields.One2many('runbot.build.error.link', 'build_id')
     build_error_ids = fields.Many2many('runbot.build.error', compute='_compute_build_error_ids', string='Errors')
     gc_running_date = fields.Date('GC Running Date', help='Running build cannot be killed before this date', index='btree_not_null')
+    create_date = fields.Datetime('Creation date', index=True)
     log_counter = fields.Integer('Log Lines counter', default=100)
 
     slot_ids = fields.One2many('runbot.batch.slot', 'build_id')
@@ -374,6 +388,8 @@ class BuildResult(models.Model):
 
     access_token = fields.Char('Token', default=lambda self: uuid.uuid4().hex)
 
+    _global_state_idx = models.Index("(global_state) WHERE global_state != 'done'")
+
     @api.depends('description', 'params_id.config_id')
     def _compute_display_name(self):
         for build in self:
@@ -385,19 +401,45 @@ class BuildResult(models.Model):
         for record in self:
             record.host_id = get_host(record.host)
 
-    @api.depends('children_ids.global_state', 'local_state')
-    def _compute_global_state(self):
+    @api.depends('parent_link_ids')
+    def _compute_linked_parent_build_ids(self):
+        for build in self:
+            build.linked_parent_build_ids = build.parent_link_ids.parent_id
+
+    @api.depends('child_link_ids')
+    def _compute_linked_children_build_ids(self):
+        for build in self:
+            build.linked_children_build_ids = build.child_link_ids.child_id
+
+    def _update_globals(self):
         for record in self:
             waiting_score = record._get_state_score('waiting')
-            children_ids = [child for child in record.children_ids if not child.orphan_result]
-            if record._get_state_score(record.local_state) > waiting_score and children_ids:  # if finish, check children
-                children_state = record._get_youngest_state([child.global_state for child in children_ids])
+            children_ids = [child.id for child in record.children_ids if not child.orphan_result]
+            children_ids += [link.child_id.id for link in record.child_link_ids if not link.orphan_result and not link.child_id.orphan_result]
+            children = self.browse(children_ids)
+            if record._get_state_score(record.local_state) > waiting_score and children:  # if finish, check children
+                children_state = record._get_youngest_state([child.global_state for child in children])
                 if record._get_state_score(children_state) > waiting_score:
                     record.global_state = record.local_state
                 else:
                     record.global_state = 'waiting'
             else:
                 record.global_state = record.local_state
+
+            if record.local_result and record._get_result_score(record.local_result) >= record._get_result_score('ko'):
+                record.global_result = record.local_result
+            else:
+                children_ids = [child.id for child in record.children_ids if not child.orphan_result]
+                children_ids += [link.child_id.id for link in record.child_link_ids if not link.orphan_result and not link.child_id.orphan_result]
+                children = self.browse(children_ids)
+                if children:
+                    children_result = record._get_worst_result([child.global_result for child in children], max_res='ko')
+                    if record.local_result:
+                        record.global_result = record._get_worst_result([record.local_result, children_result])
+                    else:
+                        record.global_result = children_result
+                else:
+                    record.global_result = record.local_result
 
     @api.depends('message_ids')
     def _compute_to_kill(self):
@@ -411,7 +453,7 @@ class BuildResult(models.Model):
         max_days_child = int(icp.get_param('runbot.db_gc_days_child', default=15))
         for build in self:
             ref_date = fields.Datetime.from_string(build.job_end or build.create_date or datetime.datetime.now())
-            max_days = max_days_main if not build.parent_id else max_days_child
+            max_days = max_days_main if not (build.parent_id or build.parent_link_ids) else max_days_child
             max_days += int(build.gc_delay if build.gc_delay else 0)
             build.gc_date = ref_date + datetime.timedelta(days=(max_days))
 
@@ -428,7 +470,37 @@ class BuildResult(models.Model):
         for build in self:
             build.ancestors = self.browse([int(b) for b in build.parent_path.split('/') if b])
 
+    def _compute_top_parent_ids(self):
+        for build in self:
+            build.top_parents_ids = build.browse([route[0].id for route in build._get_routes()])
+
+    def _get_routes(self, limit=200):
+        self.ensure_one()
+        routes = []
+
+        def walk(build, tail, rebuilt, seen):
+            if len(routes) >= limit or build.id in seen:
+                return
+            edges = [(build.orphan_result, build.parent_id)] if build.parent_id else []
+            edges += [(link.orphan_result, link.parent_id) for link in build.parent_link_ids]
+            if not edges:
+                routes.append((rebuilt, self.browse([build.id] + tail)))
+                return
+            for orphan, parent in edges:
+                walk(parent, [build.id] + tail, rebuilt + int(orphan), seen | {build.id})
+
+        walk(self, [], 0, set())
+        routes.sort(key=lambda route: (route[0], [-id_ for id_ in route[1].ids]))
+        return [builds for _rebuilt, builds in routes]
+
+    def _get_route_from_batch(self, batch):
+        for route in self._get_routes():
+            if batch in route.with_context(active_test=False).slot_ids.batch_id:
+                return route
+        return self.browse()
+
     def _compute_all_children_ids(self):
+        # does not take links into account (yet)
         for build in self:
             build.all_children_ids = self.search([('parent_path', '=like', build.parent_path + '%')])
 
@@ -438,22 +510,6 @@ class BuildResult(models.Model):
 
     def _get_state_score(self, result):
         return state_order.index(result)
-
-    @api.depends('children_ids.global_result', 'local_result', 'children_ids.orphan_result')
-    def _compute_global_result(self):
-        for record in self:
-            if record.local_result and record._get_result_score(record.local_result) >= record._get_result_score('ko'):
-                record.global_result = record.local_result
-            else:
-                children_ids = [child for child in record.children_ids if not child.orphan_result]
-                if children_ids:
-                    children_result = record._get_worst_result([child.global_result for child in children_ids], max_res='ko')
-                    if record.local_result:
-                        record.global_result = record._get_worst_result([record.local_result, children_result])
-                    else:
-                        record.global_result = children_result
-                else:
-                    record.global_result = record.local_result
 
     @api.depends('build_error_link_ids')
     def _compute_build_error_ids(self):
@@ -500,6 +556,16 @@ class BuildResult(models.Model):
         })
         return [values]
 
+    def create(self, vals):
+        records = super().create(vals)
+        parents = records.parent_id
+        # it doesn't make sense to create a build in another state than pending, and ok result,
+        # so we can assume that we don't need to update the created records globals,
+        # but we need to update the parents global state and result as the new build can impact them
+        if parents:
+            parents._update_globals()
+        return records
+
     def write(self, values):
         # some validation to ensure db consistency
         if 'local_state' in values:
@@ -513,26 +579,39 @@ class BuildResult(models.Model):
                     values.pop('local_result')
                 else:
                     raise ValidationError('Local result cannot be set to a less critical level')
-        init_global_results = self.mapped('global_result')
-        init_global_states = self.mapped('global_state')
-        init_local_states = self.mapped('local_state')
+        if "global_result" in values:
+            init_global_results = self.mapped('global_result')
+        if "global_state" in values:
+            init_global_states = self.mapped('global_state')
+        if "local_state" in values:
+            init_local_states = self.mapped('local_state')
 
         res = super(BuildResult, self).write(values)
-        for init_global_result, build in zip(init_global_results, self):
-            if init_global_result != build.global_result:
-                build._github_status()
+        if 'local_state' in values or 'local_result' in values:
+            self._update_globals()
 
-        for init_local_state, build in zip(init_local_states, self):
-            if init_local_state not in ('done', 'running') and build.local_state in ('done', 'running'):
-                build.build_end = now()
+        if 'orphan_result' in values:
+            self.parent_id._update_globals()
 
-        for init_global_state, build in zip(init_global_states, self):
-            if init_global_state not in ('done', 'running') and build.global_state in ('done', 'running'):
-                build._github_status()
+        if "global_result" in values:
+            for init_global_result, build in zip(init_global_results, self):
+                if init_global_result != build.global_result:
+                    build._prepare_github_status()
+
+        if "local_state" in values:
+            for init_local_state, build in zip(init_local_states, self):
+                if init_local_state not in ('done', 'running') and build.local_state in ('done', 'running'):
+                    build.build_end = now()
+                    build.final_build_time = build.build_time
+
+        if "global_state" in values:
+            for init_global_state, build in zip(init_global_states, self):
+                if init_global_state not in ('done', 'running') and build.global_state in ('done', 'running'):
+                    build._prepare_github_status()
 
         return res
 
-    def _add_child(self, param_values, orphan=False, description=False, additionnal_commit_links=False):
+    def _add_child(self, param_values, orphan=False, description=False, additionnal_commit_links=False, reference_parent=..., link=False):
         build_values = {key: value for key, value in param_values.items() if key not in self.params_id._fields}
         param_values = {key: value for key, value in param_values.items() if key in self.params_id._fields}
 
@@ -545,17 +624,87 @@ class BuildResult(models.Model):
             commit_link_ids |= additionnal_commit_links
             param_values['commit_link_ids'] = commit_link_ids
 
-        return self.create({
-            'params_id': self.params_id.copy(param_values).id,
-            'parent_id': self.id,
-            'build_type': self.build_type,
+        config = param_values.get('config_id') or self.params_id.config_id
+        if isinstance(config, int):
+            config = self.env['runbot.build.config'].browse(config)
+
+        if reference_parent == ...:
+            reference_parent = config._default_uses_parent(param_values)
+        if reference_parent:
+            param_values['reference_build_id'] = self.id
+
+        config_data = param_values.get('config_data', self.params_id.config_data)
+        if "faketime" in config_data:
+            current_offset = config_data.get('faketime_offset', 0)
+            new_offest = current_offset + self.build_time
+            new_config_data = {
+                **config_data,
+                'faketime_offset': new_offest,
+                'faketime': config_data['faketime'],
+            }
+            param_values['config_data'] = new_config_data
+
+        params = self.params_id.copy(param_values)
+
+        build_values = {
+            'params_id': params.id,
+            'build_type': self.build_type if self.build_type != 'priority' else 'normal',
             'priority_level': self.priority_level,
             'description': description,
             'orphan_result': orphan,
             'keep_host': self.keep_host,
             'host': self.host if self.keep_host else False,
             **build_values,
-        })
+        }
+
+        if link:
+            build = self._get_link_candidate(params, orphan)
+            link_type = 'matched'
+            if not build:
+                build = self.create(build_values)
+                link_type = 'created'
+
+            link = self.env['runbot.build.link'].create({
+                'parent_id': self.id,
+                'child_id': build.id,
+                'link_type': link_type,
+            })
+            return build.with_context(link_id=link.id)
+        else:
+            return self.create({
+                'parent_id': self.id,
+                **build_values,
+            })
+
+    def _get_link_candidate(self, params, orphan=False):
+        self.ensure_one()
+        candidates = params.build_ids.filtered(
+            lambda b: b != self  # a build linking itself would wait for itself forever
+            and not b.parent_id  # never mix the two mechanisms
+            and b.orphan_result == orphan
+            and not (b.parent_link_ids and all(link.orphan_result for link in b.parent_link_ids))  # unsure
+            and b.local_result not in ('skipped', 'killed')
+        )
+        if not orphan:
+            candidates = candidates.filtered(lambda b: not b.orphan_result)
+        if self.keep_host:
+            candidates = candidates.filtered(lambda b: b.host == self.host)
+
+        done_ok = candidates.filtered(lambda b: b.global_state == 'done' and b.global_result == 'ok')
+        if done_ok:
+            return done_ok.sorted('id')[-1]
+
+        unfinished_ok = candidates.filtered(lambda b: b.global_result == 'ok')
+        if unfinished_ok:
+            return unfinished_ok.sorted('id')[-1]
+
+        if self.create_batch_id.bundle_id.is_staging:
+            # a merge decision only reuses a result that is already green
+            return None
+
+        if candidates:
+            return candidates.sorted('id')[-1]
+        return None
 
     @api.depends('params_id.version_id.name')
     def _compute_dest(self):
@@ -612,12 +761,16 @@ class BuildResult(models.Model):
             if not build.build_end:
                 build.last_update = datetime.datetime.now()
             else:
-                build.last_update = max([child.last_update for child in build.children_ids] + [build.build_end])
+                build.last_update = max([child.last_update for child in (build.children_ids | build.linked_children_build_ids)] + [build.build_end])
 
     #@api.depends('build_time', 'children_ids.load_time')
     def _compute_load_time(self):
         for build in self:
-            build.load_time = sum([build.build_time] + [child.load_time for child in build.children_ids])
+            build.load_time = sum([build.build_time] + [child.load_time for child in (build.children_ids | build.child_link_ids.filtered(lambda link: link.link_type != 'rebuild').child_id)])
+
+    def _compute_real_load_time(self):
+        for build in self:
+            build.real_load_time = sum([build.build_time] + [child.real_load_time for child in (build.children_ids | build.child_link_ids.filtered(lambda link: link.link_type != 'matched').child_id)])
 
     @api.depends('job_start')
     def _compute_build_age(self):
@@ -639,16 +792,31 @@ class BuildResult(models.Model):
         if self.keep_host:
             values['host'] = self.host
             values['keep_host'] = True
+        if self.description:
+            values['description'] = self.description
         if self.parent_id:
-            values.update({
-                'parent_id': self.parent_id.id,
-                'description': self.description,
-            })
-            self.orphan_result = True
+            values['parent_id'] = self.parent_id.id
 
         new_build = self.create(values)
+
+        if self.parent_link_ids:
+            active_parent_links = self.parent_link_ids.filtered(lambda link: not link.orphan_result)
+            # Note: if a rebuild is made on a child that was already rebuild, the new build won't be attached to any link or slot.
+            if active_parent_links:  # TODO check, should we forbid rebuild in some cases if we have multiple parents? Or just link to an active parent?
+                for link in active_parent_links:
+                    link.orphan_result = True
+                    self.env['runbot.build.link'].create({
+                        'parent_id': link.parent_id.id,
+                        'child_id': new_build.id,
+                        'link_type': 'rebuild',
+                    })
+            else:
+                msg = 'This build is not linked to any non orphan parent, cannot rebuild it'
+                raise ValidationError(msg)
+
         if self.parent_id:
-            new_build._github_status()
+            self.orphan_result = True
+
         user = self.env.user
         new_build._log('rebuild', 'Rebuild initiated by %s%s' % (user.name, (' :%s' % message) if message else ''))
 
@@ -725,6 +893,7 @@ class BuildResult(models.Model):
             for _id in self.exists().ids:
                 additionnal_conditions.append("datname like '%s-%%'" % _id)
 
+        # TODO cleanup remove
         log_db = self.env['ir.config_parameter'].get_param('runbot.logdb_name')
         existing_db = [db for db in list_local_dbs(additionnal_conditions=additionnal_conditions) if db != log_db]
 
@@ -776,7 +945,7 @@ class BuildResult(models.Model):
                             elif log_file_path.name.endswith('.zip'):
                                 if not self.children_ids:
                                     log_file_path.unlink()
-                            elif not log_file_path.name.endswith('.txt'):
+                            elif not (log_file_path.name.endswith('.txt') or log_file_path.name.endswith('logs.json')):
                                 log_file_path.unlink()
                     gcstamp.write_text(f'gc date: {datetime.datetime.now()}')
 
@@ -906,7 +1075,7 @@ class BuildResult(models.Model):
                         build._log('_schedule', 'Docker with state %s not started after 60 seconds, skipping' % _docker_state, level='ERROR')
                     else:
                         build._log('_schedule', 'Docker was likely killed, skipping%s' % details, level='ERROR')
-            if self.env['runbot.host']._fetch_local_logs(build_ids=build.ids):
+            if self.env['runbot.host']._fetch_local_logs(builds=build)[0]:
                 return True  # avoid to make results with remaining logs
             # No job running, make result and select next job
             if build.docker_start:
@@ -1056,6 +1225,8 @@ class BuildResult(models.Model):
             rc_content = cmd.get_config(starting_config=starting_config)
             if step.check_exit_status:
                 cmd.finals = [['echo', r'$?', '>', f'/data/build/logs/{step.sanitized_name(self)}_exit_status.txt']] + cmd.finals
+            for filepath, content in cmd.files.items():
+                self._write_file(filepath, content)
         else:
             rc_content = starting_config
         self._write_file('.odoorc', rc_content)
@@ -1086,8 +1257,7 @@ class BuildResult(models.Model):
         return self.env['runbot.runbot']._path('build', self.dest, *paths)
 
     def _http_log_url(self):
-        use_ssl = self.env['ir.config_parameter'].get_param('runbot.use_ssl', default=True)
-        return '%s://%s/runbot/static/build/%s/logs/' % ('https' if use_ssl else 'http', self.host, self.dest)
+        return f'{self.host_id._build_url(self)}logs/'
 
     def _server(self, *path):
         """Return the absolute path to the direcory containing the server file, adding optional *path"""
@@ -1247,8 +1417,6 @@ class BuildResult(models.Model):
         build.local_state = 'done'
         build.active_step = False
         build.job_end = now()
-        if not build.build_end:
-            build.build_end = now()
         if result:
             build.local_result = result
 
@@ -1349,6 +1517,11 @@ class BuildResult(models.Model):
         batch = params.create_batch_id
         if refs_batches is None:
             refs_batches = batch.reference_batch_ids or batch.base_reference_batch_id.reference_batch_ids
+            missing_batches = batch._get_latest_batch_per_version(skip_versions=refs_batches.bundle_id.version_id)
+            if missing_batches:
+                self._log('upgrade_builds_references', 'Missing reference batches for %s, getting latest ones: %s' % (', '.join(missing_batches.bundle_id.version_id.mapped('name')), ', '.join([str(b.id) for b in missing_batches])))
+                refs_batches |= missing_batches
+
         template_builds = self.env['runbot.build']
         for batch in refs_batches:
             template_build = None
@@ -1390,6 +1563,21 @@ class BuildResult(models.Model):
                     pres.append([f'python{py_version}', '-m', 'pip', 'install', '--progress-bar', 'off', '-r', f'{requirement_path}'])
         return pres
 
+    def _get_faketime_time_datetime(self, step_start_offset=0):
+        self.ensure_one()
+        if faketime_params := self.params_id.config_data.get('faketime'):
+            faketime_offset = self.params_id.config_data.get('faketime_offset', 0)
+            faketime_offset += step_start_offset
+            time_offset = datetime.timedelta(seconds=faketime_offset)
+            return parser.parse(faketime_params, ignoretz=True) + time_offset
+        return None
+
+    def _get_faketime_offset(self):
+        if fake_clock_at_start := self._get_faketime_time_datetime():
+            build_start = self.build_start or self.create_date
+            return fake_clock_at_start - build_start
+        return None
+
     def _cmd(self, python_params=None, py_version=None, local_only=True, sub_command=None, enable_log_db=True):
         """Return a list describing the command to start the build
         """
@@ -1400,19 +1588,16 @@ class BuildResult(models.Model):
 
         pres = self._make_pip_command(py_version)
 
-        faketime = []
-        if faketime_params := self.params_id.config_data.get('faketime'):
-            if self.parent_id:
-                parent_time_offset = (self.parent_id.build_end or self.create_date) - self.parent_id.build_start
-                faketime_params = (parser.parse(faketime_params) + parent_time_offset).strftime('%Y-%m-%d %H:%M %Z')
-            faketime = ['faketime', faketime_params]
+        command_wrapper = []
+        if faketime_datetime := self._get_faketime_time_datetime(self.build_time):
+            command_wrapper = ['faketime', faketime_datetime.strftime('%Y-%m-%d %H:%M:%S UTC')]
 
         addons_paths = self._get_addons_path()
         (server_commit, server_file) = self._get_server_info()
         server_dir = self._docker_source_folder(server_commit)
 
         # commandline
-        cmd = faketime + ['python%s' % py_version] + python_params + [os.sep.join([server_dir, server_file])]
+        cmd = command_wrapper + ['python%s' % py_version] + python_params + [os.sep.join([server_dir, server_file])]
         if sub_command:
             cmd += [sub_command]
 
@@ -1420,44 +1605,59 @@ class BuildResult(models.Model):
             cmd += ['--addons-path', ",".join(addons_paths)]
 
         # options
-        config_path = build._server("tools/config.py")
-        if grep(config_path, "no-xmlrpcs"):  # move that to configs ?
-            cmd.append("--no-xmlrpcs")
-        if grep(config_path, "no-netrpc"):
-            cmd.append("--no-netrpc")
-
+        available_options = build._parse_config()
         pres += self.params_id.config_data.get('pres', [])
         posts = self.params_id.config_data.get('posts', [])
         finals = self.params_id.config_data.get('finals', [])
         config_tuples = self.params_id.config_data.get('config_tuples', [])
 
-        command = Command(pres, cmd, posts, finals=finals, config_tuples=config_tuples, cmd_checker=build) 
+        command = Command(pres, cmd, posts, finals=finals, config_tuples=config_tuples, cmd_checker=build)
 
         # use the username of the runbot host to connect to the databases
         command.add_config_tuple('db_user', '%s' % pwd.getpwuid(USERUID).pw_name)
-
-        if local_only:
-            if grep(config_path, "--http-interface"):
+        if "--http-interface" in available_options:
+            if local_only:
                 command.add_config_tuple("http_interface", "127.0.0.1")
-            elif grep(config_path, "--xmlrpc-interface"):
-                command.add_config_tuple("xmlrpc_interface", "127.0.0.1")
-        else:
-            if grep(config_path, "--http-interface"):
+            else:
                 command.add_config_tuple("http_interface", "0.0.0.0")
 
         if enable_log_db:
+            if '--log-config' in available_options:
+                command.add_config_tuple("log_config", '/data/build/logconfig.json')
+                command.files['odoo_log.seek'] = "0"
+                command.files['logconfig.json'] = """{
+  "version": 1,
+  "keep_odoo_default": true,
+  "formatters": {
+    "runbot": {
+      "()": "odoo.logging.JSONFormatter",
+      "record_keys": ["dbname", "name", "levelname", "pathname", "funcName", "lineno", "test", "created", "message", "exc_info"]
+    }
+  },
+  "handlers": {
+    "runbot": {
+      "class": "logging.handlers.WatchedFileHandler",
+      "formatter": "runbot",
+      "filename": "logs/%s_logs.json",
+      "level": "RUNBOT"
+    }
+  },
+  "root": {
+    "handlers": ["runbot"]
+  }
+}""" % self.active_step.sanitized_name(self)
+            # TODO cleanup remove
             log_db = self.env['ir.config_parameter'].get_param('runbot.logdb_name')
-            if grep(config_path, "log-db"):
+            if "--log-db" in available_options:
                 command.add_config_tuple("log_db", log_db)
-                if grep(config_path, 'log-db-level'):
+                if "--log-db-level" in available_options:
                     command.add_config_tuple("log_db_level", '25')
 
-        if grep(config_path, "data-dir"):
+        if "--data-dir" in available_options:
             datadir = build._path('datadir')
             if not os.path.exists(datadir):
                 os.mkdir(datadir)
             command.add_config_tuple("data_dir", '/data/build/datadir')
-
         return command
 
     def _cmd_check(self, cmd):
@@ -1590,6 +1790,36 @@ class BuildResult(models.Model):
                 title += f'\n{test_line}: {test_data[test_line]}'
         return title
 
+    def _prepare_github_status(self):
+        """Queue a github status recomputation on transaction precommit."""
+        if not self:
+            return
+        for build in self:
+            if build.parent_id:
+                if build.orphan_result:
+                    _logger.info('Skipping result for orphan build %s', build.id)
+                else:
+                    build.parent_id._prepare_github_status()
+                continue
+
+            env = build.env
+            cr = env.cr
+            cache_key = '_runbot_pending_github_status_build_ids'
+            pending_ids = cr.cache.get(cache_key)
+            if pending_ids is None:
+                pending_ids = set()
+                cr.cache[cache_key] = pending_ids
+                def _flush_github_status():
+                    ids = list(cr.cache.get(cache_key, set()))
+                    cr.cache[cache_key] = None
+                    if ids:
+                        for build in env['runbot.build'].browse(ids).exists():
+                            build._github_status()
+
+                cr.precommit.add(_flush_github_status)
+
+            pending_ids.add(build.id)
+
     def _github_status(self):
         """Notify github of failed/successful builds"""
         for build in self:
@@ -1614,7 +1844,7 @@ class BuildResult(models.Model):
                     desc = "This build used a light config. Enable default build configuration to restore default ci"
                 if build.global_result in ('ko', 'warn'):
                     state = 'error'
-                elif build.global_state in ('pending', 'testing'):
+                elif build.global_state in ('pending', 'testing', 'waiting'):
                     state = 'pending'
                 elif build.global_state in ('running', 'done'):
                     state = 'error'
@@ -1661,9 +1891,9 @@ class BuildResult(models.Model):
                     if trigger.ci_url:
                         target_url = trigger.ci_url
                     elif batch:
-                        target_url = f"{self.get_base_url()}/runbot/batch/{batch.id}/build/{build.id}"
+                        target_url = f"{build.get_base_url()}/runbot/batch/{batch.id}/build/{build.id}"
                     else:
-                        target_url = f"{self.get_base_url()}/runbot/build/{build.id}"
+                        target_url = f"{build.get_base_url()}/runbot/build/{build.id}"
 
                     commit._github_status(build, ci_context, state, target_url, desc, ci_strategy=trigger.ci_strategy)
 
@@ -1681,3 +1911,36 @@ class BuildResult(models.Model):
             "name": "Build errors",
             "view_mode": "list,form"
         }
+
+
+class BuildLink(models.Model):
+    _name = 'runbot.build.link'
+    _description = 'Runbot Build Link'
+    _order = 'id desc'
+
+    parent_id = fields.Many2one('runbot.build', string='Parent Build', required=True, ondelete='cascade')
+    child_id = fields.Many2one('runbot.build', string='Child Build', required=True, ondelete='cascade')
+    params_id = fields.Many2one('runbot.build.params', string='Params', related='child_id.params_id', store=True)
+    orphan_result = fields.Boolean(string='Orphan Result', help='If set, the result of the child build will not be taken into account for the parent build result')
+    link_type = fields.Selection([('created', 'Build created'), ('matched', 'Existing build matched'), ('rebuild', 'Rebuild')], required=True, default="created")
+
+    _no_self_link = models.Constraint('check (parent_id != child_id)', "a build cannot link itself")
+    _unique_link = models.Constraint('unique (parent_id, child_id)', "duplicate build link")
+
+    @api.constrains('parent_id', 'child_id')
+    def _check_single_link_level(self):
+        for link in self:
+            if link.parent_id.top_parent.parent_link_ids:
+                raise ValidationError('The parent of a link cannot itself be linked')
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        links = super().create(vals_list)
+        links.mapped('parent_id')._update_globals()
+        return links
+
+    def write(self, values):
+        res = super().write(values)
+        if 'orphan_result' in values or 'child_id' in values:
+            self.parent_id._update_globals()
+        return res

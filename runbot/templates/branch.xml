@@ -6,7 +6,7 @@
         <div class="container-fluid">
           <div class="row">
             <div class='col-md-12'>
-              <div class="navbar navbar-default">
+              <div class="navbar">
                 <h3>
                   <span class="text-muted"><t t-out="branch.remote_id.short_name"/>:</span><t t-out="branch.name"/> <i t-if="not branch.alive" title="deleted/closed" class="fa fa-ban text-danger"/>
                   <div class="btn-group" role="group">
@@ -16,7 +16,7 @@
                   </div>
                 </h3>
               </div>
-              <table class="table table-condensed table-responsive table-stripped">
+              <table class="table table-sm d-block overflow-x-auto">
                 <tr>
                   <td>Remote:</td>
                   <td t-out="branch.remote_id.name"></td>
@@ -58,11 +58,12 @@
                   </tr>
                 </t>
               </table>
-                <table t-if="branch.reflog_ids" class="table table-condensed table-stripped" style="table-layout: initial;">
+                <table t-if="branch.reflog_ids" class="table table-sm table-striped" style="table-layout: initial;">
                   <thead>
                       <tr>
                           <th>Ref Date</th>
-                          <th>SHA</th>
+                          <th>Commit Hash</th>
+                          <th>Tree Hash</th>
                           <th>Commit Date</th>
                           <th>Author</th>
                           <th>Subject</th>
@@ -71,6 +72,7 @@
                   <tr t-foreach='branch.reflog_ids' t-as='reflog'>
                     <td t-out="reflog.date"/>
                     <td><a t-attf-href="/runbot/commit/{{reflog.commit_id.id}}" t-out="reflog.commit_id.name"/></td>
+                    <td><a t-attf-href="/runbot/{{branch.repo_id.id}}/tree_hash/{{reflog.commit_id.tree_hash}}" t-out="reflog.commit_id.tree_hash"/></td>
                     <td t-out="reflog.commit_id.date"/>
                     <td t-out="reflog.commit_id.author"/>
                     <td t-out="reflog.commit_id.subject"/>

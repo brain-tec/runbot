@@ -1,9 +1,18 @@
 :root {
-	--gray:  #6c757d; /* used for batch limitation */
 	--btn-default-color: var(--bs-body-color);
 	--btn-default-bg: var(--bs-body-bg);
+	--btn-default-hover-bg: color-mix(in lab, var(--btn-default-bg), black 15%);
 	--btn-default-border: #ccc;
 	--active-project-color: #777;
+	--text-color-link: #507279;
+	--bs-font-sans-serif: "Helvetica Neue", Helvetica, Arial, sans-serif;
+	--bs-body-font-size: 0.875rem;
+	--bs-link-decoration: none;
+	/* FIXME: style all links, should be theme based */
+	--bs-link-color: #00A09D;
+	--bs-link-color-rgb: 0, 160, 157;
+	--bs-link-hover-color: #005452;
+	--bs-link-hover-color-rgb: 0, 84, 82;
 }
 
 /*
@@ -28,7 +37,9 @@
 
 :root[data-bs-theme=dark] {
 	--btn-default-border: #333;
+	--btn-default-hover-bg: color-mix(in lab, var(--btn-default-bg), white 15%);
 	--active-project-color: #CCC;
+	--text-color-link: #97d4e0;
 }
 
 [data-bs-theme=legacy] .text-bg-info {
@@ -110,47 +121,22 @@
     --bs-btn-disabled-border-color: #17a2b8;
 }
 
-
-.accordion {
-	--bs-accordion-btn-padding-y: 0.3rem; /* more condensed build error views */
-}
-
 .text-bg-default {
 	color: var(--bs-body-color) !important;
 	background-color: RGBA(var(--bs-body-bg-rgb), var(--bs-bg-opacity, 1)) !important;
-}
-
-.table-responsive {
-	display: block;  /* more condensed table, to replace */
 }
 
 .table {
 	--bs-table-bg: transparent; /* Forced to white in bootstrap latest version, hides the color of sub builds, batch commits, ...*/
 }
 
-/*.accordion-button:not(.collapsed) {
-	background-color: transparent; /* remove crappy color
-}*/
+.table-layout-fixed {
+    table-layout: fixed;
+}
 
 .active_project {
 	color: var(--active-project-color);
 	margin-left: 15px;
-}
-
-body {
-	margin: 0;
-    font-size: 0.875rem;
-    font-weight: 400;
-    line-height: 1.5;
-    text-align: left;
-}
-
-form {
-    margin: 0;
-}
-
-table {
-    font-size: 0.875rem;
 }
 
 dialog.modal {
@@ -169,31 +155,40 @@ dialog.modal {
     }
 }
 
-.fa {
-	line-height: inherit; /* reset fa icon line height to body height*/
-}
-
-a {
-	color: #00A09D;
-    text-decoration: none;
-}
-
-a:hover {
-    color: #005452;
-}
-
-a.slots_infos:hover {
-    text-decoration: none;
-}
-
-
-.breadcrumb-item.active a {
-	color: #6c757d;
+a, .btn-link {
+    text-decoration: none; /* until --bs-link-decoration is actually used, see twbs/bootstrap#41737 */
 }
 
 .breadcrumb {
-	background-color: inherit;
-	margin-bottom: 0;
+	--bs-body-font-size: 0.875rem;
+	--bs-breadcrumb-font-size: calc(var(--bs-body-font-size) * 1.15);
+	--bs-breadcrumb-item-active-color: var(--gray);
+	--bs-breadcrumb-margin-bottom: 0;
+
+	.btn {
+		--bs-btn-font-size: var(--bs-body-font-size);
+		--bs-btn-padding-y: 0;
+		--bs-btn-padding-x: 0;
+	}
+
+	.breadcrumb-item.active {
+		--bs-link-color: var(--bs-breadcrumb-item-active-color);
+	}
+
+	--breadcrumb-dropdown-toggle-padding-x: 0.25rem; /* Same as .btn-sm */
+	.btn.dropdown-toggle {
+		--bs-btn-color: var(--bs-breadcrumb-item-active-color);
+		--bs-btn-padding-x: var(--breadcrumb-dropdown-toggle-padding-x);
+	}
+
+	.dropdown-item { /* Align with parent's text */
+		--bs-dropdown-item-padding-x: calc(var(--breadcrumb-dropdown-toggle-padding-x) * 2 + 1em);
+	}
+}
+
+.dropdown-menu {
+	--bs-dropdown-link-active-color: var(--btn-default-color);
+	--bs-dropdown-link-active-bg: var(--btn-default-hover-bg);
 }
 
 .build_details {
@@ -204,23 +199,20 @@ a.slots_infos:hover {
 	border-top: 0.2em solid #666;
 }
 
-body, .table {
-	font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-}
-
-
 .btn-sm, .btn-group-sm > .btn {
-	padding: 0.25rem 0.5rem;
-	font-size: 0.89rem;
-	line-height: 1.5;
-	border-radius: 0.2rem;
+	--bs-btn-padding-y: 0.25rem;
+	--bs-btn-padding-x: 0.5rem;
+	--bs-btn-font-size: 0.89rem;
+	--bs-btn-line-height: 1.5;
+	--bs-btn-border-radius: 0.2rem;
 }
 
 .btn-ssm, .btn-group-ssm > .btn {
-	padding: 0.22rem 0.4rem;
-	font-size: 0.82rem;
-	line-height: 1;
-	border-radius: 0.2rem;
+	--bs-btn-padding-y: 0.22rem;
+	--bs-btn-padding-x: 0.4rem;
+	--bs-btn-font-size: 0.82rem;
+	--bs-btn-line-height: 1;
+	--bs-btn-border-radius: 0.2rem;
 }
 
 .killed, .bg-killed, .bg-killed-light {
@@ -231,31 +223,8 @@ body, .table {
 	content: none;
 }
 
-.one_line {
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
-
-.batch_tile {
-	padding: 6px;
-}
-
-.branch_time {
-	float: right;
-	margin-left: 10px;
-}
-
 .text-info {
 	color: #096b72 !important;
-}
-
-.build_subject_buttons {
-	display: flex;
-}
-
-.build_buttons {
-	margin-left: auto;
 }
 
 .bg-killed {
@@ -266,10 +235,6 @@ body, .table {
 	background-color: #aaa;
 }
 
-.table-condensed td {
-	padding: 0.25rem;
-}
-
 .line-through {
 	text-decoration: line-through;
 }
@@ -277,6 +242,11 @@ body, .table {
 .slot_button_group {
 	display: flex;
 	padding: 0 1px;
+}
+
+.slot_link_matched > .slot_name {
+	--bs-btn-color: var(--text-color-link);
+	font-style: italic;
 }
 
 .slot_button_group .btn {
@@ -292,8 +262,16 @@ body, .table {
 	text-align: left;
 }
 
-.batch_header {
-	padding: 6px;
+.batch_tile {
+	--batch-tile-padding-x: .25rem;
+	--batch-tile-padding-y: .25rem;
+	padding: var(--batch-tile-padding-y) var(--batch-tile-padding-x);
+}
+
+.batch_header,
+.batch_slots,
+.batch_commits {
+	padding: var(--batch-tile-padding-y) var(--batch-tile-padding-x);
 }
 
 .batch_header:hover {
@@ -310,30 +288,13 @@ body, .table {
 }
 
 .batch_slots {
-	display: flex;
-	flex-wrap: wrap;
-	padding: 6px;
-}
-
-.batch_commits {
-	padding: 2px;
-}
-
-
-.batch_row .slot_container {
-	flex: 1 0 200px;
-	padding: 0 4px;
-}
-
-.batch_row .slot_filler {
-	width: 100px;
-	height: 0px;
-	flex: 1 0 200px;
-	padding: 0 4px;
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+	gap: calc(var(--batch-tile-padding-y) / 2) calc(var(--batch-tile-padding-x) / 2);
 }
 
 .bundle_row {
-	border-bottom: 1px solid var(--gray);
+	border-bottom: 1px solid var(--bs-gray);
 }
 
 .bundle_row .batch_commits {
@@ -343,31 +304,6 @@ body, .table {
 .bundle_row .slot_container {
 	flex: 1 0 50%;
 }
-
-.bundle_row .slot_filler {
-	flex: 1 0 50%;
-}
-
-.bundle_row .more .batch_commits {
-	display: block;
-}
-
-/*.bundle_row .nomore .batch_commits {
-	display: none;
-	padding: 8px;
-}
-
-.bundle_row .nomore.batch_tile:hover .batch_commits {
-	display: block;
-	position: absolute;
-	bottom: 1px;
-	transform: translateY(100%);
-	z-index: 100;
-	border: 1px solid rgba(0, 0, 0, 0.125);
-	border-radius: 0.2rem;
-	box-sizing: border-box;
-	margin-left: -1px;
-}*/
 
 .chart-legend {
 	max-height: calc(100vh - 160px);
@@ -423,14 +359,13 @@ body, .table {
 	display: none;
 }
 
-.limited-height-toggle:hover {
+[data-toggle="limited-height"]:hover {
 	background-color: #DDD;
 }
 
 .o_runbot_team_searchbar .nav {
 	margin-left: 0px !important;
 }
-
 
 code {
 	white-space: pre-wrap;
@@ -446,7 +381,7 @@ code {
 
 .pre {
 	display: block;
-    font-family: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+	font-family: var(--bs-font-monospace);
     white-space: pre;
 	overflow: auto;
 	font-size: 0.875em;
@@ -462,7 +397,7 @@ code {
 	text-decoration: underline;
 }
 
-.table-condensed .log-server td, .table-condensed .log-details td {
+.table-sm .log-server td, .table-sm .log-details td {
 	padding-top: 0;
 	padding-bottom: 0;
 	border: none;
@@ -470,4 +405,40 @@ code {
 
 .log-details td {
 	padding-left: 20px;
+}
+
+[class*="text-bg-color_"] {
+	--runbot-tag-color: var(--bs-primary);
+	--runbot-tag-associated-color: color-mix(in lab, var(--runbot-tag-color), white 90%);
+	color: var(--runbot-tag-color);
+	background-color: var(--runbot-tag-associated-color);
+
+	:root[data-bs-theme=dark] & {
+		color: var(--runbot-tag-associated-color);
+		background-color: var(--runbot-tag-color);
+	}
+}
+
+.text-bg-color_0 {
+	--runbot-tag-color: #ba0f0f;
+}
+
+.text-bg-color_1 {
+	--runbot-tag-color: #9c4824;
+}
+
+.text-bg-color_2 {
+	--runbot-tag-color: #920c4c;
+}
+
+.text-bg-color_3 {
+	--runbot-tag-color: #172b98;
+}
+
+.text-bg-color_4 {
+	--runbot-tag-color: #2f7b39;
+}
+
+.text-bg-color_5 {
+	--runbot-tag-color: #5221b8;
 }

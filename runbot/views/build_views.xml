@@ -7,11 +7,13 @@
                 <sheet>
                     <group>
                         <group colspan="2">
+                            <field name="fingerprint"/>
                             <field name="config_id"/>
                             <field name="config_data"/>
                             <field name="extra_params"/>
                             <field name="dockerfile_id"/>
                             <field name="dump_db"/>
+                            <field name="reference_build_id"/>
                             <field name="config_data" widget="runbotjsonb" readonly="0"/>
                             <field name="dynamic_config" widget="runbotjsonb" readonly="0"/>
                         </group>
@@ -27,6 +29,7 @@
                             <field name="commit_link_ids">
                                 <list>
                                     <field name="commit_id"/>
+                                    <field name="tree_hash"/>
                                     <field name="match_type"/>
                                 </list>
                             </field>
@@ -123,6 +126,15 @@
                 <field name="create_date" interval="week" type="row"/>
                 <field name="global_state" type="col"/>
             </pivot>
+        </field>
+    </record>
+     <record id="build_view_graph" model="ir.ui.view">
+        <field name="name">runbot.build.graph</field>
+        <field name="model">runbot.build</field>
+        <field name="arch" type="xml">
+            <graph string="Builds" type="bar" sample="1">
+                <field name="create_date" interval="month" type="row"/>
+            </graph>
         </field>
     </record>
     <record id="view_build_search" model="ir.ui.view">

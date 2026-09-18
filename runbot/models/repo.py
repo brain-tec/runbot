@@ -22,6 +22,7 @@ from odoo.tools.safe_eval import safe_eval
 
 _logger = logging.getLogger(__name__)
 
+
 class ModuleFilter(models.Model):
     _name = 'runbot.module.filter'
     _description = 'Module filter'
@@ -38,6 +39,7 @@ class TriggerDependency(models.Model):
 
     dependency_id = fields.Many2one('runbot.trigger', string="Dependency", required=True)
     dependant_id = fields.Many2one('runbot.trigger', string="Dependant", required=True)
+
 
 class Trigger(models.Model):
     """
@@ -72,11 +74,14 @@ class Trigger(models.Model):
         column2='dependency_id',
         column1='dependant_id',
     )
+    starts_after_failure = fields.Boolean('Starts after failures', help="If checked, the trigger will also start after a failure", default=False)
+    starts_after_pending = fields.Boolean('Starts after pending', help="If checked, the trigger will start before the build finishes", default=False)
     module_filters = fields.One2many('runbot.module.filter', 'trigger_id', string="Module filters", help='Will be combined with repo module filters when used with this trigger')
     config_id = fields.Many2one('runbot.build.config', string="Config", required=True)
     light_config_id = fields.Many2one('runbot.build.config', string="Light config", help="Alternative config to use when light mode is enabled")
     config_data = JsonDictField('Config Data')
     network_enabled = fields.Boolean('Network Enabled')
+    backup_databases = fields.Boolean('Backup Databases', help="If checked, builds from this trigger will be backed up by the backup host for sticky bundles")
     batch_dependent = fields.Boolean('Batch Dependent', help="Force adding batch in build parameters to make it unique and give access to bundle")
     version_dependent = fields.Boolean('Version Dependent', default=True, help="Add the version in build parameters. Uncheck if the version is not needed to determine the build result")
 
@@ -613,7 +618,7 @@ class Repo(models.Model):
                 return refs
             except Exception:
                 _logger.exception('Fail to get refs for repo %s', self.name)
-                self.env['runbot.runbot'].warning('Fail to get refs for repo %s', self.name)
+                self.env['runbot.runbot']._warning('Fail to get refs for repo %s', self.name)
         return []
 
     def _find_or_create_branches(self, refs):
