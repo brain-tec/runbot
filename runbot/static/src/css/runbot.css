@@ -136,7 +136,6 @@
 
 .active_project {
 	color: var(--active-project-color);
-	margin-left: 15px;
 }
 
 dialog.modal {
@@ -361,10 +360,6 @@ a, .btn-link {
 
 [data-toggle="limited-height"]:hover {
 	background-color: #DDD;
-}
-
-.o_runbot_team_searchbar .nav {
-	margin-left: 0px !important;
 }
 
 code {
