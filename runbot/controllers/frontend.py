@@ -1,67 +1,19 @@
 import datetime
-import functools
 import logging
 from collections import OrderedDict, defaultdict
 from subprocess import CalledProcessError
-from urllib.parse import urlsplit
 
-import werkzeug
-import werkzeug.urls
 import werkzeug.utils
 from dateutil.relativedelta import relativedelta
 from werkzeug.exceptions import Forbidden, NotFound
 
 from odoo import fields
-from odoo.http import Controller, Response, request
-from odoo.http import route as o_route
+from odoo.http import Controller, Response, request, route
 from odoo.fields import Domain
-
-from odoo.addons.website.controllers.main import QueryURL
+from odoo.tools import str2bool
 
 _logger = logging.getLogger(__name__)
 
-
-def route(routes, **kw):
-    def decorator(f):
-        @o_route(routes, **kw)
-        @functools.wraps(f)
-        def response_wrap(*args, **kwargs):
-            projects = request.env['runbot.project'].search([('hidden', '=', False)])
-            more = request.httprequest.cookies.get('more', False) == '1'
-            filter_mode = request.httprequest.cookies.get('filter_mode', 'default')
-            refresh = kwargs.get('refresh', False)
-            nb_build_errors = request.env['runbot.build.error'].sudo().search_count([])
-            nb_assigned_errors = request.env['runbot.build.error'].sudo().search_count([('responsible', '=', request.env.user.id)])
-            nb_team_errors = request.env['runbot.build.error'].sudo().search_count([('responsible', '=', False), ('team_id', 'in', request.env.user.runbot_team_ids.ids)])
-            kwargs['more'] = more
-            kwargs['projects'] = projects
-
-            response = f(*args, **kwargs)
-            if isinstance(response, Response):
-                search = kwargs.get('search', '')
-                has_pr = kwargs.get('has_pr')
-                project = response.qcontext.get('project') or (projects and projects[0])
-
-                response.qcontext['theme'] = kwargs.get('theme', request.httprequest.cookies.get('theme', 'legacy'))
-                response.qcontext['projects'] = projects
-                response.qcontext['more'] = more
-                response.qcontext['search'] = search
-                response.qcontext['current_path'] = request.httprequest.full_path
-                response.qcontext['refresh'] = refresh
-                response.qcontext['filter_mode'] = filter_mode
-                response.qcontext['default_category'] = request.env['ir.model.data']._xmlid_to_res_id('runbot.default_category')
-                slug = request.env['ir.http']._slug
-                response.qcontext['qu'] = QueryURL('/runbot/%s' % (slug(project) if project else ''), search=search, refresh=refresh, has_pr=has_pr)
-                if 'title' not in response.qcontext:
-                    response.qcontext['title'] = 'Runbot %s' % project.name or ''
-                response.qcontext['nb_build_errors'] = nb_build_errors
-                response.qcontext['nb_assigned_errors'] = nb_assigned_errors
-                response.qcontext['nb_team_errors'] = nb_team_errors
-                if 'page_info_state' not in response.qcontext:
-                    response.qcontext['page_info_state'] = 'ok'
-            return response
-        return response_wrap
-    return decorator
 
 class Runbot(Controller):
 
@@ -70,33 +22,39 @@ class Runbot(Controller):
         warn = int(ICP('runbot.pending.warning', 5))
         crit = int(ICP('runbot.pending.critical', 12))
         pending_count = request.env['runbot.build'].search_count([('local_state', '=', 'pending'), ('build_type', '!=', 'scheduled'), ('host', '=', False)])
-        scheduled_count = request.env['runbot.build'].search_count([('local_state', '=', 'pending'), ('build_type', '=', 'scheduled')])
         pending_assigned_count = request.env['runbot.build'].search_count([('local_state', '=', 'pending'), ('build_type', '!=', 'scheduled'), ('host', '!=', False)])
         level = ['info', 'warning', 'danger'][int(pending_count > warn) + int(pending_count > crit)]
-        return pending_count, level, scheduled_count, pending_assigned_count
+        return pending_count, level, pending_assigned_count
+
+    def _slots_infos(self):
+        pending_count, level, pending_assigned_count = self._pending()
+        return {
+            'pending_count': pending_count,
+            'pending_assigned_count': pending_assigned_count,
+            'pending_level': level,
+            'hosts_data': request.env['runbot.host'].search([('assigned_only', '=', False)]),
+        }
 
     @route(['/',
             '/runbot',
             '/runbot/<model("runbot.project"):project>',
             '/runbot/<model("runbot.project"):project>/search/<search>'], website=True, auth='public', type='http')
-    def bundles(self, project=None, search='', refresh=False, limit=40, has_pr=None, **kwargs):
+    def bundles(self, project=None, search='', refresh=False, limit=40, has_pr=None, category=None, filter_mode=None, **kwargs):
         search = search if len(search) < 60 else search[:200]
+        default_filter_mode = request.httprequest.cookies.get('filter_mode', 'sticky')
+        if default_filter_mode in ('mine', 'team') and not request.env.user._is_internal():
+            default_filter_mode = 'sticky'
+        filter_mode = filter_mode or ('all' if search else default_filter_mode)
         env = request.env
-        categories = env['runbot.category'].search([])
         projects = self.env['runbot.project'].search([('hidden', '=', False)])
         if not project and projects:
             project = projects[0]
 
-        pending_count, level, scheduled_count, pending_assigned_count = self._pending()
         context = {
-            'categories': categories,
             'search': search,
+            'filter_mode': filter_mode,
             'message': request.env['ir.config_parameter'].sudo().get_param('runbot.runbot_message'),
-            'pending_count': pending_count,
-            'pending_assigned_count': pending_assigned_count,
-            'pending_level': level,
-            'scheduled_count': scheduled_count,
-            'hosts_data': request.env['runbot.host'].search([('assigned_only', '=', False)]),
+            **self._slots_infos(),
         }
         if project:
             domain = [('last_batch', '!=', False), ('project_id', '=', project.id)]
@@ -106,17 +64,17 @@ class Runbot(Controller):
             if has_pr is not None:
                 domain.append(('has_active_pr', '=', bool(has_pr)))
 
-            filter_mode = request.httprequest.cookies.get('filter_mode', 'default')
             if filter_mode == 'sticky':
                 domain.append(('sticky', '=', True))
             elif filter_mode == 'nosticky':
                 domain.append(('sticky', '=', False))
-            elif filter_mode == 'default' and not search:
-                domain.append(('sticky', '=', True))
+            elif filter_mode == 'mine':
+                domain.append(('author_ids', 'in', request.env.user.id))
+            elif filter_mode == 'team':
+                domain.append(('team_id', 'in', request.env.user.runbot_team_ids.ids))
 
             if search:
                 search_domains = []
-                pr_numbers = []
                 for search_elem in search.split("|"):
                     if search_elem.isnumeric():
                         search_domains.append([('branch_ids', 'any', [('name', '=', search_elem)])])
@@ -136,7 +94,7 @@ class Runbot(Controller):
             query.limit = min(int(limit), 200)
             bundles = env['runbot.bundle'].browse(query)
 
-            category_id = int(request.httprequest.cookies.get('category') or 0) or request.env['ir.model.data']._xmlid_to_res_id('runbot.default_category')
+            category_id = int(category) if category and category.isdigit() else env['ir.model.data']._xmlid_to_res_id('runbot.default_category')
 
             trigger_display = request.httprequest.cookies.get('trigger_display_%s' % project.id, None)
             if trigger_display is not None:
@@ -145,7 +103,6 @@ class Runbot(Controller):
 
             triggers = env['runbot.trigger'].search([('project_id', '=', project.id)])
             context.update({
-                'projects': projects,
                 'active_category_id': category_id,
                 'bundles': bundles,
                 'project': project,
@@ -155,8 +112,6 @@ class Runbot(Controller):
                 'search': search,
             })
 
-        context.update({'message': request.env['ir.config_parameter'].sudo().get_param('runbot.runbot_message')})
-        # request.is_frontend = False  # remove inherit branding
         return request.render('runbot.bundles', context)
 
     @route([
@@ -164,33 +119,44 @@ class Runbot(Controller):
         '/runbot/bundle/<model("runbot.bundle"):bundle>/page/<int:page>',
         '/runbot/bundle/<string:bundle>',
         ], website=True, auth='public', type='http', sitemap=False)
-    def bundle(self, bundle=None, page=1, limit=50, expand_custom=False, **kwargs):
+    def bundle(self, bundle=None, page=1, limit=50, expand_custom=False, category=None, **kwargs):
         if isinstance(bundle, str):
             bundle = request.env['runbot.bundle'].search([('name', '=', bundle)], limit=1, order='id')
             if not bundle:
                 raise NotFound
             slug = request.env['ir.http']._slug
             return werkzeug.utils.redirect(f'/runbot/bundle/{slug(bundle)}')
-        domain = [('bundle_id', '=', bundle.id), ('hidden', '=', False)]
+        category_id = int(category) if category and category.isdigit() else request.env['ir.model.data']._xmlid_to_res_id('runbot.default_category')
+        domain = [('bundle_id', '=', bundle.id), ('hidden', '=', False), ('category_id', '=', category_id)]
         batch_count = request.env['runbot.batch'].search_count(domain)
         pager = request.website.pager(
             url='/runbot/bundle/%s' % bundle.id,
+            url_args={'category': category} if category else None,
             total=batch_count,
             page=page,
             step=int(limit),
         )
         batchs = request.env['runbot.batch'].search(domain, limit=limit, offset=pager.get('offset', 0), order='id desc')
+        last_batch = request.env['runbot.batch'].search(domain, limit=1, order='id desc')
+
+        trigger_display = request.httprequest.cookies.get('trigger_display_%s' % bundle.project_id.id, None)
+        if trigger_display is not None:
+            trigger_display = [int(td) for td in trigger_display.split('-') if td]
 
         # compute if we should display the new batch button
         context = {
             'bundle': bundle,
+            **self._slots_infos(),
             'batchs': batchs,
             'pager': pager,
             'project': bundle.project_id,
             'title': 'Bundle %s' % bundle.name,
-            'page_info_state': bundle.last_batch._get_global_result(),
+            'active_category_id': category_id,
+            'page_info_state': last_batch._get_global_result(),
             'expand_custom': expand_custom,
             'needs_update': bundle.last_batch and bundle.last_batch.sudo().needs_update(),
+            'triggers': request.env['runbot.trigger'].search([('project_id', '=', bundle.project_id.id)]),
+            'trigger_display': trigger_display,
         }
 
         return request.render('runbot.bundle', context)
@@ -206,7 +172,7 @@ class Runbot(Controller):
         _logger.info('user %s forcing bundle %s', request.env.user.name, bundle.name)  # user must be able to read bundle
         batch = bundle.sudo()._force() or bundle.sudo().last_batch
         batch._log('Batch forced by %s', request.env.user.name)
-        batch._prepare(auto_rebase=bool(auto_rebase), use_base_commits=bool(use_base_commits))
+        batch._prepare(auto_rebase=bool(auto_rebase), use_base_commits=str2bool(use_base_commits, False))
         batch._process()
         return werkzeug.utils.redirect('/runbot/batch/%s' % batch.id)
 
@@ -218,6 +184,7 @@ class Runbot(Controller):
             'project': batch.bundle_id.project_id,
             'title': 'Batch %s (%s)' % (batch.id, batch.bundle_id.name),
             'page_info_state': batch._get_global_result(),
+            **self._slots_infos(),
         }
         return request.render('runbot.batch', context)
 
@@ -295,7 +262,7 @@ class Runbot(Controller):
                 return request.render('runbot.tree_hash', context)
         raise NotFound
 
-    @o_route([
+    @route([
         '/runbot/build/<int:build_id>/<operation>',
     ], type='http', auth="user", methods=['POST'], csrf=False)
     def build_operations(self, build_id, operation, **post):
@@ -338,7 +305,7 @@ class Runbot(Controller):
         context = {
             'build': build,
             'from_batch': from_batch,
-            'project': build.params_id.trigger_id.project_id,
+            'project': build.params_id.project_id,
             'title': 'Build %s' % build.id,
             'siblings': siblings,
             'page_info_state': build.global_result,
@@ -347,6 +314,7 @@ class Runbot(Controller):
             'prev_bu': next((b for b in reversed(siblings) if b.id < build.id), Build),
             'next_bu': next((b for b in siblings if b.id > build.id), Build),
             'next_ko': next((b for b in siblings if b.id > build.id and b.global_result != 'ok'), Build),
+            **self._slots_infos(),
         }
         return request.render("runbot.build", context)
 
@@ -412,7 +380,7 @@ class Runbot(Controller):
     def glances(self, project_id=None, **kwargs):
         project_ids = [project_id] if project_id else request.env['runbot.project'].search([]).ids  # search for access rights
         bundles = request.env['runbot.bundle'].search([('sticky', '=', True), ('project_id', 'in', project_ids)])
-        pending_count, level, _scheduled_count, pending_assigned_count = self._pending()
+        pending_count, level, pending_assigned_count = self._pending()
         qctx = {
             'pending_count': pending_count,
             'pending_assigned_count': pending_assigned_count,
@@ -426,7 +394,7 @@ class Runbot(Controller):
             '/runbot/monitoring/<int:category_id>',
             '/runbot/monitoring/<int:category_id>/<int:view_id>'], type='http', auth='user', website=True, sitemap=False)
     def monitoring(self, category_id=None, view_id=None, **kwargs):
-        pending_count, level, scheduled_count, pending_assigned_count = self._pending()
+        pending_count, level, pending_assigned_count = self._pending()
         hosts_data = request.env['runbot.host'].search([])
         if category_id:
             category = request.env['runbot.category'].browse(category_id)
@@ -440,7 +408,6 @@ class Runbot(Controller):
             'pending_count': pending_count,
             'pending_assigned_count': pending_assigned_count,
             'pending_level': level,
-            'scheduled_count': scheduled_count,
             'bundles': bundles,
             'hosts_data': hosts_data,
             'auto_tags': request.env['runbot.build.error']._disabling_tags(),
@@ -449,29 +416,6 @@ class Runbot(Controller):
             'title': 'monitoring',
         }
         return request.render(view_id if view_id else "runbot.monitoring", qctx)
-
-    @o_route([
-        '/runbot/submit',
-    ], type='http', auth="public", methods=['GET', 'POST'], csrf=False)
-    def submit(self, more=False, redirect='/', update_triggers=False, **kwargs):
-        assert redirect.startswith('/')
-        response = werkzeug.utils.redirect('/' + urlsplit(redirect)._replace(scheme='', netloc='').geturl().lstrip('/\\'))
-        response.set_cookie('more', '1' if more else '0', expires=datetime.datetime.now() + datetime.timedelta(days=365 * 10))
-        if update_triggers:
-            enabled_triggers = []
-            project_id = int(update_triggers)
-            for key in kwargs:
-                if key.startswith('trigger_'):
-                    enabled_triggers.append(key.replace('trigger_', ''))
-
-            key = 'trigger_display_%s' % project_id
-            default_trigger_ids = set(request.env['runbot.trigger'].search([('hide', '=', False), ('project_id', '=', project_id), ('manual', '=', False)]).ids)
-            selected_trigger_ids = set(map(int, enabled_triggers))
-            if default_trigger_ids == selected_trigger_ids:
-                response.delete_cookie(key)
-            else:
-                response.set_cookie(key, '-'.join(enabled_triggers), expires=datetime.datetime.now() + datetime.timedelta(days=365 * 10))
-        return response
 
     @route(['/runbot/errors/assign/<int:build_error_id>',
             ], type='http', auth='user', methods=['POST'], csrf=False, sitemap=False)
@@ -561,12 +505,11 @@ class Runbot(Controller):
             'team': team,
             'teams': teams,
             'assignment_ids': request.env['runbot.build.error'].search(domain, order=order),
-            'hide_empty': bool(hide_empty),
+            'hide_empty': str2bool(hide_empty, False),
             'searchbar_sortings': searchbar_sortings,
             'sortby': sortby,
             'searchbar_filters': OrderedDict(sorted(searchbar_filters.items())),
             'filterby': filterby,
-            'default_url': request.httprequest.path,
         }
         return request.render('runbot.team', qctx)
 
@@ -574,7 +517,7 @@ class Runbot(Controller):
     def dashboards(self, dashboard=None, hide_empty=False, **kwargs):
         qctx = {
             'dashboard': dashboard,
-            'hide_empty': bool(hide_empty),
+            'hide_empty': str2bool(hide_empty, False),
         }
         return request.render('runbot.dashboard_page', qctx)
 
@@ -693,13 +636,12 @@ class Runbot(Controller):
 
         build_by_bundle = list(build_by_bundle.items())
         build_by_bundle.sort(key=lambda x: -len(x[1]))
-        pending_count, level, scheduled_count, pending_assigned_count = self._pending()
+        pending_count, level, pending_assigned_count = self._pending()
         context = {
             'build_by_bundle': build_by_bundle,
             'pending_count': pending_count,
             'pending_assigned_count': pending_assigned_count,
             'pending_level': level,
-            'scheduled_count': scheduled_count,
             'hosts_data': request.env['runbot.host'].search([('assigned_only', '=', False)]),
         }
 
@@ -803,7 +745,7 @@ class Runbot(Controller):
     @route([
         '/runbot/dockerfile_result/<int:dockerfile_result_id>',
         '/runbot/dockerfile_result/<dockerfile_tag>/<dockerfile_hash>',
-    ], type='http', auth='public', sitemap=False)
+    ], type='http', auth='public', website=True, sitemap=False)
     def dockerfile_result(self, dockerfile_result_id=None, dockerfile_tag=None, dockerfile_hash=None, **kwargs):
         dockerfile_result_sudo = request.env['runbot.docker_build_result'].sudo()
         if dockerfile_result_id:
