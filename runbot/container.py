@@ -255,18 +255,45 @@ def _docker_run(cmd=False, log_path=False, build_dir=False, container_name=False
     assert cmd and log_path and build_dir and container_name
     image_tag = image_tag or 'odoo:DockerDefault'
     container_name = sanitize_container_name(container_name)
+    env_variables = (env_variables or []) + [f'CONTAINER_NAME={container_name}']
     cmd_str = str(cmd)
     if isinstance(cmd, Command):
         run_cmd = cmd.build()
     else:
         run_cmd = cmd
-    run_cmd = f'cd /data/build;touch start-{container_name};{run_cmd};cd /data/build;touch end-{container_name}'
+    run_cmd = f'cd /data/build;{run_cmd};'
+    entrypoint = f"""#!/bin/bash
+set -e
+
+mkdir -p "/data/build/logs"
+exec &>> /data/build/logs/docker.txt
+touch /data/build/start-{container_name}
+
+set +e
+if [ -f /entrypoint.sh ]; then
+    echo "Executing dockerfile entrypoint:"
+    bash /entrypoint.sh "$@"
+    TEST_EXIT_CODE=$?
+else
+    echo "Executing test command: $@"
+    "$@"
+    TEST_EXIT_CODE=$?
+fi
+set -e
+touch /data/build/end-{container_name}
+exit $TEST_EXIT_CODE
+"""
     run_cmd_repr = str(run_cmd)
-    if len(run_cmd_repr) > 250:
-        run_cmd_repr = run_cmd_repr[:250] + '...'
+    if len(run_cmd_repr) > 300:
+        run_cmd_repr = run_cmd_repr[:250] + '...' + run_cmd_repr[-50:]
     _logger.info('Docker run command: %s', run_cmd_repr)
     docker_clear_state(container_name, build_dir)  # ensure that no state are remaining
     build_dir = file_path(build_dir)
+
+    entrypoint_path = os.path.join(build_dir, 'entrypoint.sh')
+    with open(entrypoint_path, 'w+') as f:
+        f.write(entrypoint)
+    os.chmod(entrypoint_path, 0o755)
 
     file_path(os.path.dirname(log_path))
     open(os.path.join(build_dir, 'exist-%s' % container_name), 'w+').close()
@@ -297,6 +324,7 @@ def _docker_run(cmd=False, log_path=False, build_dir=False, container_name=False
     docker_client = docker.from_env()
     container = docker_client.containers.run(
         image_tag,
+        entrypoint='/data/build/entrypoint.sh',
         name=container_name,
         volumes=volumes,
         shm_size='128m',
@@ -304,7 +332,7 @@ def _docker_run(cmd=False, log_path=False, build_dir=False, container_name=False
         ports=ports,
         ulimits=ulimits,
         cpu_period=cpu_period,
-        cpu_quota=int(cpus * cpu_period ) if cpus else None,
+        cpu_quota=int(cpus * cpu_period) if cpus else None,
         environment=env_variables,
         init=True,
         command=['/bin/bash', '-c',
@@ -312,7 +340,7 @@ def _docker_run(cmd=False, log_path=False, build_dir=False, container_name=False
         auto_remove=True,
         detach=True,
         user=USERNAME,
-        network_mode=None if network_enabled else 'none'
+        network_mode=None if network_enabled else 'none',
     )
     if container.status not in ('running', 'created') :
         _logger.error('Container %s started but status is not running or created:  %s', container_name, container.status)
@@ -365,9 +393,6 @@ def docker_state(container_name, build_dir):
     if not exist:
         return 'VOID'
 
-    if os.path.exists(os.path.join(build_dir, f'end-{container_name}')):
-        return 'END'
-
     state = 'UNKNOWN'
     if started:
         docker_client = docker.from_env()
@@ -377,7 +402,6 @@ def docker_state(container_name, build_dir):
             state = 'RUNNING' if container.status in ('created', 'running', 'paused') else 'GHOST'
         except docker.errors.NotFound:
             state = 'GHOST'
-        # check if the end- file has been written in between time
         if state == 'GHOST' and os.path.exists(os.path.join(build_dir, f'end-{container_name}')):
             state = 'END'
     return state
