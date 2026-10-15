@@ -52,6 +52,10 @@ _re_warning = r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ WARNING .*'
 PYTHON_DEFAULT = "# type python code here\n\n\n\n\n\n"
 
 
+def echo(text):
+    return f'echo $(date -u "+%Y-%m-%d %H:%M:%S,%3N") "{text}"'
+
+
 def filter_all_modules(selector, build, dynamic_vars):
     if selector.split(',', 1)[0] != '*':
         selector = f'*,{selector}'
@@ -446,8 +450,8 @@ class ConfigStep(models.Model):
     dockerfile_id = fields.Many2one('runbot.dockerfile', string='Dockerfile')
     dockerfile_variant = fields.Char('Docker Variant')
     # install_odoo
-    create_db = fields.Boolean('Create Db', default=True, tracking=True)  # future
-    custom_db_name = fields.Char('Custom Db Name', tracking=True)  # future
+    create_db = fields.Boolean('Create Db', default=True, tracking=True)  # TODO remove
+    custom_db_name = fields.Char('Custom Db Name', tracking=True)
     install_modules = fields.Char('Modules to install', help="List of module patterns to install, use * to install all available modules, prefix the pattern with dash to remove the module.", default='', tracking=True)
     db_name = fields.Char('Db Name', compute='_compute_db_name', inverse='_inverse_db_name', tracking=True)
     cpu_limit = fields.Integer('Cpu limit', default=3600, tracking=True)
@@ -797,6 +801,7 @@ class ConfigStep(models.Model):
         db_suffix = re.sub(r'[^a-z0-9\-_]', '_', db_suffix.lower())
         db_name = '%s-%s' % (build.dest, db_suffix)
         cmd += ['-d', db_name]
+        self.env['runbot.database'].create({'name': db_name, 'build_id': build.id})
 
         # Demo data behavior changed in 18.1 -> demo data became opt-in instead of opt-out
         available_options = build._parse_config()
@@ -885,9 +890,13 @@ class ConfigStep(models.Model):
         filestore_path = '/data/build/datadir/filestore/%s' % db_name
         filestore_dest = '%s/filestore/' % dump_dir
         zip_path = '/data/build/logs/%s.zip' % db_name
+        cmd.finals.append([echo('### Generating dump')])
         cmd.finals.append(['pg_dump', db_name, '>', sql_dest])
+        cmd.finals.append([echo('### Copying filestore')])
         cmd.finals.append(['cp', '-r', filestore_path, filestore_dest])
+        cmd.finals.append([echo('### Generating zip')])
         cmd.finals.append(['cd', dump_dir, '&&', 'zip', '-rmq9', zip_path, '*'])
+        cmd.finals.append([echo('### Done')])
         infos = '{\n    "db_name": "%s",\n    "build_id": %s,\n    "shas": [%s]\n}' % (db_name, build.id, ', '.join(['"%s"' % build_commit.commit_id.dname for build_commit in build.params_id.commit_link_ids]))
         build._write_file('logs/%s/info.json' % db_name, infos)
 
@@ -1143,6 +1152,7 @@ class ConfigStep(models.Model):
 
     def _run_restore(self, build, config_data=None):
         # exports = build._checkout()
+        download_db_suffix = None
         params = build.params_id
         if config_data:
             config_data = {**config_data, **params.config_data}
@@ -1210,30 +1220,32 @@ class ConfigStep(models.Model):
                         break
             if not use_backup:
                 build._log('_run_restore', 'Restoring template [%s](%s) from build [%s](%s)', zip_name, dump_url, dump_build.id, dump_build.build_url, log_type='markdown')
-        target_suffix = config_data.get('target_suffix', self.restore_rename_db_suffix or download_db_suffix)
+        target_suffix = config_data.get('target_suffix', self.restore_rename_db_suffix or download_db_suffix or 'all')
         restore_db_name = '%s-%s' % (build.dest, target_suffix)
 
         icp = self.env['ir.config_parameter']
         db_template = icp.get_param('runbot.runbot_db_template', default='template0')
+        self.env['runbot.database'].create({'name': restore_db_name, 'build_id': build.id})
         cmd = ' && '.join([
             'mkdir /data/build/restore',
             'cd /data/build/restore',
+            echo('### getting archive'),
             'wget --retry-on-host-error %s' % dump_url,
             'unzip -q %s' % zip_name,
-            'echo "### restoring filestore"',
+            echo('### restoring filestore'),
             'mkdir -p /data/build/datadir/filestore/%s' % restore_db_name,
             'mv filestore/* /data/build/datadir/filestore/%s' % restore_db_name,
-            'echo "### restoring db"',
+            echo('### restoring db'),
             'createdb %s -T %s' % (restore_db_name, db_template),
             'psql -q %s < dump.sql' % (restore_db_name),
-            'echo "### performing an analyze"',
+            echo('### performing an analyze'),
             'psql -q -d %s -c "ANALYZE;"' % restore_db_name,
             'cd /data/build',
-            'echo "### cleaning"',
+            echo('### cleaning'),
             'rm -r restore',
-            'echo "### listing modules"',
+            echo('### listing modules'),
             """psql %s -c "select name from ir_module_module where state = 'installed'" -t -A > /data/build/logs/restore_modules_installed.txt""" % restore_db_name,
-            'echo "### restore" "successful"',  # two part string to avoid miss grep
+            echo('### restore" "successful'),  # two part string to avoid miss grep
             ])
 
         return dict(cmd=cmd, network_enabled=True)
