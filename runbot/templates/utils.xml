@@ -312,8 +312,8 @@
         <template id="runbot.slot_button">
             <t t-set="bu" t-value="slot.build_id"/>
             <t t-set="color" t-value="bu._get_color_class()"/>
-            <div t-attf-class="btn-group btn-group-ssm slot_button_group {{'slot_link_created' if slot.link_type == 'created' else 'slot_link_matched'}}">
-                <span t-attf-class="btn btn-{{color}} disabled">
+            <div t-attf-class="input-group input-group-ssm slot_button_group {{'slot_link_created' if slot.link_type == 'created' else 'slot_link_matched'}}">
+                <span t-attf-class="input-group-text text-bg-{{color}} border-{{color}}">
                     <i t-if="slot.build_id.global_state in ('testing', 'pending', 'waiting')" class="fa fa-spinner fa-spin fa-fw"/>
                     <i t-else="" t-attf-class="fa fa-{{slot._fa_result()}} fa-fw"/>
                 </span>

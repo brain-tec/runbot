@@ -7,6 +7,7 @@
 	--text-color-link: #507279;
 	--text-color-info: #096b72;
 	--batch-header-hover-bg: rgba(0, 0, 0, 0.3);
+	--border-emphasis-width: .375rem;
 	--bs-font-sans-serif: "Helvetica Neue", Helvetica, Arial, sans-serif;
 	--bs-body-font-size: 0.875rem;
 	--bs-link-decoration: none;
@@ -216,12 +217,19 @@ a, .btn-link {
 	--bs-btn-border-radius: 0.2rem;
 }
 
-.btn-ssm, .btn-group-ssm > .btn {
+.btn-ssm, .btn-group-ssm > .btn, .input-group-ssm > .btn {
 	--bs-btn-padding-y: 0.22rem;
 	--bs-btn-padding-x: 0.4rem;
 	--bs-btn-font-size: 0.82rem;
 	--bs-btn-line-height: 1;
 	--bs-btn-border-radius: 0.2rem;
+}
+
+.input-group-ssm > .input-group-text {
+	padding: 0.22rem 0.4rem;
+	font-size: 0.82rem;
+	line-height: 1;
+	border-radius: 0.2rem;
 }
 
 .killed, .bg-killed, .bg-killed-light {
@@ -249,7 +257,7 @@ a, .btn-link {
 }
 
 .slot_button_group {
-	display: flex;
+	flex-wrap: nowrap;
 	padding: 0 1px;
 }
 
@@ -258,8 +266,13 @@ a, .btn-link {
 	font-style: italic;
 }
 
-.slot_button_group .btn {
+.slot_button_group .btn,
+.slot_button_group .input-group-text {
 	flex: 0 0 25px;
+}
+
+.slot_button_group .input-group-text {
+	justify-content: center;
 }
 
 .slot_button_group .btn.slot_name {
@@ -275,6 +288,10 @@ a, .btn-link {
 	--batch-tile-padding-x: .25rem;
 	--batch-tile-padding-y: .25rem;
 	padding: var(--batch-tile-padding-y) var(--batch-tile-padding-x);
+
+	> .card {
+		border-inline-start-width: var(--border-emphasis-width);
+	}
 }
 
 .batch_header,

@@ -106,7 +106,7 @@
       <t t-if="batch.state=='done' and any(slot.build_id.global_result in ('ko', 'warn') for slot in batch.slot_ids)" t-set="klass">danger</t>
 
       <div t-attf-class="batch_tile">
-        <div t-attf-class="card bg-{{klass}}-subtle">
+        <div t-attf-class="card border-{{klass}}">
           <a t-attf-href="/runbot/batch/#{batch.id}" t-att-title="batch.create_date.strftime('%Y-%m-%d %H:%M:%S')">
             <div class="batch_header">
               <span t-attf-class="badge text-bg-{{'warning' if batch.has_warning else 'default'}}">
@@ -123,8 +123,8 @@
             <t t-if="batch_builds is not None">
               <t t-foreach="batch_builds" t-as="build">
                 <div class="slot_container">
-                  <div class="btn-group btn-group-ssm slot_button_group">
-                    <span t-attf-class="btn btn-{{build._get_color_class()}}" t-out="build.id"/>
+                  <div class="input-group input-group-ssm slot_button_group">
+                    <span t-attf-class="input-group-text text-bg-{{build._get_color_class()}} border-{{build._get_color_class()}}" t-out="build.id"/>
                     <a t-attf-href="/runbot/build/{{build.id}}" class="btn btn-default slot_name" target="new" t-att-title="build.trigger_id.name">
                         <span t-out="build.trigger_id.name"/>
                     </a>
