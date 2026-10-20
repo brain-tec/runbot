@@ -5,7 +5,6 @@
 	--btn-default-border: #ccc;
 	--active-project-color: #777;
 	--text-color-link: #507279;
-	--text-color-info: #096b72;
 	--batch-header-hover-bg: rgba(0, 0, 0, 0.3);
 	--border-emphasis-width: .375rem;
 	--bs-font-sans-serif: "Helvetica Neue", Helvetica, Arial, sans-serif;
@@ -53,7 +52,6 @@
 	--btn-default-hover-bg: color-mix(in lab, var(--btn-default-bg), white 15%);
 	--active-project-color: #CCC;
 	--text-color-link: #97d4e0;
-	--text-color-info: #6edff6;
 	--batch-header-hover-bg: rgba(255, 255, 255, 0.15);
 }
 
@@ -238,10 +236,6 @@ a, .btn-link {
 
 .dropdown-toggle:after {
 	content: none;
-}
-
-.text-info {
-	color: var(--text-color-info) !important;
 }
 
 .bg-killed {

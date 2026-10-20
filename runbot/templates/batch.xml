@@ -118,7 +118,7 @@
                                         <t t-if="batch.state != 'preparing'">
                                             <span t-out="'+%s' % commit_link.diff_add" class="text-success"/>
                                             <span t-out="'-%s' % commit_link.diff_remove" class="text-danger"/>
-                                            <span class="text-info">
+                                            <span class="text-info-emphasis">
                                                 (
                                                 <span t-out="commit_link.file_changed"/>
                                                 <i class="fa fa-file"/>
