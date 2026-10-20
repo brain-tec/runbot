@@ -168,7 +168,6 @@ a, .btn-link {
 }
 
 .breadcrumb {
-	--bs-body-font-size: 0.875rem;
 	--bs-breadcrumb-font-size: calc(var(--bs-body-font-size) * 1.15);
 	--bs-breadcrumb-margin-bottom: 0;
 
@@ -302,10 +301,6 @@ a, .btn-link {
 
 .bundle_row .batch_commits {
 	font-size: 80%;
-}
-
-.bundle_row .slot_container {
-	flex: 1 0 50%;
 }
 
 .chart-legend {
