@@ -194,7 +194,7 @@ dialog.modal {
 }
 
 [data-toggle="limited-height"]:hover {
-	background-color: var(--btn-default-hover-bg);
+	background-color: var(--bs-tertiary-bg);
 }
 
 .d-empty-none:empty {
