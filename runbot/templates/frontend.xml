@@ -100,15 +100,11 @@
     <template id="runbot.batch_tile">
       <t t-set="more" t-value="str2bool(request.httprequest.cookies.get('more', ''), False)"/>
       <t t-set="show_failed_triggers" t-value="str2bool(request.httprequest.cookies.get('show_failed_triggers', '1'), False)"/>
-      <t t-set="klass">info</t>
-      <t t-if="batch.state=='skipped'" t-set="klass">secondary</t>
-      <t t-if="batch.state=='done' and all(slot.build_id.global_result == 'ok' for slot in batch.slot_ids if slot.build_id)" t-set="klass">success</t>
-      <t t-if="batch.state=='done' and any(slot.build_id.global_result in ('ko', 'warn') for slot in batch.slot_ids)" t-set="klass">danger</t>
+      <t t-set="color" t-value="batch._get_color_class()"/>
 
       <div t-attf-class="batch_tile">
-        <div t-attf-class="card border-{{klass}}">
+        <div t-attf-class="card border-{{color}}">
           <a t-attf-href="/runbot/batch/#{batch.id}" class="card-header" t-att-title="batch.create_date.strftime('%Y-%m-%d %H:%M:%S')">
-            <t t-set="color" t-value="batch._get_color_class()"/>
             <i t-if="batch.state in ('preparing', 'ready')" t-attf-class="fa fa-hourglass-half fa-fw text-{{color}}"/>
             <i t-else="" t-attf-class="fa fa-{{batch._fa_result()}} fa-fw text-{{color}}"/>
             <t t-out="batch._get_formated_age()"/>
