@@ -363,29 +363,6 @@
                 <t t-call="runbot.build_menu_button"/>
             </div>
         </template>
-        <!-- Event / Logs page -->
-        <template id="runbot.build_class">
-            <t t-set="rowclass">info</t>
-            <t t-if="build.global_state in ['running','done']">
-                <t t-if="build.global_result == 'ok'">
-                    <t t-set="rowclass">success</t>
-                </t>
-                <t t-if="build.global_result == 'skipped'">
-                    <t t-set="rowclass">default</t>
-                </t>
-                <t t-if="build.global_result == 'killed'">
-                    <t t-set="rowclass">killed</t>
-                </t>
-            </t>
-            <t t-if="build.global_result == 'ko'">
-                <t t-set="rowclass">danger</t>
-            </t>
-            <t t-if="build.global_result == 'warn'">
-                <t t-set="rowclass">warning</t>
-            </t>
-            <t t-out="rowclass"/>
-        </template>
-
         <template id="runbot.build_menu">
             <template id="build-options-dropdown-menu">
                 <ul class="dropdown-menu dropdown-menu-end" role="menu">

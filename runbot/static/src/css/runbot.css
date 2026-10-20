@@ -230,20 +230,8 @@ a, .btn-link {
 	border-radius: 0.2rem;
 }
 
-.killed, .bg-killed, .bg-killed-light {
-	background-color: #aaa;
-}
-
 .dropdown-toggle:after {
 	content: none;
-}
-
-.bg-killed {
-	background-color: #aaa;
-}
-
-.text-bg-killed {
-	background-color: #aaa;
 }
 
 .line-through {

@@ -247,12 +247,8 @@
               <div class="table-responsive">
                 <table class="table table-sm">
                   <t t-foreach="builds" t-as="build">
-                    <t t-set="rowclass">
-                      <t t-call="runbot.build_class">
-                        <t t-set="build" t-value="build"/>
-                      </t>
-                    </t>
-                    <tr t-attf-class="bg-{{rowclass.strip()}}-subtle {{'line-through' if build.orphan_result else ''}}">
+                    <t t-set="rowclass" t-value="build._get_color_class()"/>
+                    <tr t-attf-class="bg-{{rowclass}}-subtle {{'line-through' if build.orphan_result else ''}}">
                       <td> Batch: <a t-attf-href="/runbot/batch/{{build.params_id.create_batch_id.id}}"><t t-out="build.params_id.create_batch_id.id"/></a></td>
                       <td><a t-attf-href="/runbot/build/{{build.id}}"><t t-out="build.parent_path"/></a></td>
                       <td t-out="build.local_state"/>

@@ -97,11 +97,7 @@
         </t>
         <div class="row g-0">
           <!-- Build details-->
-          <t t-set="rowclass">
-            <t t-call="runbot.build_class">
-              <t t-set="build" t-value="build"/>
-            </t>
-          </t>
+          <t t-set="rowclass" t-value="build._get_color_class()"/>
           <t t-if="build.params_id.reference_build_id and build.params_id.reference_build_id.local_state not in ('running', 'done')">
             <div class="alert alert-warning py-10 my-2 text-center">
               <i class="fa fa-exclamation-triangle me-1"/>
@@ -112,7 +108,7 @@
               finishes.
             </div>
           </t>
-          <div t-attf-class="bg-{{rowclass.strip()}}-subtle {{'col-md-6' if build.children_ids or build.linked_children_build_ids else 'col-md-12'}}">
+          <div t-attf-class="bg-{{rowclass}}-subtle {{'col-md-6' if build.children_ids or build.linked_children_build_ids else 'col-md-12'}}">
             <div class="build_details text-truncate">
               <!-- Batch/bundles links-->
               <t t-if="len(bundles) > 1">
@@ -284,12 +280,8 @@
             Children:
             <table class="table table-sm">
               <t t-foreach="(build.children_ids | build.linked_children_build_ids).sorted(lambda b: b.id)" t-as="child">
-                <t t-set="rowclass">
-                  <t t-call="runbot.build_class">
-                    <t t-set="build" t-value="child"/>
-                  </t>
-                </t>
-                <tr t-attf-class="bg-{{rowclass.strip()}}-subtle{{' line-through' if child.orphan_result else ''}}">
+                <t t-set="rowclass" t-value="child._get_color_class()"/>
+                <tr t-attf-class="bg-{{rowclass}}-subtle{{' line-through' if child.orphan_result else ''}}">
                   <td class="text-truncate" style="max-width: 0; width: 100%;">
                     <a t-attf-href="/runbot/{{'batch/%s/' % from_batch.id if from_batch else ''}}build/{{child.id}}">
                       <t t-if="child.parent_id">Build</t>
@@ -357,12 +349,8 @@
                     </t>
                   </td>
                   <t t-set="message_class" t-value="''"/>
-                  <t t-if="subbuild" t-set="message_class">
-                    <t t-call="runbot.build_class">
-                      <t t-set="build" t-value="subbuild"/>
-                    </t>
-                  </t>
-                  <td t-attf-class="bg-{{message_class.strip() or logclass}}-subtle" style="max-width: 0; width: 100%;">
+                  <t t-if="subbuild" t-set="message_class" t-value="subbuild._get_color_class()"/>
+                  <td t-attf-class="bg-{{message_class or logclass}}-subtle" style="max-width: 0; width: 100%;">
                     <t t-if="l.type == 'subbuild'">
                       <a t-attf-href="/runbot/build/{{l.path}}">
                         Build #
@@ -374,7 +362,7 @@
                     <span t-elif="l.type == 'server'" t-out="build._format_message(l)" class="pre" />
                     <span t-else="" t-out="l.message"/>
                   </td>
-                  <td t-attf-class="bg-{{message_class.strip() or logclass}}-subtle">
+                  <td t-attf-class="bg-{{message_class or logclass}}-subtle">
                     <t t-if="l.level in ('CRITICAL', 'ERROR', 'WARNING') and not l.with_context(active_test=False).error_content_id">
                       <small>
                         <a groups="runbot.group_runbot_admin" t-attf-href="/runbot/parse_log/{{l.id}}" class="sm" title="Parse this log line to follow this error.">
@@ -412,12 +400,8 @@
           <div class="col-md-12">
             <table class="table table-sm">
               <t t-foreach="builds" t-as="build">
-                <t t-set="rowclass">
-                  <t t-call="runbot.build_class">
-                    <t t-set="build" t-value="build"/>
-                  </t>
-                </t>
-                <tr t-attf-class="bg-{{rowclass.strip()}}-subtle{{' line-through' if build.orphan_result else ''}}">
+                <t t-set="rowclass" t-value="build._get_color_class()"/>
+                <tr t-attf-class="bg-{{rowclass}}-subtle{{' line-through' if build.orphan_result else ''}}">
                   <td>
                       <t t-out="build.create_date"/>
                   </td>
