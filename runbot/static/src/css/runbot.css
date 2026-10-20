@@ -106,27 +106,29 @@ dialog.modal {
 	padding: var(--batch-tile-padding-y) var(--batch-tile-padding-x);
 
 	> .card {
+		--bs-card-cap-padding-x: var(--batch-tile-padding-x);
+		--bs-card-cap-padding-y: var(--batch-tile-padding-y);
+		--bs-card-spacer-x: var(--batch-tile-padding-x);
+		--bs-card-spacer-y: var(--batch-tile-padding-y);
+
 		border-inline-start-width: var(--border-emphasis-width);
+
+		.card-header:first-child {
+			border-start-start-radius: 0;
+		}
 	}
-}
 
-.batch_header,
-.batch_slots,
-.batch_commits {
-	padding: var(--batch-tile-padding-y) var(--batch-tile-padding-x);
-}
+	.card-header:hover {
+		--bs-card-cap-bg: var(--batch-header-hover-bg);
+	}
 
-.batch_header:hover {
-	color: var(--bs-body-color);
-	background-color: var(--batch-header-hover-bg)
-}
+	.header_hover {
+		visibility: hidden;
+	}
 
-.header_hover {
-	visibility: hidden;
-}
-
-.batch_header:hover .header_hover {
-	visibility: visible;
+	.card-header:hover .header_hover {
+		visibility: visible;
+	}
 }
 
 .batch_slots {

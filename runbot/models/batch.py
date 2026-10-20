@@ -5,6 +5,7 @@ import subprocess
 
 from odoo import models, fields, api
 from ..common import dt2time, s2human_long, pseudo_markdown, markdown_escape
+from .build import get_color_class
 
 _logger = logging.getLogger(__name__)
 
@@ -70,6 +71,13 @@ class Batch(models.Model):
         return self.env['runbot.build']._get_worst_result([
             batch_result, *self.slot_ids.build_id.mapped('global_result'),
         ])
+
+    def _fa_result(self):
+        return fa_results.get(self._get_global_result(), '')
+
+    def _get_color_class(self):
+        state = 'testing' if self.state in ('preparing', 'ready') else 'done'
+        return get_color_class(state, self._get_global_result())
 
     def _url(self):
         self.ensure_one()
