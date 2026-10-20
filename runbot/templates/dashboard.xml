@@ -230,7 +230,7 @@
             </div>
           </div>
 
-          <div t-foreach="build_by_bundle" t-as="bundle_builds" class="row bundle_row">
+          <div t-foreach="build_by_bundle" t-as="bundle_builds" class="row bundle_row border-bottom">
             <t t-set="bundle" t-value="bundle_builds[0]"/>
             <t t-set="builds" t-value="bundle_builds[1]"/>
 
