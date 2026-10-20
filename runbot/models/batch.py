@@ -592,7 +592,7 @@ class BatchLog(models.Model):
 
 
 fa_link_types = {'created': 'hashtag', 'matched': 'link', 'rebuild': 'refresh'}
-fa_results = {'ok': 'check', 'warn': 'exclamation-triangle', 'skipped': 'ban', 'ko': 'times'}
+fa_results = {'ok': 'check', 'warn': 'exclamation-triangle', 'skipped': 'ban', 'ko': 'times', 'killed': 'ban'}
 
 class BatchSlot(models.Model):
     _name = 'runbot.batch.slot'
