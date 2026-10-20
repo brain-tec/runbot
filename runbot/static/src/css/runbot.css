@@ -170,7 +170,6 @@ a, .btn-link {
 .breadcrumb {
 	--bs-body-font-size: 0.875rem;
 	--bs-breadcrumb-font-size: calc(var(--bs-body-font-size) * 1.15);
-	--bs-breadcrumb-item-active-color: var(--gray);
 	--bs-breadcrumb-margin-bottom: 0;
 
 	.btn {
