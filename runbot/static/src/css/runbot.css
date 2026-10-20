@@ -1,142 +1,14 @@
 :root {
-	--btn-default-color: var(--bs-body-color);
-	--btn-default-bg: var(--bs-body-bg);
-	--btn-default-hover-bg: color-mix(in lab, var(--btn-default-bg), black 15%);
-	--btn-default-border: #ccc;
 	--active-project-color: #777;
 	--text-color-link: #507279;
 	--batch-header-hover-bg: rgba(0, 0, 0, 0.3);
 	--border-emphasis-width: .375rem;
-	--bs-font-sans-serif: "Helvetica Neue", Helvetica, Arial, sans-serif;
-	--bs-body-font-size: 0.875rem;
-	--bs-link-decoration: none;
-	/* FIXME: style all links, should be theme based */
-	--bs-link-color: #00A09D;
-	--bs-link-color-rgb: 0, 160, 157;
-	--bs-link-hover-color: #005452;
-	--bs-link-hover-color-rgb: 0, 84, 82;
-}
-
-/*
- * Light theme
- */
-
-:root[data-bs-theme=light] { /* to match initial runbot style*/
-	--bs-success-bg-subtle: #dff0d8;
-	--bs-danger-bg-subtle: #f2dede;
-	--bs-warning-bg-subtle: #fff9e6;
-	--bs-info-bg-subtle: #d9edf7;
-	--bs-info-rgb: 23, 162, 184;
-}
-
-:root[data-bs-theme=red404] {
-	--bs-success-bg-subtle: #cdffb9;
-	--bs-danger-bg-subtle: #e67ecf;
-	--bs-warning-bg-subtle: #fae9b1;
-	--bs-info-bg-subtle: #b6e2f8;
-	--bs-info-rgb: 23, 162, 184;
 }
 
 :root[data-bs-theme=dark] {
-	--bs-success-bg-subtle: #234730;
-	--bs-danger-bg-subtle: #6c2b34;
-	--bs-warning-bg-subtle: #474023;
-	--bs-info-bg-subtle: #1e464e;
-	--bs-info-rgb: 75, 179, 200;
-	--bs-secondary-rgb: 90, 98, 104;
-	--bs-link-color: #3fc9c6;
-	--bs-link-color-rgb: 63, 201, 198;
-	--bs-link-hover-color: #7fdedb;
-	--bs-link-hover-color-rgb: 127, 222, 219;
-	--btn-default-border: var(--bs-border-color);
-	--btn-default-hover-bg: color-mix(in lab, var(--btn-default-bg), white 15%);
 	--active-project-color: #CCC;
 	--text-color-link: #97d4e0;
 	--batch-header-hover-bg: rgba(255, 255, 255, 0.15);
-}
-
-[data-bs-theme=light] .text-bg-info,
-[data-bs-theme=red404] .text-bg-info {
-	color: #fff !important; /* black by default, changes from previous version, color forced to fit with --bs-info-rgb*/
-}
-
-[data-bs-theme=light] .btn-success {
-	--bs-btn-disabled-bg: #28a745;
-	--bs-btn-disabled-border-color: #28a745;
-  }
-
-[data-bs-theme=red404] .btn-danger {
-	--bs-btn-color: #fff;
-	--bs-btn-bg: #990a59;
-	--bs-btn-border-color: #990a59;
-	--bs-btn-hover-color: #fff;
-	--bs-btn-hover-bg: #740442;
-	--bs-btn-hover-border-color: #740442;
-	--bs-btn-focus-shadow-rgb: 60, 153, 110;
-	--bs-btn-active-color: #fff;
-	--bs-btn-active-bg: #740442;
-	--bs-btn-active-border-color: #740442;
-	--bs-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
-	--bs-btn-disabled-color: #fff;
-	--bs-btn-disabled-bg: #b90e6c;
-	--bs-btn-disabled-border-color: #b90e6c;
-}
-
-.btn-default {
-	--bs-btn-color: var(--btn-default-color);
-	--bs-btn-bg: var(--btn-default-bg);
-	--bs-btn-border-color: var(--btn-default-border);
-	--bs-btn-hover-color: var(--btn-default-color);
-	--bs-btn-hover-bg: color-mix(in lab, var(--btn-default-bg), black 15%);
-	--bs-btn-hover-border-color: color-mix(in lab, var(--btn-default-border), black 10%);
-	--bs-btn-focus-shadow-rgb: 60, 153, 110;
-	--bs-btn-active-color: var(--btn-default-color);
-	--bs-btn-active-bg: color-mix(in lab, var(--btn-default-bg), black 20%);
-	--bs-btn-active-border-color: color-mix(in lab, var(--btn-default-border), black 15%);
-	--bs-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
-	--bs-btn-disabled-color: var(--btn-default-color);
-	--bs-btn-disabled-bg: var(--btn-default-bg);
-	--bs-btn-disabled-border-color: var(--btn-default-border);
-}
-
-[data-bs-theme=dark] .btn-default {
-	--bs-btn-hover-bg: color-mix(in lab, var(--btn-default-bg), white 15%);
-	--bs-btn-hover-border-color: color-mix(in lab, var(--btn-default-border), white 10%);
-	--bs-btn-active-bg: color-mix(in lab, var(--btn-default-bg), white 20%);
-	--bs-btn-active-border-color: color-mix(in lab, var(--btn-default-border), white 15%);
-}
-
-[data-bs-theme=dark] .btn-outline-secondary {
-	--bs-btn-color: #8c959d;
-	--bs-btn-border-color: #8c959d;
-	--bs-btn-disabled-color: #8c959d;
-	--bs-btn-disabled-border-color: #8c959d;
-}
-
-.btn-info {
-    --bs-btn-color: #FFF;
-    --bs-btn-bg: #17a2b8;
-    --bs-btn-border-color: #17a2b8;
-    --bs-btn-hover-color: #FFF;
-    --bs-btn-hover-bg: #31d2f2;
-    --bs-btn-hover-border-color: #25cff2;
-    --bs-btn-focus-shadow-rgb: 11, 172, 204;
-    --bs-btn-active-color: #FFF;
-    --bs-btn-active-bg: #3dd5f3;
-    --bs-btn-active-border-color: #25cff2;
-    --bs-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
-    --bs-btn-disabled-color: #FFF;
-    --bs-btn-disabled-bg: #17a2b8;
-    --bs-btn-disabled-border-color: #17a2b8;
-}
-
-.text-bg-default {
-	color: var(--bs-body-color) !important;
-	background-color: RGBA(var(--bs-body-bg-rgb), var(--bs-bg-opacity, 1)) !important;
-}
-
-.table {
-	--bs-table-bg: transparent; /* Forced to white in bootstrap latest version, hides the color of sub builds, batch commits, ...*/
 }
 
 .table-layout-fixed {
@@ -161,10 +33,6 @@ dialog.modal {
     &[open] {
         display: block;
     }
-}
-
-a, .btn-link {
-    text-decoration: none; /* until --bs-link-decoration is actually used, see twbs/bootstrap#41737 */
 }
 
 .breadcrumb {
@@ -192,44 +60,12 @@ a, .btn-link {
 	}
 }
 
-.dropdown-menu {
-	--bs-dropdown-link-active-color: var(--btn-default-color);
-	--bs-dropdown-link-active-bg: var(--btn-default-hover-bg);
-}
-
 .build_details {
 	padding: 5px;
 }
 
 .separator {
 	border-top: 0.2em solid #666;
-}
-
-.btn-sm, .btn-group-sm > .btn {
-	--bs-btn-padding-y: 0.25rem;
-	--bs-btn-padding-x: 0.5rem;
-	--bs-btn-font-size: 0.89rem;
-	--bs-btn-line-height: 1.5;
-	--bs-btn-border-radius: 0.2rem;
-}
-
-.btn-ssm, .btn-group-ssm > .btn, .input-group-ssm > .btn {
-	--bs-btn-padding-y: 0.22rem;
-	--bs-btn-padding-x: 0.4rem;
-	--bs-btn-font-size: 0.82rem;
-	--bs-btn-line-height: 1;
-	--bs-btn-border-radius: 0.2rem;
-}
-
-.input-group-ssm > .input-group-text {
-	padding: 0.22rem 0.4rem;
-	font-size: 0.82rem;
-	line-height: 1;
-	border-radius: 0.2rem;
-}
-
-.dropdown-toggle:after {
-	content: none;
 }
 
 .line-through {
@@ -359,10 +195,6 @@ a, .btn-link {
 
 [data-toggle="limited-height"]:hover {
 	background-color: var(--btn-default-hover-bg);
-}
-
-code {
-	white-space: pre-wrap;
 }
 
 .d-empty-none:empty {
