@@ -1,14 +1,12 @@
 :root {
 	--active-project-color: #777;
 	--text-color-link: #507279;
-	--batch-header-hover-bg: rgba(0, 0, 0, 0.3);
 	--border-emphasis-width: .375rem;
 }
 
 :root[data-bs-theme=dark] {
 	--active-project-color: #CCC;
 	--text-color-link: #97d4e0;
-	--batch-header-hover-bg: rgba(255, 255, 255, 0.15);
 }
 
 .table-layout-fixed {
@@ -119,7 +117,7 @@ dialog.modal {
 	}
 
 	.card-header:hover {
-		--bs-card-cap-bg: var(--batch-header-hover-bg);
+		--bs-card-cap-bg: var(--bs-secondary-bg);
 	}
 
 	.header_hover {
