@@ -113,7 +113,7 @@
           </a>
           <div class="card-body">
             <t t-if="batch.state=='preparing'">
-              <span><i class="fa fa-cog fa-spin fa-fw"/> preparing</span>
+              <span><i class="fa fa-cog fa-fw"/> preparing</span>
             </t>
             <div class="batch_slots">
               <t t-if="batch_builds is not None">
