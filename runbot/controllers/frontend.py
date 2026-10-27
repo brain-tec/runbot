@@ -699,6 +699,22 @@ class Runbot(Controller):
             return werkzeug.utils.redirect(f'/runbot/bundle/{bundle_id}?expand_custom=1')
         return werkzeug.utils.redirect(f'/runbot/bundle/{bundle_id}')
 
+    @route(['/runbot/bundle/<int:bundle_id>/toggle_freeze'], type='http', auth='user', sitemap=False)
+    def toggle_freeze_tag(self, bundle_id, **kwargs):
+        if not request.env.user.has_group('runbot.group_freeze_leaders'):
+            raise Forbidden("Only Freeze Leaders can toggle the next freeze tag")
+        bundle = request.env['runbot.bundle'].browse(bundle_id)
+        if not bundle.exists():
+            raise NotFound()
+        tag = bundle.project_id.next_freeze_tag_id
+        if not tag:
+            return werkzeug.utils.redirect(f'/runbot/bundle/{bundle.id}')
+        if tag in bundle.tag_ids:
+            bundle.sudo().tag_ids -= tag
+        else:
+            bundle.sudo().tag_ids |= tag
+        return werkzeug.utils.redirect(f'/runbot/bundle/{bundle.id}')
+
     @route(['/runbot/trigger_custom/<int:trigger_custom_id>/set_mode/<string:mode>'], type='http', auth='user', sitemap=False)
     def configure_custom_trigger(self, trigger_custom_id, mode, **kwargs):
         if not request.env.user.has_group('runbot.group_user'):

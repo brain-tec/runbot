@@ -19,9 +19,15 @@
                                 <header class="card-header d-flex flex-wrap align-items-center gap-2">
                                     <span class="h6 mb-1 me-auto">
                                         <i t-if="bundle.sticky" class="fa fa-star" style="color: #f0ad4e"/>
+                                        <i t-if="bundle.project_id.next_freeze_tag_id and bundle.project_id.next_freeze_tag_id in bundle.tag_ids" class="fa fa-snowflake-o text-info" t-attf-title="Tagged for next freeze {{bundle.project_id.next_freeze_tag_id.name}}"/>
                                         <span t-out="bundle.name"/>
                                     </span>
                                     <div class="btn-group btn-group-ssm" role="group">
+                                        <t t-if="request.env.user.has_group('runbot.group_freeze_leaders') and bundle.project_id.next_freeze_tag_id">
+                                            <a class="btn btn-default" t-attf-href="/runbot/bundle/{{bundle.id}}/toggle_freeze" t-att-title="'Remove from next freeze' if bundle.project_id.next_freeze_tag_id in bundle.tag_ids else 'Add to next freeze'">
+                                                <i class="fa fa-snowflake-o"/>
+                                            </a>
+                                        </t>
                                         <t t-call="runbot.branch_copy_button">
                                             <t t-set="btn_size" t-value="'btn'"/>
                                         </t>
