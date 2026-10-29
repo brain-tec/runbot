@@ -2,13 +2,14 @@ import logging
 import re
 import shutil
 from typing import List
+from urllib.parse import urlencode
 
 import requests
 
 from odoo import models, fields, api
 from odoo.exceptions import UserError
 from odoo.osv import expression
-from odoo.tools import reverse_order, groupby
+from odoo.tools import reverse_order, groupby, hmac
 
 _logger = logging.getLogger(__name__)
 class Project(models.Model):
@@ -30,7 +31,7 @@ class Project(models.Model):
     staging_enabled = fields.Boolean(default=True)
     staging_pattern = fields.Char(
         required=True,
-        default="%(stage)s.%(target)s%(sub)s",
+        default="%(stage)s.%(target)s",
         help="""\
 Pattern for the naming of the staging branches. Editing this will switch over
 every staging branch instantaneously, so any existing staging will be extremely
@@ -38,10 +39,17 @@ confused (and will probably timeout).
 
 - `stage` is either tmp or staging, it must be either at the start or end of the pattern
 - `target` is the target branch
-- `sub` is the sub-staging, used for presplits and optimistic secondary stagings
 """
     )
-    staging_sub_pattern = fields.Char(required=True, default=".%(sub)s")
+    staging_sub_target = fields.Selection([
+        ('main', "Main"),
+        ('fp', "Forwardport"),
+    ], default='main', help="Repository in which to create sub-staging branches")
+    staging_sub_pattern = fields.Char(
+        required=True,
+        default="%(stage)s.%(target)s.%(sub)s",
+        help="Same as `staging_pattern` but there is also a `sub` key for the sub-staging's identifier"
+    )
     staging_priority = fields.Selection([
         ('default', "Splits over ready PRs"),
         ('largest', "Largest of split and ready PRs"),
@@ -54,7 +62,9 @@ confused (and will probably timeout).
         help="Delay (in minutes) before a staging is considered timed out and failed"
     )
 
-    github_token = fields.Char("Github Token", required=True)
+    github_id = fields.Many2one(
+        "runbot_merge.github_connector",
+        required=True, ondelete='restrict', delegate=True)
     github_name = fields.Char(store=True, compute="_compute_identity", required=True, copy=True)
     github_email = fields.Char(store=True, compute="_compute_identity", required=True, copy=True)
     github_prefix = fields.Char(
@@ -63,8 +73,8 @@ confused (and will probably timeout).
         help="Prefix (~bot name) used when sending commands from PR "
              "comments e.g. [hanson retry] or [hanson r+ priority]",
     )
-    fp_github_token = fields.Char()
     fp_github_name = fields.Char(store=True, compute="_compute_git_identity")
+    fp_enabled = fields.Boolean(compute='_compute_fp_enabled')
 
     batch_limit = fields.Integer(
         default=8, group_operator=None, help="Maximum number of PRs staged together")
@@ -105,14 +115,14 @@ confused (and will probably timeout).
             project.warn_mergiraf = \
                 project.use_mergiraf and not shutil.which('mergiraf')
 
-    @api.depends('github_token')
+    @api.depends('github_id')
     def _compute_identity(self):
         s = requests.Session()
         for project in self:
-            if not project.github_token or (project.github_name and project.github_email):
+            if not project.github_id or (project.github_name and project.github_email):
                 continue
 
-            headers = {'Authorization': f'token {project.github_token}'}
+            headers = {'Authorization': f'token {project.github_id.main_pat}'}
             r0 = s.get('https://api.github.com/user', headers=headers)
             if not r0.ok:
                 _logger.warning("Failed to fetch merge bot information for project %s: %s", project.name, r0.text or r0.content)
@@ -124,6 +134,7 @@ confused (and will probably timeout).
                 project.github_email = email
                 continue
 
+            # FIXME: no oauth scopes if IAT...
             if 'user:email' not in set(re.split(r',\s*', r0.headers['x-oauth-scopes'])):
                 _logger.warning("Unable to fetch merge bot emails for project %s: scope missing from token", project.name)
             r1 = s.get('https://api.github.com/user/emails', headers=headers)
@@ -137,16 +148,21 @@ confused (and will probably timeout).
                 if entry['primary']
             ), None)
 
+    @api.depends('repo_ids.fp_remote_target')
+    def _compute_fp_enabled(self):
+        for project in self:
+            project.fp_enabled = all(repo.fp_remote_target for repo in project.repo_ids)
+
     # technically the email could change at any moment...
-    @api.depends('fp_github_token')
+    @api.depends('github_id')
     def _compute_git_identity(self):
         s = requests.Session()
         for project in self:
-            if project.fp_github_name or not project.fp_github_token:
+            if not project.github_id or project.fp_github_name:
                 continue
 
             r0 = s.get('https://api.github.com/user', headers={
-                'Authorization': 'token %s' % project.fp_github_token
+                'Authorization': f'token {project.github_id.fp_pat}'
             })
             if not r0.ok:
                 _logger.error("Failed to fetch forward bot information for project %s: %s", project.name, r0.text or r0.content)
@@ -167,6 +183,7 @@ confused (and will probably timeout).
             except Exception:
                 _logger.exception("Failed to check staging for branch %r (staging %s)",
                                   branch.name, staging)
+                self.env.ref("runbot_merge.merge_cron")._trigger()
             else:
                 if commit:
                     self.env.cr.commit()
@@ -199,6 +216,7 @@ confused (and will probably timeout).
                     try_staging(branch)
             except Exception:
                 _logger.exception("Failed to create staging for branch %r", branch.name)
+                self.env.ref("runbot_merge.staging_cron")._trigger()
             else:
                 if commit:
                     self.env.cr.commit()
@@ -274,19 +292,18 @@ confused (and will probably timeout).
          or (vals.get('active') is True and not all(self.mapped('active')))
         ):
             self.env.ref('runbot_merge.staging_cron')._trigger()
-        # projects without an fw token can't have forward ports, thus don't need
-        # intermediates or followups being checked for
-        if fw_enabled := self.filtered('fp_github_token').with_context(active_test=False):
-            # check on branches both active and inactive so disabling branches doesn't
-            # make it look like the sequence changed.
-            previously_active_branches = {project: project.branch_ids.filtered('active') for project in fw_enabled}
-            branches_before = {project: project._forward_port_ordered() for project in fw_enabled}
 
-            r = super().write(vals)
-            fw_enabled._followup_prs(previously_active_branches)
-            fw_enabled._insert_intermediate_prs(branches_before)
-            return r
-        return super().write(vals)
+        self_ = self.with_context(active_test=False)
+
+        # check on branches both active and inactive so disabling branches doesn't
+        # make it look like the sequence changed.
+        previously_active_branches = {project: project.branch_ids.filtered('active') for project in self_}
+        branches_before = {project: project._forward_port_ordered() for project in self_}
+        r = super().write(vals)
+        if fp_enabled := self_.filtered('fp_enabled'):
+            fp_enabled._followup_prs(previously_active_branches)
+            fp_enabled._insert_intermediate_prs(branches_before)
+        return r
 
     def _followup_prs(self, previously_active_branches):
         """If a branch has been disabled and had PRs without a followup (e.g.
@@ -391,3 +408,16 @@ confused (and will probably timeout).
                     'batch_id': cs[0].batch_id.id,
                     'source': 'insert',
                 })
+
+    def action_create_app(self):
+        return self.env['runbot_merge.github_connector.appwizard'].create({
+            'project_id': self.id,
+        }).open()
+
+    def action_connectors(self):
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Github Connectors',
+            'res_model': 'runbot_merge.github_connector',
+            'view_mode': 'tree,form',
+        }

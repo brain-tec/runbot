@@ -11,9 +11,12 @@ import re
 import resource
 import stat
 import subprocess
-from operator import methodcaller
-from typing import Optional, TypeVar, Union, Sequence, Tuple, Dict, Iterator
+import time
+import types
+import typing
 from collections.abc import Iterable, Mapping, Callable
+from operator import methodcaller
+from typing import Sequence, Iterator, Any, Self, Protocol
 
 from odoo.tools.appdirs import user_cache_dir
 from .github import MergeError, PrCommit
@@ -37,21 +40,10 @@ except ImportError:
     def git_tracing_params() -> Iterator[str]:
         return iter(())
 
-def source_url(repository) -> str:
-    return 'https://{}@github.com/{}'.format(
-        repository.project_id.github_token,
-        repository.name,
-    )
 
-def fw_url(repository) -> str:
-    return 'https://{}@github.com/{}'.format(
-        repository.project_id.fp_github_token,
-        repository.fp_remote_target,
-    )
+Authorship = tuple[str, str] | tuple[str, str, str]
 
-Authorship = Union[Tuple[str, str], Tuple[str, str, str]]
-
-def get_local(repository, *, clone: bool = True) -> 'Optional[Repo]':
+def get_local(repository, *, clone: bool = True) -> Repo[subprocess.CompletedProcess[bytes]] | None:
     repos_dir = pathlib.Path(user_cache_dir('mergebot'))
     repos_dir.mkdir(parents=True, exist_ok=True)
     # NB: `repository.name` is `$org/$name` so this will be a subdirectory, probably
@@ -61,10 +53,15 @@ def get_local(repository, *, clone: bool = True) -> 'Optional[Repo]':
         return git(repo_dir)
     elif clone:
         _logger.info("Cloning out %s to %s", repository.name, repo_dir)
+        url, user, password = repository._git()
         subprocess.run([
-            'git', *git_tracing_params(), 'clone', '--bare',
-            source_url(repository), str(repo_dir)
-        ], check=True)
+            'git', *ALWAYS, *git_tracing_params(),
+            'clone', '--bare', url, str(repo_dir)
+        ], check=True, env={
+            **os.environ,
+            "GIT_USER": user,
+            "GIT_PASSWORD": password,
+        })
         # All this could probably be removed since the shift to explicit fetches
         # but not sure it's worth removing?
         repo = git(repo_dir)
@@ -94,49 +91,99 @@ def get_local(repository, *, clone: bool = True) -> 'Optional[Repo]':
         return None
 
 
-ALWAYS = ('gc.auto=0', 'maintenance.auto=0')
+ALWAYS = (
+    '-c', 'gc.auto=0',
+    '-c', 'maintenance.auto=0',
+    '-c', 'http.proactiveAuth=basic',
+    '-c', '''credential.helper=!f() {
+        sleep 1
+        echo "username=${GIT_USER}"
+        echo "password=${GIT_PASSWORD}"
+    }; f''',
+)
 
 
 def _bypass_limits():
     resource.setrlimit(resource.RLIMIT_AS, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
 
 
-def git(directory: str) -> 'Repo':
+def git(directory: str) -> Repo[subprocess.CompletedProcess[bytes]]:
     return Repo(directory, check=True)
 
 
-StdOutValue = Union[bool, int, None, io.IOBase]
-class Repo:
-    def __init__(self, directory: str, **config: object) -> None:
-        self._directory = str(directory)
+StdOutValue = bool | int | None | io.IOBase
+
+
+class ProcessRunner[T](Protocol):
+    def __call__(self, args: Iterable[str], **opts: Any) -> T:
+        pass
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Repo[T]:
+    directory: str
+    config_: Mapping[str, Any]
+    params: tuple[str]
+    runner: ProcessRunner[T]
+
+    def __init__(self, directory: str, config_: Mapping[str, Any] | None = None, params: tuple[str] = (), runner: ProcessRunner[T] = subprocess.run, **config: Any) -> None:
+        object.__setattr__(self, 'directory', str(directory))
+
         config.setdefault('stderr', subprocess.PIPE)
-        self._config = config
-        self._params = ()
-        self.runner = subprocess.run
+        env = {
+            'GIT_CONFIG_NOSYSTEM': 'true',
+            'GIT_CONFIG_GLOBAL': '/dev/null',
+            'GIT_CONFIG_SYSTEM': '/dev/null',
+        }
+        if config_ and 'env' in config_:
+            env.update(config_['env'])
+        if config and 'env' in config:
+            env.update(config['env'])
+        if len(env) == 3:
+            env.update(os.environ)
+        config['env'] = env
+
+        object.__setattr__(self, 'config_', types.MappingProxyType({
+            'stderr': subprocess.PIPE,
+            **(config_ or {}),
+            **config,
+        }))
+        object.__setattr__(self, 'params', params)
+        object.__setattr__(self, 'runner', runner)
 
     def __getattr__(self, name: str) -> GitCommand:
         return GitCommand(self, name.replace('_', '-'))
 
     def _run(self, *args, **kwargs) -> subprocess.CompletedProcess:
-        opts = {**self._config, **kwargs}
-        args = tuple(itertools.chain(
-            ('git', '-C', self._directory),
-            itertools.chain.from_iterable(('-c', p) for p in self._params + ALWAYS),
+        opts = {**self.config_, **kwargs}
+        assert args[0] not in ('ls-remote', 'fetch', 'pull', 'push') or opts['env'].get('GIT_USER'),\
+            f"{args[0]} missing git config in {opts}"
+        if self.runner is subprocess.run:
+            opts['timeout'] = 10 * 60
+        command = tuple(itertools.chain(
+            ('git', '-C', self.directory),
+            ALWAYS,
+            itertools.chain.from_iterable(('-c', p) for p in self.params),
             git_tracing_params(),
             args,
         ))
+        start = time.time()
         try:
-            return self.runner(args, preexec_fn=_bypass_limits, **opts)
+            return self.runner(command, preexec_fn=_bypass_limits, **opts)
         except subprocess.CalledProcessError as e:
             stream = e.stderr or e.stdout
             if stream:
                 if isinstance(stream, bytes):
                     with contextlib.suppress(UnicodeDecodeError):
                         stream = stream.decode()
-                _logger.error("git call error: %s", stream)
+                _logger.error("git call error: %s", stream, exc_info=True)
             raise
+        finally:
+            if self.runner is subprocess.run:
+                end = time.time()
+                _logger.info("%s executed in %.1f seconds", args, (end - start))
 
-    def stdout(self, flag: StdOutValue = True) -> Repo:
+    def stdout(self, flag: StdOutValue = True) -> Self:
         match flag:
             case True:
                 return self.with_config(stdout=subprocess.PIPE)
@@ -145,33 +192,61 @@ class Repo:
             case f:
                 return self.with_config(stdout=f)
 
-    def check(self, flag: bool) -> Repo:
+    def lazy(self) -> Repo[subprocess.Popen[bytes]]:
+        return dataclasses.replace(
+            self,
+            runner=subprocess.Popen,
+            # remove config and any conf which enables text mode (so Popen
+            # resets to bytes mode)
+            config_=types.MappingProxyType({
+                k: v for k, v in self.config_.items()
+                if k not in ('check', 'encoding', 'text', 'errors', 'universal_newlines')
+            })
+        )
+
+    def check(self, flag: bool) -> Self:
         return self.with_config(check=flag)
 
-    def with_config(self, **kw) -> Repo:
-        opts = {**self._config, **kw}
-        r = Repo(self._directory, **opts)
-        r._params = self._params
-        return r
+    def with_config(self, **kw) -> Self:
+        return dataclasses.replace(self, config_=types.MappingProxyType({**self.config_, **kw}))
 
-    def with_params(self, *args) -> Repo:
-        r = self.with_config()
-        r._params = args
-        return r
+    def with_params(self, *args) -> Self:
+        return dataclasses.replace(self, params=args)
 
-    def clone(self, to: str, branch: Optional[str] = None) -> Repo:
+    @typing.overload
+    def text(self: Repo[subprocess.CompletedProcess[bytes]]) -> Repo[subprocess.CompletedProcess[str]]:
+        ...
+
+    @typing.overload
+    def text(self: Repo[subprocess.Popen[bytes]]) -> Repo[subprocess.Popen[str]]:
+        ...
+
+    def text(self):
+        return self.with_config(encoding='utf-8')
+
+    def clone(self, to: str, branch: str | None = None) -> Repo:
         self._run(
             'clone',
             *([] if branch is None else ['-b', branch]),
-            self._directory, to,
+            self.directory, to,
         )
         return Repo(to)
+
+    def with_env(self, **env) -> Repo:
+        return self.with_config(env={**self.config_['env'], **env})
+
+    def with_credentials(self, user, password) -> Repo:
+        return self.with_env(GIT_USER=user, GIT_PASSWORD=password)
 
     def fetch_heads(self, repo, *specs) -> Iterator[str]:
         """Fetches the heads of all the specified revisions, and returns their
         oids.
         """
-        r = self.stdout().with_config(check=True, encoding="utf-8").fetch(
+        url, user, password = repo._git()
+        r = (self.stdout()
+        .with_config(check=True, encoding="utf-8")
+        .with_credentials(user, password)
+        .fetch(
             # as its name does not indicate, retrieves all relevant objects but
             # stops short of updating local refs, so
             # `fetch --dry-run refs/heads/master` will resolve and retrieve the
@@ -180,10 +255,10 @@ class Repo:
             '--dry-run',
             # parseable output (see below), returns info even when nothing happened
             '--porcelain',
-            source_url(repo),
+            url,
             *specs,
             no_tags=True,
-        )
+        ))
         # <flag> <old-object-id> <new-object-id> <local-reference>
         # flag:
         #   ` ` fast forward
@@ -210,7 +285,7 @@ class Repo:
             .rev_parse(f'{rev}^{{tree}}')\
             .stdout.strip()
 
-    def rebase(self, dest: str, commits: Sequence[PrCommit]) -> Tuple[str, Dict[str, str]]:
+    def rebase(self, dest: str, commits: Sequence[PrCommit]) -> tuple[str, dict[str, str]]:
         """Implements rebase by hand atop plumbing so:
 
         - we can work without a working copy
@@ -252,6 +327,8 @@ class Repo:
                 tree=new_trees[-1],
                 parents=[parent, original['sha']],
                 message=f'temp rebase {original["sha"]}',
+                author=('temp', ''),
+                committer=('temp', ''),
             )).stdout.strip()
             prev_tree = new_trees[-1]
             prev_original_tree = original['commit']['tree']['sha']
@@ -275,7 +352,7 @@ class Repo:
 
         return dest, mapping
 
-    def merge(self, c1: str, c2: str, msg: str, *, author: Tuple[str, str]) -> str:
+    def merge(self, c1: str, c2: str, msg: str, *, author: tuple[str, str]) -> str:
         repo = self.stdout().with_config(text=True, check=False)
 
         t = repo.merge_tree(c1, c2)
@@ -287,6 +364,7 @@ class Repo:
             message=msg,
             parents=[c1, c2],
             author=author,
+            committer=author,
         )
         if c.returncode:
             raise MergeError(c.stderr)
@@ -295,20 +373,18 @@ class Repo:
     def commit_tree(
         self, *, tree: str, message: str,
         parents: Sequence[str] = (),
-        author: Optional[Authorship] = None,
-        committer: Optional[Authorship] = None,
+        author: Authorship,
+        committer: Authorship,
     ) -> subprocess.CompletedProcess:
         authorship = {}
-        if author:
-            authorship['GIT_AUTHOR_NAME'] = author[0]
-            authorship['GIT_AUTHOR_EMAIL'] = author[1]
-            if len(author) > 2:
-                authorship['GIT_AUTHOR_DATE'] = author[2]
-        if committer:
-            authorship['GIT_COMMITTER_NAME'] = committer[0]
-            authorship['GIT_COMMITTER_EMAIL'] = committer[1]
-            if len(committer) > 2:
-                authorship['GIT_COMMITTER_DATE'] = committer[2]
+        authorship['GIT_AUTHOR_NAME'] = author[0]
+        authorship['GIT_AUTHOR_EMAIL'] = author[1]
+        if len(author) > 2:
+            authorship['GIT_AUTHOR_DATE'] = author[2]
+        authorship['GIT_COMMITTER_NAME'] = committer[0]
+        authorship['GIT_COMMITTER_EMAIL'] = committer[1]
+        if len(committer) > 2:
+            authorship['GIT_COMMITTER_DATE'] = committer[2]
 
         return self.with_config(
             input=message,

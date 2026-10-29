@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from utils import Commit, to_pr, seen
+from utils import Commit, to_pr, seen, fakehook
 
 
 def test_optional_statuses(env, project, make_repo, users, setreviewers, config):
@@ -90,20 +90,20 @@ def test_incomplete_statuses_request(env, project, make_repo, users, setreviewer
     'success', 'failure', 'pending', 'error',
 ])
 def test_complete_statuses_norequest(
-    env, project, make_repo, users, setreviewers, config, status
-):
+    env, project, make_repo, users, setreviewers, config, status, botname):
     """If *any* status has been sent on the status we don't trigger the
     request.
     """
     project.request_missing_statuses = True
-    repo = make_repo('repo')
+    repo = make_repo('repo', hooks=project.github_id.method == 'pat')
     env['runbot_merge.repository'].create({
         'project_id': project.id,
         'name': repo.name,
         'status_ids': [(0, 0, {'context': 'l/azy'}), (0, 0, {'context': 'o/ptional', 'prs': 'optional'})]
     })
     setreviewers(*project.repo_ids)
-    env['runbot_merge.events_sources'].create({'repository': repo.name})
+    if project.github_id.method == 'pat':
+        env['runbot_merge.events_sources'].create({'repository': repo.name})
 
     with repo:
         m = repo.make_commits(None, Commit('root', tree={'a': '1'}), ref='heads/master')
@@ -120,12 +120,49 @@ def test_complete_statuses_norequest(
     assert env['saas.calls'].search([]) == env['saas.calls']
     if status not in ('error', 'failure'):
         assert pr.comments == [
-            seen(env, pr, users),
+            (botname, seen(env, pr)),
             (users['reviewer'], 'hansen r+'),
         ]
     else:
         assert pr.comments == [
-            seen(env, pr, users),
+            (botname, seen(env, pr)),
             (users['reviewer'], 'hansen r+'),
-            (users['user'], "@{reviewer} you may want to rebuild or fix this PR as it has failed CI.".format_map(users)),
+            (botname, "@{reviewer} you may want to rebuild or fix this PR as it has failed CI.".format_map(users)),
         ]
+
+def test_statuses_wrong_order(port, env, project, repo, users, config):
+    with repo:
+        [m] = repo.make_commits(None, Commit('initial', tree={'m': 'm'}), ref='heads/master')
+
+        [c] = repo.make_commits(m, Commit('thing1', tree={}), ref='heads/other1')
+        pr = repo.make_pr(target='master', head=c)
+    env.run_crons()
+
+    fakehook(port, env, repo, {
+        'sha': c,
+        'context': 'default',
+        'state': 'failure',
+        'created_at': '1932-11-08T11:12:13Z',
+        'description': "They can face machine guns with the invincibility of tanks",
+        'target_url': "https://en.wikipedia.org/wiki/Emu_War#First_attempt",
+        'repository': {
+            'full_name': repo.name,
+        },
+    }, event='status')
+    env.run_crons()
+
+    fakehook(port, env, repo, {
+        'sha': c,
+        'context': 'default',
+        'state': 'pending',
+        'created_at': '1932-11-02T11:12:13Z',
+        'description': "Fear not, we will take care of the feathered foes",
+        'target_url': "https://en.wikipedia.org/wiki/Emu_War#First_attempt",
+        'repository': {
+            'full_name': repo.name,
+        },
+    }, event='status')
+    env.run_crons()
+
+    assert to_pr(env, pr).status == 'failure',\
+        "the delayed and misordered pending status should be ignored"

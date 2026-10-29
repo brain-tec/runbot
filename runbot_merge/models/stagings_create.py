@@ -12,17 +12,18 @@ import subprocess
 import tempfile
 import typing
 from collections.abc import Mapping
-from datetime import datetime
-from difflib import Differ
+from datetime import datetime, timedelta
+from itertools import chain
 from operator import itemgetter
 from subprocess import CalledProcessError
 from typing import Dict, Union, Optional, Literal, Callable, Iterator, Tuple, List, TypeAlias, Any
+from urllib.parse import urlsplit
 
 from markupsafe import Markup
 from werkzeug.datastructures import Headers
 
-from odoo import api, models, fields, Command, addons
-from odoo.tools import OrderedSet, groupby, Reverse
+from odoo import api, models, fields, Command
+from odoo.tools import OrderedSet, groupby
 from .pull_requests import Branch, Stagings, PullRequests, Repository, Split
 from .batch import Batch
 from .. import exceptions, utils, github, git
@@ -30,6 +31,21 @@ from ..github import PrCommit
 
 WAIT_FOR_VISIBILITY = [10, 10, 10, 10]
 _logger = logging.getLogger(__name__)
+# see push [OUTPUT]
+PUSH_REJECTION_PATTERN = re.compile(
+    r'''
+    ^
+    (?P<flag>[ +*!=-])
+    \t
+    (?P<from>.*):(?P<to>.*)
+    \t
+    \[(?P<summary>.*)]
+    \s*
+    \((?P<reason>.*)\)
+    $
+    ''',
+    flags=re.VERBOSE | re.MULTILINE,
+)
 
 
 class Project(models.Model):
@@ -65,19 +81,11 @@ def batch_key(batch: Batch) -> tuple:
     )
     return -priority, batch.unblocked_at or datetime.max, batch.id
 
-def prepare_split(
-        split: Split,
-        priority: Literal['splits', 'ready', 'largest'],
-) -> tuple[Batch, int, set[int]]:
+def prepare_split(split: Split) -> tuple[Batch, int, set[int]]:
     batches = split.batch_ids.sorted(batch_key)
     parent_id = split.staging_id.id
     originals = set(split.original_batches or ())
     split.with_context(staging_split=True).unlink()
-    _logger.info(
-        "staging split PRs %s (prioritising %s)",
-        ', '.join(batches.mapped('prs.display_name')),
-        priority,
-    )
     return batches, parent_id, originals
 
 
@@ -87,8 +95,8 @@ def try_staging(branch: Branch, batches: Optional[Batch] = None) -> Optional[Sta
     is nothing to stage, the newly created staging otherwise.
     """
     _logger.info(
-        "Checking %s (%s) for staging: %s, skip? %s",
-        branch, branch.name,
+        "Checking %s:%s for staging: %s, skip? %s",
+        branch.project_id.name, branch.name,
         branch.active_staging_id,
         bool(branch.active_staging_id)
     )
@@ -102,43 +110,50 @@ def try_staging(branch: Branch, batches: Optional[Batch] = None) -> Optional[Sta
     originals = set()
     split = None
     if batches:
-        log("staging retried PRs %s", batches)
+        reason = "retried"
     else:
         alone, batches = ready_batches(for_branch=branch)
 
         if alone:
-            log("staging high-priority PRs %s", batches)
+            reason = "high-priority"
         elif branch.project_id.staging_priority == 'default':
             if split := branch.first_split:
-                batches, parent_id, originals = prepare_split(split, 'splits')
+                reason = "prioritising splits"
+                batches, parent_id, originals = prepare_split(split)
             else:
                 # priority, normal; priority = sorted ahead of normal, so always picked
                 # first as long as there's room
-                log("staging ready PRs %s (prioritising splits)", batches)
+                reason = "prioritising splits, no splits"
         elif branch.project_id.staging_priority == 'ready':
             if batches:
-                log("staging ready PRs %s (prioritising ready)", batches)
+                reason = "prioritising ready PRs"
             else:
+                reason = "prioritising ready PRs, no ready PRs"
                 split = branch.first_split
-                batches, parent_id, originals = prepare_split(split, 'ready')
+                batches, parent_id, originals = prepare_split(split)
         else:
             assert branch.project_id.staging_priority == 'largest'
             split = max(branch.split_ids, key=lambda s: len(s.batch_ids), default=branch.env['runbot_merge.split'])
-            _logger.info("largest split = %d, ready = %d", len(split.batch_ids), len(batches))
             # bias towards splits if len(ready) = len(batch_ids)
             if len(split.batch_ids) >= len(batches):
-                batches, parent_id, originals = prepare_split(split, 'largest')
+                reason = f"prioritising largest set: split ({len(split.batch_ids)} > {len(batches)})"
+                batches, parent_id, originals = prepare_split(split)
             else:
-                log("staging ready PRs %s (prioritising largest)", batches)
+                reason = f"prioritising largest set: ready PRs ({len(batches)} > {len(split.batch_ids)})"
+
 
     if not batches:
+        log(f"nothing to stage%s ({reason})", batches)
         if split:  # in case of empty split, re-run staging Soon©
             branch.env.ref('runbot_merge.staging_cron')._trigger()
         return None
 
+    log(f"staging PRs %s ({reason})", batches)
     original_heads, staging_state = staging_setup(branch, batches)
     staged = stage_batches(branch, batches, staging_state)
     if not staged:
+        log(f"nothing staged%s (all candidates skipped or failed)", staged)
+        # branch.env.ref("runbot_merge.staging_cron")._trigger()
         return None
 
     env = branch.env
@@ -159,6 +174,7 @@ def try_staging(branch: Branch, batches: Optional[Batch] = None) -> Optional[Sta
                 tree=f'{it.head}^{{tree}}',
                 parents=[it.head],
                 author=(project.github_name, project.github_email),
+                committer=(project.github_name, project.github_email),
                 message=f'''\
 force rebuild
 
@@ -169,8 +185,8 @@ For-Commit-Id: {it.head}
 
             # see above, `DO UPDATE` is necessary for `RETURNING` to work
             env.cr.execute(
-                "INSERT INTO runbot_merge_commit (sha, to_check, statuses) "
-                "VALUES (%s, false, '{}'), (%s, true, '{}') "
+                "INSERT INTO runbot_merge_commit (sha, to_check, create_date) "
+                "VALUES (%s, false, now() at time zone 'UTC'), (%s, true, now() at time zone 'UTC') "
                 "ON CONFLICT (sha) DO UPDATE SET to_check=runbot_merge_commit.to_check "
                 "RETURNING id",
                 [it.head, dummy_head]
@@ -182,8 +198,8 @@ For-Commit-Id: {it.head}
             # one as to-recheck in case there are already statuses we want to
             # propagate to the staging or something
             env.cr.execute(
-                "INSERT INTO runbot_merge_commit (sha, to_check, statuses) "
-                "VALUES (%s, true, '{}') "
+                "INSERT INTO runbot_merge_commit (sha, to_check, create_date) "
+                "VALUES (%s, true, now() at time zone 'UTC') "
                 "ON CONFLICT (sha) DO UPDATE SET to_check=true "
                 "RETURNING id",
                 [it.head]
@@ -219,23 +235,32 @@ For-Commit-Id: {it.head}
     tmpname = pattern % {
         'stage': 'tmp',
         'target': branch.name,
-        'sub': '',
     }
     # push all the new objects first via the tmp branches
     pushers = []
     for repo, it in staging_state.items():
-        executor = it.repo.with_config(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        executor._config.pop('check', None)
-        executor.runner = subprocess.Popen
-        pid = executor.push('-f', git.source_url(repo), f'{it.head}:refs/heads/{tmpname}')
-        pushers.append(pid)
-    for pid in pushers:
-        pid.wait()
+        url, user, password = repo._git()
+        pushers.append(
+            it.repo.with_config(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+               .with_credentials(user, password)
+               .lazy()
+               .push('-f', url, f'{it.head}:refs/heads/{tmpname}')
+        )
+    for repo, pid in zip(staging_state, pushers):
+        if pid.wait():
+            # wait until staging to actually fail (this might be an issue with
+            # the tmp ref...) but log the issue nonetheless
+            _logger.warning(
+                "Failed to pre-push staging %s to %s:tmp.%s:\n%s",
+                st,
+                repo.name,
+                branch.name,
+                pid.stderr.read()
+            )
 
     stagingname = pattern % {
         'stage': 'staging',
         'target': branch.name,
-        'sub': '',
     }
     # then sync the staging refs (there might be a more efficient command than push but...)
     for repo, it in staging_state.items():
@@ -244,26 +269,40 @@ For-Commit-Id: {it.head}
             branch.project_id.name, repo.name, branch.name,
             it.head, stagingname,
         )
-        r = it.repo.with_config(stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False)\
-            .push('-f', git.source_url(repo), f'{it.head}:refs/heads/{stagingname}')
+        url, user, password = repo._git()
+        r = it.repo.with_config(stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, encoding="utf-8")\
+            .with_credentials(user, password)\
+            .push('--porcelain', '-f', url, f'{it.head}:refs/heads/{stagingname}')
         if r.returncode:
-            branch.staging_enabled = False
             st.write({
                 'active': False,
                 'state': 'failure',
                 'reason': f"Failed pushing to {repo.name}",
             })
+            _logger.error("Failed to create staging for branch %r:\n%s%s", branch.name, r.stderr, r.stdout.replace('\t', ' '))
+            # likely transient github errors, abort staging but resume some time later
+            icp = env['ir.config_parameter'].get_param('runbot_merge.github_benign.remote_rejected', None)
+            if icp is None:
+                icp = 'failure,Internal Server Error'
+                env['ir.config_parameter'].set_param('runbot_merge.github_benign.remote_rejected', icp)
+            transients = icp.split(',')
+            if all(
+                m['reason'] in transients
+                for m in PUSH_REJECTION_PATTERN.finditer(r.stdout)
+                if m['summary'] == 'remote rejected'
+            ):
+                env.ref('runbot_merge.staging_cron')._trigger(
+                    fields.Datetime.now() + timedelta(minutes=5)
+                )
+                return None
+
+            branch.staging_enabled = False
             st.with_context(mail_post_autofollow=True).message_post(
                 body=Markup(
                     "<p>Staging on {} has been disabled because pushing to {} failed:</p>"
-                    "<pre>{}</pre>"
-                ).format(branch.name, repo.name, r.stderr),
+                    "<pre>{}{}</pre>"
+                ).format(branch.name, repo.name, r.stderr, r.stdout.replace('\t', ' ')),
                 partner_ids=branch.env.ref("runbot_merge.group_admin").users.partner_id.ids,
-            )
-            _logger.error(
-                "Failed to create staging for branch %r:\n%s",
-                branch.name,
-                r.stderr
             )
             return None
 
@@ -272,11 +311,12 @@ For-Commit-Id: {it.head}
         for batch in staged
     ), st.target.name)
 
-    subpattern = pattern % {
-        'stage': 'staging',
-        'target': branch.name,
-        'sub': branch.project_id.staging_sub_pattern,
-    }
+    check_conflicts(branch, staged, {
+        repo: dataclasses.replace(state, head=original_heads[repo])
+        for repo, state in staging_state.items()
+    })
+
+    sub_pattern = branch.project_id.staging_sub_pattern
     if branch.presplit and len(staged) > 1:
         _logger.info("Pre-splitting staging...")
         midpoint = len(staged) // 2
@@ -294,10 +334,22 @@ For-Commit-Id: {it.head}
                 break
             if staged_split != split:
                 _logger.warning("Failed to fully stage presplit %d of %s", i, st)
-            branchname = subpattern % {'sub': i}
+            branchname = sub_pattern % {
+                'stage': 'staging',
+                'target': branch.name,
+                'sub': i,
+            }
             for repo, it in staging_state_split.items():
+                match branch.project_id.staging_sub_target:
+                    case 'main':
+                        url, user, password = repo._git()
+                    case 'fp':
+                        url, user, password = repo._fw_git()
+                    case v:
+                        typing.assert_never(v)
                 r = it.repo.with_config(stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False) \
-                    .push('-f', git.source_url(repo), f'{it.head}:refs/heads/{branchname}')
+                    .with_credentials(user, password) \
+                    .push('-f', url, f'{it.head}:refs/heads/{branchname}')
                 if r.returncode:
                     _logger.warning("Failed to push presplit %d of %s:\n%s", i, st, r.stderr)
 
@@ -317,10 +369,22 @@ For-Commit-Id: {it.head}
             if not staged:
                 _logger.warning("Failed to stage successor of %s", st)
             else:
-                branchname = subpattern % {"sub": '3'}
+                branchname = sub_pattern % {
+                    'stage': 'staging',
+                    'target': branch.name,
+                    'sub': '3',
+                }
                 for repo, it in staging_state.items():
+                    match branch.project_id.staging_sub_target:
+                        case 'main':
+                            url, user, password = repo._git()
+                        case 'fp':
+                            url, user, password = repo._fw_git()
+                        case v:
+                            typing.assert_never(v)
                     r = it.repo.with_config(stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False) \
-                        .push('-f', git.source_url(repo), f'{it.head}:refs/heads/{branchname}')
+                        .with_credentials(user, password) \
+                        .push('-f', url, f'{it.head}:refs/heads/{branchname}')
                     if r.returncode:
                         _logger.warning("Failed to push successor of %s:\n%s", st, r.stderr)
 
@@ -352,6 +416,61 @@ def ready_batches(for_branch: Branch) -> Tuple[bool, Batch]:
             ('id', 'not in', split_ids),
         ], order="priority DESC, unblocked_at ASC, id ASC"),
     )
+
+
+def check_conflicts(branch: Branch, staged: Batch, staging_state: StagingState) -> None:
+    env = branch.env
+    candidates = env['runbot_merge.batch'].search([
+        ('target', '=', branch.id),
+        ('blocked', '=', False),
+        ('id', 'not in', staged.ids),
+    ]).prs.filtered(lambda p: not p.error and p.repository in staging_state)
+    if not candidates:
+        return
+
+    with merge_driver(branch, staging_state):
+        for repo, prs in groupby(candidates, lambda p: p.repository):
+            info = staging_state[repo]
+            git_repo = info.repo.stdout().with_config(text=True, check=False)
+            try:
+                for _ in git_repo.fetch_heads(repo, *(pr.head for pr in prs)):
+                    pass
+            except CalledProcessError as e:
+                _logger.warning("Failed to fetch heads for conflict check on %s: %s", repo.name, e.stderr)
+                continue
+
+            for pr in prs:
+                r = git_repo.merge_tree('--name-only', info.head, pr.head)
+                if r.returncode and 'merge.mergiraf.name=mergiraf' in git_repo.params and 'fatal: failure to merge' in r.stderr:
+                    r = git_repo.with_params().merge_tree('--name-only', info.head, pr.head)
+                match r.returncode:
+                    case 0:
+                        continue
+                    case 1:
+                        pass
+                    case _:
+                        _logger.warning(
+                            "Failed to check %s for conflicts with %s:\n%s",
+                            pr.display_name, branch.name, r.stderr,
+                        )
+                        continue
+
+                # tree
+                # conflicted_files (one per line, unique)
+                #
+                # informational_messages (for end user)
+                _, *files = r.stdout.split('\n\n', 1)[0].splitlines()
+                pr._message_log(body=f"Conflicts with {branch.name} ({info.head}): {', '.join(files)}")
+                pr.error = True
+                env.ref('runbot_merge.pr.merge.conflict')._send(
+                    repository=pr.repository,
+                    pull_request=pr.number,
+                    format_args={
+                        'pr': pr,
+                        'head': info.head,
+                        'files': ''.join(f'* `{f}`\n' for f in files),
+                    },
+                )
 
 
 def staging_setup(
@@ -391,7 +510,11 @@ def staging_setup(
 
     return original_heads, staging_state
 
-def stage_batches(branch: Branch, batches: Batch | Any, staging_state: dict[Repository, StagingSlice]) -> Batch:
+@contextlib.contextmanager
+def merge_driver(branch: Branch, staging_state: StagingState) -> Iterator[None]:
+    """Configures the repositories of ``staging_state`` with the merge driver
+    selected for the project (if any) for the duration of the context.
+    """
     if branch.project_id.use_mergiraf and shutil.which('mergiraf'):
         with tempfile.NamedTemporaryFile(buffering=0) as attrs:
             attrs.write(b'* merge=mergiraf\n')
@@ -402,8 +525,12 @@ def stage_batches(branch: Branch, batches: Batch | Any, staging_state: dict[Repo
                     'merge.mergiraf.driver=mergiraf merge --git %O %A %B -s %S -x %X -y %Y -p %P -l %L',
                     f'core.attributesfile={attrs.name}',
                 )
-            return _stage_batches(branch, batches, staging_state)
+            yield
     else:
+        yield
+
+def stage_batches(branch: Branch, batches: Batch | Any, staging_state: dict[Repository, StagingSlice]) -> Batch:
+    with merge_driver(branch, staging_state):
         return _stage_batches(branch, batches, staging_state)
 
 def _stage_batches(branch: Branch, batches: Batch, staging_state: StagingState) -> Batch:
@@ -549,7 +676,7 @@ def stage(pr: PullRequests, info: StagingSlice, related_prs: PullRequests) -> Tu
     try:
         new_head = fn(pr, info, pr_commits, related_prs=related_prs)
     except git.MergeError as e:
-        if 'fatal: failure to merge' in str(e) and 'merge.mergiraf.name=mergiraf' in info.repo._params:
+        if 'fatal: failure to merge' in str(e) and 'merge.mergiraf.name=mergiraf' in info.repo.params:
             _logger.warning(
                 "mergiraf likely crashed staging %s, switching to default merge driver",
                 pr.display_name,

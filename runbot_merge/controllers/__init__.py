@@ -4,15 +4,19 @@ import hashlib
 import hmac
 import logging
 import json
+import random
+import time
+import typing
 from datetime import datetime, timedelta
-from typing import Callable
 
 import psycopg2.errors
 from werkzeug.exceptions import NotFound, UnprocessableEntity
 
 from odoo.api import Environment
 from odoo.http import Controller, request, route, Response
+from odoo.service.model import MAX_TRIES_ON_CONCURRENCY_FAILURE
 
+from . import apps
 from . import dashboard
 from . import misc
 from . import reviewer_provisioning
@@ -101,33 +105,53 @@ class MergebotController(Controller):
         return request.make_json_response([staging_dict(staging) for staging in stagings])
 
     @route('/runbot_merge/hooks', auth='none', type='http', csrf=False, methods=['POST'])
-    def index(self) -> Response:
+    def webhooks(self) -> Response:
         req = request.httprequest
-        event = req.headers['X-Github-Event']
         github._gh.getChild('hook').info(self._format(req))
 
         env = request.env(user=1)
         data = request.get_json_data()
-        if event == 'ping':
-            return handle_ping(env, request.get_json_data())
 
-        repo = data.get('repository', {}).get('full_name')
-        source = repo and env['runbot_merge.events_sources'].search([('repository', '=', repo)])
+        target = req.headers.get('X-Github-Hook-Installation-Target-Type')
+        target_id = req.headers.get('X-Github-Hook-Installation-Target-Id')
+        match target:
+            case 'repository':
+                # TODO: store repo ids and use that instead of name-based?
+                sourcename = data.get('repository', {}).get('full_name')
+                source = sourcename and env['runbot_merge.events_sources'].search([('repository', '=', sourcename)])
+                secret = source and source.secret
+            case 'integration':
+                connector_ = env['runbot_merge.github_connector']
+                source = connector_.search([('app_id', '=', int(target_id))])
+                sourcename = source.name
+                # TODO: also filter on repository?
+                secret = source.webhook_secret
+            case it:
+                _logger.warning(
+                    "Ignored hook %s with unknown installation type %s",
+                    req.headers.get('X-Github-Delivery'),
+                    it,
+                )
+                return Response(status=400, mimetype="text/plain")
+
         if not source:
             _logger.warning(
-                "Ignored hook %s to unknown source repository %s",
+                "Ignored hook %s (%s) to unknown source repository %s (%s:%s)",
                 req.headers.get("X-Github-Delivery"),
-                repo,
+                req.headers.get("X-Github-Event"),
+                sourcename,
+                target,
+                target_id,
             )
             return Response(status=403, mimetype="text/plain")
-        elif secret := source.secret:
+        elif secret:
             signature = 'sha256=' + hmac.new(secret.strip().encode(), req.get_data(), hashlib.sha256).hexdigest()
-            if not hmac.compare_digest(signature, req.headers.get('X-Hub-Signature-256', '')):
+            if not hmac.compare_digest(signature, sig := req.headers.get('X-Hub-Signature-256', '')):
                 _logger.warning(
                     "Ignored hook %s with incorrect signature on %s: got %s expected %s, in:\n%s",
                     req.headers.get('X-Github-Delivery'),
-                    repo,
-                    req.headers.get('X-Hub-Signature-256'),
+                    sourcename,
+                    sig,
                     signature,
                     req.headers,
                 )
@@ -136,22 +160,74 @@ class MergebotController(Controller):
             _logger.warning(
                 "Ignored hook %s with signature but no secret on %s",
                 req.headers.get('X-Github-Delivery'),
-                repo,
+                sourcename,
             )
             return Response(status=501, mimetype="text/plain")
         else:
-            _logger.info("No secret or signature for %s", repo)
-
-        c = EVENTS.get(event)
-        if not c:
-            _logger.warning('Unknown event %s', event)
-            return Response(
-                status=422,
-                mimetype="text/plain",
-                response="Not setup to receive event.",
+            _logger.info(
+                "Hook %s: no secret or signature for %s",
+                req.headers.get('X-Github-Delivery'),
+                sourcename,
             )
 
-        return c(env, data)
+        match req.headers['X-Github-Event']:
+            case 'ping':
+                return handle_ping(env, data)
+            case 'installation':
+                installation = data['installation']
+                app = env['runbot_merge.github_connector'].search([
+                    ('client_id', '=', installation['client_id']),
+                ])
+                match data['action']:
+                    case 'created':
+                        _logger.info("created installation %s for %s", installation['id'], app)
+                        env['runbot_merge.github_connector.installation'].create({
+                            'connector_id': app.id,
+                            'installation_id': installation['id'],
+                            'owner_id': installation['account']['id'],
+                            'owner_login': installation['account']['login'],
+                            'repository_selection': installation['repository_selection'],
+                            # TODO: repositories
+                        })
+                    case 'deleted':
+                        _logger.info("deleted installation %s for %s", installation['id'], app)
+                        env['runbot_merge.github_connector.installation'].search([
+                            ('connector_id', '=', app.id),
+                            ('installation_id', '=', installation['id']),
+                        ]).unlink()
+                    case ('suspend' | 'unsuspend' | 'new_permissions_accepted') as act:
+                        _logger.info("ignored installation action %r", act)
+                    case act:
+                        _logger.warning("unknown installation action %r", act)
+                return Response(mimetype="text/plain", response="ok")
+            case 'installation_repositories':
+                # TODO note that this is kinda shit, needs to characterise but
+                #      - despite both `added` and `removed` having
+                #        `repositories_added` and `repositories_removed` keys,
+                #        only the corresponding key is non-empty
+                #      - when switching between repository selection modes, you
+                #        always get ADD, no indication of the actual change,
+                #        and the repos to which access is now granted
+                #      - in `selected` mode, both adding and removing repos
+                #        triggers both events one after the other
+                #      - if selection_mode=all, I think repos being created or
+                #        deleted triggers added/removed events, to check
+                return Response(mimetype="text/plain", response="ok")
+            case 'pull_request':
+                return handle_pr(env, data)
+            case 'status':
+                return handle_status(env, data)
+            case 'issue_comment':
+                return handle_comment(env, data)
+            case 'pull_request_review':
+                return handle_review(env, data)
+            case event:
+                _logger.warning('Unknown event %s', event)
+                return Response(
+                    status=422,
+                    mimetype="text/plain",
+                    response="Not setup to receive event.",
+                )
 
     def _format(self, request):
         headers = '\n'.join('\t%s: %s' % entry for entry in request.headers.items())
@@ -438,27 +514,56 @@ def handle_pr(env, event):
 
 def handle_status(env: Environment, event: dict) -> Response:
     _logger.info(
-        'status on %(sha)s %(context)s:%(state)s (%(target_url)s) [%(description)r]',
+        '%(sha)s:%(context)s:%(state)s (%(target_url)s) [%(description)r]',
         event
     )
-    status_value = json.dumps({
+    updated_at = event.get('created_at', datetime.now().isoformat(timespec='seconds')).rstrip('Z')
+    status_value = {
         event['context']: {
             'state': event['state'],
             'target_url': event['target_url'],
             'description': event['description'],
-            'updated_at': datetime.now().isoformat(timespec='seconds'),
+            'updated_at': updated_at,
         }
-    })
-    # create status, or merge update into commit *unless* the update is already
-    # part of the status (dupe status)
-    env.cr.execute("""
-        INSERT INTO runbot_merge_commit AS c (sha, to_check, statuses)
-        VALUES (%s, true, %s)
-        ON CONFLICT (sha) DO UPDATE
-            SET to_check = true,
-                statuses = c.statuses::jsonb || EXCLUDED.statuses::jsonb
-            WHERE NOT c.statuses::jsonb @> EXCLUDED.statuses::jsonb
-    """, [event['sha'], status_value], log_exceptions=False)
+    }
+    for n in range(1, MAX_TRIES_ON_CONCURRENCY_FAILURE+1):
+        try:
+            commit = env['runbot_merge.commit'].search([('sha', '=', event['sha'])])
+            if commit:
+                st = json.loads(commit.statuses)
+                # check if we already have a more recent status for this context
+                if (ctx := st.get(event['context'])) and ctx.get('updated_at', '') >= updated_at:
+                    _logger.info(
+                        "%(sha)s:%(context)s ignored: outdated",
+                        event
+                    )
+                    return Response("outdated status", status=200)  # or 409 conflict?
+
+                updated = st | status_value
+                if updated != st:
+                    commit.statuses = json.dumps(updated)
+            else:
+                env['runbot_merge.commit'].create({
+                    'sha': event['sha'],
+                    'statuses': json.dumps(status_value),
+                })
+            env.cr.flush()
+            break
+        except (
+            psycopg2.errors.UniqueViolation,
+            psycopg2.errors.SerializationFailure,
+            # shouldn't come into play but might as well also handle these
+            psycopg2.errors.DeadlockDetected,
+            psycopg2.errors.LockNotAvailable,
+        ):
+            env.cr.rollback()
+            env.reset()
+            env.registry.reset_changes()
+            if n == MAX_TRIES_ON_CONCURRENCY_FAILURE:
+                _logger.warning("Serialization failure on statuses", exc_info=True)
+                return Response(status=500)
+            # fuzz sleep as in `retrying`
+            time.sleep(random.uniform(0.0, 2 ** n))
     env.ref("runbot_merge.process_updated_commits")._trigger()
 
     return Response(status=204)
@@ -510,14 +615,6 @@ def handle_review(env: Environment, event: dict) -> Response:
 def handle_ping(env: Environment, event: dict) -> Response:
     _logger.info("Got ping! %s", event['zen'])
     return Response(mimetype="text/plain", response="pong")
-
-EVENTS: dict[str, Callable[[Environment, dict], Response]] = {
-    'pull_request': handle_pr,
-    'status': handle_status,
-    'issue_comment': handle_comment,
-    'pull_request_review': handle_review,
-    'ping': handle_ping,
-}
 
 def _handle_comment(
         env: Environment,

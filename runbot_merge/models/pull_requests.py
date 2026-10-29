@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import builtins
 import collections
 import contextlib
 import datetime
@@ -16,26 +15,30 @@ import statistics
 import subprocess
 import tempfile
 import typing
+import zlib
+from collections.abc import Iterable, Iterator
 from enum import IntEnum
 from functools import reduce
 from operator import itemgetter
-from typing import Optional, Union, List, Iterator, Tuple
 
 import psycopg2.errors
 import werkzeug
 import werkzeug.urls
 from markupsafe import Markup, escape
 
-from odoo import api, fields, models, tools, Command
+from odoo import Command, api, fields, models, tools
 from odoo.addons.base.controllers.rpc import OdooMarshaller
 from odoo.exceptions import UserError, ValidationError
 from odoo.osv import expression
-from odoo.tools import html_escape, Reverse, mute_logger, groupby
+from odoo.tools import Reverse, groupby, html_escape, mute_logger, file_open
 from odoo.tools.safe_eval import safe_eval
 
-from .commands import commands, AccessFailure, Rel
-from .. import github, exceptions, controllers, utils, git
-from .utils import readonly, dfm, EnumSelection
+from .. import controllers, exceptions, git, github, utils
+from .commands import AccessFailure, Rel, commands
+from .utils import EnumSelection, dfm, readonly
+
+if typing.TYPE_CHECKING:
+    from .batch import Batch
 
 Conflict = tuple[str, str, str, list[str]]
 
@@ -127,8 +130,17 @@ All substitutions are tentatively applied sequentially to the input.
             vals['status_ids'] = [(5, 0, {})] + [(0, 0, {'context': c}) for c in st.split(',')]
         return super().write(vals)
 
-    def github(self, token_field='github_token') -> github.GH:
-        return github.GH(self.project_id[token_field], self.name)
+    def github(self) -> github.GH:
+        return github.GH(self.project_id.github_id._main_token(self.name), self.name)
+
+    def _git(self) -> tuple[str, str, str]:
+        token = self.project_id.github_id._main_token(self.name)
+        return f'https://github.com/{self.name}', 'x-access-token', token
+
+    def _fw_git(self) -> tuple[str, str, str]:
+        assert self.fp_remote_target
+        token = self.project_id.github_id._fp_token(self.name)
+        return f'https://github.com/{self.fp_remote_target}', 'x-access-token', token
 
     def _auto_init(self):
         res = super()._auto_init()
@@ -841,7 +853,7 @@ class PullRequests(models.Model):
             return 'ok'
 
         fedback = False
-        def feedback(message: Optional[str] = None, close: bool = False):
+        def feedback(message: str | None = None, close: bool = False):
             nonlocal fedback
             if message:
                 fedback = True
@@ -882,7 +894,7 @@ class PullRequests(models.Model):
             return "\n".join(s)
 
         try:
-            cmds: List[commands.Command] = list(acls.commands_check(
+            cmds: list[commands.Command] = list(acls.commands_check(
                 ps
                 for line in commandlines
                 for ps in commands.Parser(line.rstrip())
@@ -1174,7 +1186,7 @@ For your own safety I've ignored *everything in your entire comment*.
             feedback(message=f"@{login}{rejections}{footer}")
         return 'rejected'
 
-    def _maybe_update_limit(self, limit: str) -> Tuple[Ping, str]:
+    def _maybe_update_limit(self, limit: str) -> tuple[Ping, str]:
         limit_id = self.env['runbot_merge.branch'].with_context(active_test=False).search([
             ('project_id', '=', self.repository.project_id.id),
             ('name', '=', limit),
@@ -1264,7 +1276,6 @@ For your own safety I've ignored *everything in your entire comment*.
                 'repository': p.repository.id,
                 'pull_request': p.number,
                 'message': root_msg,
-                'token_field': 'fp_github_token',
             }
             # send messages to source and root unless root is self (as it
             # already gets the normal message)
@@ -1274,7 +1285,7 @@ For your own safety I've ignored *everything in your entire comment*.
         return Ping.NO, msg
 
 
-    def _find_next_target(self) -> Optional[Branch]:
+    def _find_next_target(self) -> Branch | None:
         """ Finds the branch between target and limit_id which follows
         reference
         """
@@ -1512,7 +1523,6 @@ For your own safety I've ignored *everything in your entire comment*.
             self.env.ref('runbot_merge.forwardport.ci.failed')._send(
                 repository=self.repository,
                 pull_request=self.number,
-                token_field='fp_github_token',
                 format_args={'pr': self, 'ci': ci},
             )
 
@@ -1742,7 +1752,6 @@ For your own safety I've ignored *everything in your entire comment*.
                     self.env.ref('runbot_merge.forwardport.update.detached')._send(
                         repository=p.repository,
                         pull_request=p.number,
-                        token_field='fp_github_token',
                         format_args={'pr': p.with_context(
                             suppress_ping=p.source_id.batch_id.fw_policy=='skipmerge',
                         )},
@@ -1751,7 +1760,6 @@ For your own safety I've ignored *everything in your entire comment*.
                     self.env.ref('runbot_merge.forwardport.update.parent')._send(
                         repository=parent.repository,
                         pull_request=parent.number,
-                        token_field='fp_github_token',
                         format_args={
                             'pr': parent.with_context(
                                 suppress_ping=p.source_id.batch_id.fw_policy=='skipmerge',
@@ -1853,7 +1861,7 @@ For your own safety I've ignored *everything in your entire comment*.
             if commit:
                 self.env.cr.commit()
 
-    def _build_message(self, message: Union['PullRequests', str], related_prs: 'PullRequests' = (), merge: bool = True) -> 'Message':
+    def _build_message(self, message: PullRequests | str, related_prs: Iterable[PullRequests] = (), merge: bool = True) -> Message:
         # handle co-authored commits (https://help.github.com/articles/creating-a-commit-with-multiple-authors/)
         m = Message.from_message(message)
         if not is_mentioned(message, self):
@@ -1990,7 +1998,6 @@ For your own safety I've ignored *everything in your entire comment*.
         self.env.ref(template)._send(
             repository=self.repository,
             pull_request=self.number,
-            token_field='fp_github_token',
             format_args=format_args,
         )
 
@@ -2031,7 +2038,7 @@ For your own safety I've ignored *everything in your entire comment*.
             target_branch: Branch,
             *,
             forward: bool,
-    ) -> tuple[typing.Optional[Conflict], str]:
+    ) -> tuple[Conflict | None, str]:
         """ Creates a forward-port for the current PR to ``target_branch`` under
         ``fp_branch_name``.
 
@@ -2146,7 +2153,7 @@ For your own safety I've ignored *everything in your entire comment*.
         # <xxx>.cherrypick.<number>
         logger = _logger.getChild(str(self.id)).getChild('cherrypick')
 
-        commits = self.repository.github('fp_github_token').commits(self.number)
+        commits = self.repository.github().commits(self.number)
         logger.info(
             "%s: copy %s commits to %s (%s)%s",
             self, len(commits), branch.name, head,
@@ -2279,7 +2286,6 @@ For your own safety I've ignored *everything in your entire comment*.
                 self.env.ref('runbot_merge.forwardport.reminder')._send(
                     repository=pr.repository,
                     pull_request=pr.number,
-                    token_field='fp_github_token',
                     format_args={'pr': pr, 'source': pr.source_id},
                 )
 
@@ -2445,10 +2451,17 @@ class Commit(models.Model):
     """
     _name = _description = 'runbot_merge.commit'
     _rec_name = 'sha'
+    _log_access = False
 
     sha = fields.Char(required=True)
-    statuses = fields.Char(help="json-encoded mapping of status contexts to states", default="{}")
+    statuses = fields.Char(
+        help="json-encoded mapping of status contexts to states",
+        compute='_compute_statuses',
+        inverse='_write_statuses',
+    )
+    statuses_compressed = fields.Binary(attachment=False)
     to_check = fields.Boolean(default=False)
+    create_date = fields.Datetime(required=True, default=fields.Datetime.now)
 
     head_ids = fields.Many2many('runbot_merge.stagings', relation='runbot_merge_stagings_heads', column2='staging_id', column1='commit_id')
     commit_ids = fields.Many2many('runbot_merge.stagings', relation='runbot_merge_stagings_commits', column2='staging_id', column1='commit_id')
@@ -2519,6 +2532,11 @@ class Commit(models.Model):
             CREATE INDEX IF NOT EXISTS runbot_merge_to_process
             ON runbot_merge_commit ((1)) WHERE to_check
         """)
+        # disable TOAST compression since values are already compressed
+        self._cr.execute("""
+            ALTER TABLE runbot_merge_commit
+                ALTER COLUMN statuses_compressed SET STORAGE EXTERNAL
+        """)
         return res
 
     def _compute_prs(self):
@@ -2527,6 +2545,37 @@ class Commit(models.Model):
                 ('head', '=', c.sha),
             ])
 
+    @api.depends('statuses_compressed')
+    def _compute_statuses(self):
+        global statuses_decompressor
+        if statuses_decompressor is None:
+            with file_open('runbot_merge/data/runbot_merge.commit.statuses.v1.zdict', 'rb') as f:
+                dec = statuses_decompressor = zlib.decompressobj(wbits=-15, zdict=f.read())
+        else:
+            dec = statuses_decompressor
+
+        for commit in self:
+            if commit.statuses_compressed:
+                d = dec.copy()
+                commit.statuses = (d.decompress(commit.statuses_compressed) + d.flush()).decode()
+            else:
+                commit.statuses = '{}'
+
+    def _write_statuses(self):
+        global statuses_compressor
+        if statuses_compressor is None:
+            with file_open('runbot_merge/data/runbot_merge.commit.statuses.v1.zdict', 'rb') as f:
+                comp = statuses_compressor = zlib.compressobj(level=9, memLevel=9, wbits=-15, zdict=f.read())
+        else:
+            comp = statuses_compressor
+        for commit in self:
+            if commit.statuses and commit.statuses != '{}':
+                c = comp.copy()
+                commit.statuses_compressed = c.compress(commit.statuses.encode()) + c.flush()
+            else:
+                commit.statuses_compressed = False
+
+statuses_compressor = statuses_decompressor = None
 
 class Stagings(models.Model):
     _name = 'runbot_merge.stagings'
@@ -2651,7 +2700,7 @@ class Stagings(models.Model):
             vals['staging_end'] = fields.Datetime.now()
             self.env.ref("runbot_merge.staging_cron")._trigger()
 
-            if self.state == 'success' and self.target.project_id.fp_github_token:
+            if self.state == 'success' and self.target.project_id.fp_enabled:
                 # check all batches to see if they should be forward ported
                 for b in self.with_context(active_test=False).batch_ids:
                     if b.fw_policy == 'no':
@@ -2780,8 +2829,7 @@ class Stagings(models.Model):
                       + datetime.timedelta(minutes=staging.target.project_id.ci_timeout)
 
                 if timeout > staging.timeout_limit:
-                    staging.timeout_limit = timeout
-                    self.env.ref("runbot_merge.merge_cron")._trigger(timeout)
+                    staging.timeout_limit = timeout + datetime.timedelta(minutes=1)
                     _logger.debug("%s got pending status, bumping timeout to %s", staging, timeout)
 
     def action_cancel(self):
@@ -2926,12 +2974,12 @@ class Stagings(models.Model):
         """
         logger = _logger.getChild('cron')
         if not self.active:
-            logger.info("Staging %s is not active, ignoring status check", self)
+            logger.info("%s not active, ignoring status check", self)
             return
 
-        logger.info("Checking active staging %s (state=%s)", self, self.state)
         project = self.target.project_id
         if self.state == 'success':
+            logger.info("%s successful, integrating", self)
             self.env.cr.execute('''
             SELECT 1 FROM runbot_merge_pull_requests
             WHERE id in %s
@@ -2941,9 +2989,11 @@ class Stagings(models.Model):
                 self._safety_dance()
             except exceptions.FastForwardError as e:
                 logger.warning(
-                    "Could not fast-forward successful staging on %s:%s: %s",
-                    e.args[0], self.target.name,
-                    e,
+                    "%s could not fast-forward on %s:%s: %s",
+                    self,
+                    e.args[0],
+                    self.target.name,
+                    e.__cause__,
                 )
                 self.write({
                     'state': 'ff_failed',
@@ -2951,23 +3001,40 @@ class Stagings(models.Model):
                 })
             except exceptions.InconsistentIntegration as e:
                 merged, failed = e.args
-                merged_repos = merged.repository_id
+                pushed_repos = merged.repository_id
                 failed_repos = failed.repository_id
-
-                merged_batches = self.batch_ids.filtered(lambda b: b.prs.repository <= merged_repos)
-                skipped_batches = self.batch_ids.filtered(lambda b: b.prs.repository <= failed_repos)
-                error_batches = self.batch_ids - (merged_batches | skipped_batches)
-
-                merged_batches.merge_date = fields.Datetime.now()
-                self.target.staging_enabled = False
-                self.fail(
-                    "inconsistent integration - "
-                    f"succeeded for {', '.join(r.name for r in merged_repos)} "
-                    f"but failed for {', '.join(r.name for r in failed_repos)}.",
-                    prs=error_batches.prs,
+                logger.warning(
+                    "%s inconsistent integration on %s:%s: %s",
+                    self,
+                    failed_repos[0].name,
+                    self.target.name,
+                    e.__cause__,
                 )
+
+                self.batch_ids.prs.error = True
+                self.target.staging_enabled = False
+                self.write({
+                    'state': 'ff_failed',
+                    'reason': f"inconsistent integration: push failed on {failed_repos[0].name}"
+                })
                 self.with_context(mail_post_autofollow=True).message_post(
-                    body=f"Staging on {self.target.name} has been disabled pending investigation.",
+                    body=Markup(
+                        """\
+<p>Inconsistent integration, staging on {} has been disabled for investigation.</p>
+<p>All PRs set to error.</p>
+<p>
+    push error: {}<br>
+    pushed: {}<br>
+    not pushed: {}
+</p>
+<pre><code>{}</code></pre>
+""").format(
+                        self.target.name,
+                        failed_repos[0].name,
+                        ', '.join(r.name for r in pushed_repos),
+                        ', '.join(r.name for r in failed_repos[1:]),
+                        e.__cause__,
+                    ),
                     partner_ids=self.env.ref("runbot_merge.group_admin").users.partner_id.ids,
                 )
             else:
@@ -3003,7 +3070,10 @@ class Stagings(models.Model):
             finally:
                 self.write({'active': False})
         elif self.state == 'failure' or self.is_timed_out():
+            logger.info("%s failed, processing", self)
             self.try_splitting()
+        else:
+            logger.info("%s %s", self, self.state)
 
     def is_timed_out(self):
         return fields.Datetime.from_string(self.timeout_limit) < datetime.datetime.now()
@@ -3034,10 +3104,9 @@ class Stagings(models.Model):
         # first force-push the current targets to all tmps
         for head in self.heads:
             repo = head.repository_id
-            repo_url, r = repos[repo] = (
-                git.source_url(repo),
-                git.get_local(repo).stdout().with_config(encoding="utf-8", check=False),
-            )
+            repo_url, user, password = repo._git()
+            r = git.get_local(repo).stdout().with_config(encoding="utf-8", check=False).with_credentials(user, password)
+            repos[repo] = (repo_url, r)
             # can't push an object you don't have locally...
             branch_head = next((
                 h for h in r.fetch_heads(repo, f"refs/heads/{self.target.name}", head.commit_id.sha)
