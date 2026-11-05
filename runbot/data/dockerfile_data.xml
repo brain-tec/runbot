@@ -23,7 +23,7 @@
         <field name="layer_type">template</field>
         <field name="name">Install pip packages</field>
         <field name="values">{}</field>
-        <field name="content">RUN python3 -m pip install --no-cache-dir {$packages}</field>
+        <field name="content">RUN python3 -m pip install --no-cache-dir {$packages} &amp;&amp; if [ -d /venv/main ]; then chmod -R a+rX /venv/main; fi</field>
     </record>
 
     <record id="runbot.docker_layer_create_user_template" model="runbot.docker_layer">
@@ -112,7 +112,7 @@ ARG PG_VERSION=18</field>
         <field name="dockerfile_id" ref="runbot.docker_default"/>
         <field name="layer_type">reference_layer</field>
         <field name="name">Install base debian packages</field>
-        <field name="packages">apt-transport-https build-essential ca-certificates curl faketime file fonts-freefont-ttf fonts-noto-cjk gawk gnupg gsfonts libldap2-dev libjpeg9-dev libsasl2-dev libxslt1-dev lsb-release npm ocrmypdf sed sudo unzip zstd xfonts-75dpi zip zlib1g-dev</field>
+        <field name="packages">apt-transport-https build-essential ca-certificates curl faketime file fonts-freefont-ttf fonts-noto-cjk gawk gnupg gsfonts libldap2-dev libjpeg-dev libsasl2-dev libxslt1-dev lsb-release npm ocrmypdf sed sudo unzip zstd xfonts-75dpi zip zlib1g-dev</field>
         <field name="reference_docker_layer_id" ref="runbot.docker_layer_debian_packages_template"/>
     </record>
 
@@ -203,7 +203,7 @@ RUN curl -sSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /etc/apt/tru
         <field name="dockerfile_id" ref="runbot.docker_default"/>
         <field name="layer_type">template</field>
         <field name="name">Install chrome</field>
-        <field name="values" eval="{'chrome_version': '150.0.7871.114-1'}"/>
+        <field name="values" eval="{'chrome_version': '155.0.8059.84-1'}"/>
         <field name="content">RUN curl -sSL https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_{chrome_version}_amd64.deb -o /tmp/chrome.deb \
     &amp;&amp; apt-get update \
     &amp;&amp; apt-get -y install --no-install-recommends /tmp/chrome.deb \

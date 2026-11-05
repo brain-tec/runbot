@@ -42,7 +42,7 @@ ENV LANG C.UTF-8
 USER root
 RUN set -x ; \
     apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends apt-transport-https build-essential ca-certificates curl faketime file fonts-freefont-ttf fonts-noto-cjk gawk gnupg gsfonts libldap2-dev libjpeg9-dev libsasl2-dev libxslt1-dev lsb-release npm ocrmypdf sed sudo unzip zstd xfonts-75dpi zip zlib1g-dev \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends apt-transport-https build-essential ca-certificates curl faketime file fonts-freefont-ttf fonts-noto-cjk gawk gnupg gsfonts libldap2-dev libjpeg-dev libsasl2-dev libxslt1-dev lsb-release npm ocrmypdf sed sudo unzip zstd xfonts-75dpi zip zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 ENV PG_VERSION=${PG_VERSION}
 RUN set -x ; \
@@ -79,7 +79,7 @@ RUN deluser ubuntu
 RUN groupadd -g 1337 TestUser && useradd --create-home -u 4242 -g TestUser -G audio,video TestUser
 USER TestUser
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
-RUN python3 -m pip install --no-cache-dir ebaysdk==2.1.5 pdf417gen==0.7.1
+RUN python3 -m pip install --no-cache-dir ebaysdk==2.1.5 pdf417gen==0.7.1 && if [ -d /venv/main ]; then chmod -R a+rX /venv/main; fi
 ADD --chown=TestUser https://raw.githubusercontent.com/odoo/odoo/master/requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/requirements.txt
 """, docker_render)
