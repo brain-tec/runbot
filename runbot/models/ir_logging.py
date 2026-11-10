@@ -76,3 +76,27 @@ class IrLogging(models.Model):
             if 'create_date' in vals:
                 result_vals['create_date'] = vals['create_date']
         return result_vals_list
+
+    def _gc_logs(self):
+        """ Remove old logs from the leader database:
+            - after `runbot.logs_gc_days_info` days: logs of the run step and server logs that are not warnings/errors
+            - after `runbot.logs_gc_days` days: all logs
+        """
+        icp = self.env['ir.config_parameter'].sudo()
+        gc_days_info = int(icp.get_param('runbot.logs_gc_days_info', default=30))
+        gc_days = int(icp.get_param('runbot.logs_gc_days', default=180))
+        run_step = self.env.ref('runbot.runbot_build_config_step_run', raise_if_not_found=False)
+        self.env.cr.execute("""
+            DELETE FROM ir_logging
+            WHERE create_date < NOW() - make_interval(days => %s)
+            AND (
+                active_step_id = %s
+                OR (level NOT IN ('ERROR', 'WARNING', 'CRITICAL') AND type = 'server')
+            )
+        """, [gc_days_info, run_step.id if run_step else None])
+        _logger.info('Removed %s info logs older than %s days', self.env.cr.rowcount, gc_days_info)
+        self.env.cr.execute("""
+            DELETE FROM ir_logging
+            WHERE create_date < NOW() - make_interval(days => %s)
+        """, [gc_days])
+        _logger.info('Removed %s logs older than %s days', self.env.cr.rowcount, gc_days)
