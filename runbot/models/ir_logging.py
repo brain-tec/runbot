@@ -21,11 +21,14 @@ class IrLogging(models.Model):
     _order = 'id'
 
     build_id = fields.Many2one('runbot.build', 'Build', index=True, ondelete='cascade')
-    active_step_id = fields.Many2one('runbot.build.config.step', 'Active step', index=True)
-    type = fields.Selection(selection_add=TYPES, string='Type', required=True, index=True, ondelete={t[0]: 'cascade' for t in TYPES})
+    active_step_id = fields.Many2one('runbot.build.config.step', 'Active step')
+    type = fields.Selection(selection_add=TYPES, string='Type', required=True, index=False, ondelete={t[0]: 'cascade' for t in TYPES})
     error_content_id = fields.Many2one('runbot.build.error.content', compute='_compute_known_error')  # remember to never store this field
     dbname = fields.Char(string='Database Name', index=False)
+    level = fields.Char(index=False)
     metadata = JsonDictField('Metadata')
+
+    _create_date_brin = models.Index("USING brin (create_date)")  # used by _gc_logs
 
     @api.model_create_multi
     def create(self, vals_list):
@@ -79,7 +82,7 @@ class IrLogging(models.Model):
 
     def _gc_logs(self):
         """ Remove old logs from the leader database:
-            - after `runbot.logs_gc_days_info` days: logs of the run step and server logs that are not warnings/errors
+            - after `runbot.logs_gc_days_info` days: logs of the run step and logs that are not warnings/errors/separators
             - after `runbot.logs_gc_days` days: all logs
         """
         icp = self.env['ir.config_parameter'].sudo()
@@ -91,7 +94,7 @@ class IrLogging(models.Model):
             WHERE create_date < NOW() - make_interval(days => %s)
             AND (
                 active_step_id = %s
-                OR (level NOT IN ('ERROR', 'WARNING', 'CRITICAL') AND type = 'server')
+                OR upper(level) NOT IN ('ERROR', 'WARNING', 'WARN', 'CRITICAL', 'SEPARATOR')
             )
         """, [gc_days_info, run_step.id if run_step else None])
         _logger.info('Removed %s info logs older than %s days', self.env.cr.rowcount, gc_days_info)

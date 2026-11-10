@@ -1475,7 +1475,7 @@ Initiating shutdown
         with patch('builtins.open', mock_open(read_data=file_content)):
             self.config_step._make_results(self.build)
         self.assertEqual(str(self.build.job_end), '1970-01-01 02:00:00')
-        self.assertEqual(self.logs, [('INFO', 'Getting results for build %s' % self.build.dest)])
+        self.assertEqual(self.logs, [])
         self.assertEqual(self.build.local_result, 'ok')
 
     def test_make_result_no_shutdown(self):
@@ -1489,7 +1489,6 @@ Some post install stuff
         self.assertEqual(str(self.build.job_end), '1970-01-01 02:00:00')
         self.assertEqual(self.build.local_result, 'ko')
         self.assertEqual(self.logs, [
-            ('INFO', 'Getting results for build %s' % self.build.dest),
             ('ERROR', 'No "Initiating shutdown" found in logs.\n'
    '\n'
    'Loading stuff\n'
@@ -1506,7 +1505,6 @@ Loading stuff
         self.assertEqual(str(self.build.job_end), '1970-01-01 02:00:00')
         self.assertEqual(self.build.local_result, 'ko')
         self.assertEqual(self.logs, [
-            ('INFO', 'Getting results for build %s' % self.build.dest),
             ('ERROR', 'Modules loaded not found in logs\n\nLoading stuff\n'),
         ])
 
@@ -1541,7 +1539,6 @@ AttributeError: module 'lxml.html.clean' has no attribute 'defs'"""
 2025-05-04 08:40:00,000 42 INFO test_runbot odoo.addons.runbot.tests.test_build_config_step: FAIL: TestMakeResult.test_make_result_traceback
 {self.traceback_example}"""
         self.assertEqual(self.logs, [
-            ('INFO', 'Getting results for build %s' % self.build.dest),
             ('ERROR', expected),
         ])
 
@@ -1557,7 +1554,6 @@ AttributeError: module 'lxml.html.clean' has no attribute 'defs'"""
         expected = f"""Traceback found in logs:
 {self.traceback_example}"""
         self.assertEqual(self.logs, [
-            ('INFO', 'Getting results for build %s' % self.build.dest),
             ('ERROR', expected),
         ])
 
@@ -1576,7 +1572,6 @@ Initiating shutdown
             self.config_step._make_results(self.build)
         self.assertEqual(str(self.build.job_end), '1970-01-01 02:00:00')
         self.assertEqual(self.logs, [
-            ('INFO', 'Getting results for build %s' % self.build.dest),
         ])
         self.assertEqual(self.build.local_result, 'ok')
 
@@ -1595,7 +1590,6 @@ Initiating shutdown
         self.assertEqual(str(self.build.job_end), '1970-01-01 02:00:00')
         self.assertEqual(self.build.local_result, 'ko')
         self.assertEqual(self.logs, [
-            ('INFO', 'Getting results for build %s' % self.build.dest),
             ('ERROR', """Error found in logs:
 2024-05-14 09:54:22,692 17 ERROR dbname path.to.test: FAIL: TestClass.test_
 2024-05-14 09:54:22,692 17 ERROR dbname path.to.test: FAIL: TestClass.test2_"""),
@@ -1614,7 +1608,6 @@ Initiating shutdown
         self.assertEqual(str(self.build.job_end), '1970-01-01 02:00:00')
         self.assertEqual(self.build.local_result, 'warn')
         self.assertEqual(self.logs, [
-            ('INFO', 'Getting results for build %s' % self.build.dest),
             ('WARNING', 'Warning found in logs:\n2019-12-17 17:34:37,692 17 WARNING dbname path.to.test: timeout exceded')
         ])
 
@@ -1625,7 +1618,6 @@ Initiating shutdown
 
         self.assertEqual(self.build.local_result, 'ko')
         self.assertEqual(self.logs, [
-            ('INFO', 'Getting results for build %s' % self.build.dest),
             ('ERROR', 'Log file not found at the end of test job')
         ])
 
@@ -1640,9 +1632,7 @@ Initiating shutdown
         self.build.local_result = 'warn'
         with patch('builtins.open', mock_open(read_data=file_content)):
             self.config_step._make_results(self.build)
-        self.assertEqual(self.logs, [
-            ('INFO', 'Getting results for build %s' % self.build.dest)
-        ])
+        self.assertEqual(self.logs, [])
         self.assertEqual(str(self.build.job_end), '1970-01-01 02:00:00')
         self.assertEqual(self.build.local_result, 'warn')
 
