@@ -79,7 +79,7 @@ RUN deluser ubuntu
 RUN groupadd -g 1337 TestUser && useradd --create-home -u 4242 -g TestUser -G audio,video TestUser
 USER TestUser
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
-RUN python3 -m pip install --no-cache-dir ebaysdk==2.1.5 pdf417gen==0.7.1 && if [ -d /venv/main ]; then chmod -R a+rX /venv/main; fi
+RUN python3 -m pip install --no-cache-dir ebaysdk==2.1.5 pdf417gen==0.7.1 && if [ -d /venv/main ]; then chmod -R a+rwX /venv/main; fi
 ADD --chown=TestUser https://raw.githubusercontent.com/odoo/odoo/master/requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/requirements.txt
 """, docker_render)
@@ -302,7 +302,7 @@ ENV USER TestUser
             'image_id': 'xxx',
             'success': True,
             'duration': 69,
-            'image': 'd0d0caca',
+            'image': MagicMock(attrs={'Size': 125829120}),
             'msg': '',
         }
 
@@ -314,3 +314,4 @@ ENV USER TestUser
         dockerfile_file_handle.write.assert_called_once_with(expected_content)
         self.patchers['docker_path_hardlink_to'].assert_called()
         self.patchers['docker_get_docker_metadata'].assert_called()
+        self.assertEqual(dockerfile.build_results.mapped('image_size'), [120])

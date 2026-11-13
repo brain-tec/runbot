@@ -660,6 +660,9 @@ class ConfigStep(models.Model):
             description = child_data.pop('description', {})
             for create_config in self.env['runbot.build.config'].browse(child_data.get('config_id', config_ids.ids)):
                 child_data_values = {'config_data': {}, **child_data, 'config_id': create_config}
+                if 'make_stats' in config_data and 'make_stats' not in child_data_values['config_data']:
+                    # propagate make_stats to the whole build tree, unless the child defines its own
+                    child_data_values['config_data'] = {**child_data_values['config_data'], 'make_stats': config_data['make_stats']}
                 for _ in range(config_data.get('number_build', self.number_builds)):
                     count += 1
                     if count > max_build:
@@ -667,8 +670,7 @@ class ConfigStep(models.Model):
                         build._log('create_build', f'More than {max_build} build created, stopping', level='WARNING')
                         return
                     config_name = config_name or create_config.name
-                    child = build._add_child(child_data_values, orphan=self.make_orphan, description=description or config_name, reference_parent=reference_parent)
-                    build._log('create_build', 'created with config %s' % config_name, log_type='subbuild', path=str(child.id))
+                    build._add_child(child_data_values, orphan=self.make_orphan, description=description or config_name, reference_parent=reference_parent)
 
     def _make_python_ctx(self, build):
         def log(*args, **kwargs):
@@ -729,7 +731,7 @@ class ConfigStep(models.Model):
 
         exports = build._checkout()
 
-        build._log('run', 'Start running build %s' % build.dest)
+        build._logger('Start running build')
         # run server
         cmd = build._cmd(local_only=False, enable_log_db=self.enable_log_db)
 
@@ -907,6 +909,7 @@ class ConfigStep(models.Model):
             filestore_path = '/data/build/datadir/filestore/%s' % db_name
             filestore_dest = '%s/filestore/' % dump_dir
             zip_path = '/data/build/logs/%s.zip' % db_name
+            build.database_ids.filtered(lambda database: database.name == db_name).exported = True
             cmd.finals.append([echo('### Copying filestore')])
             cmd.finals.append(['cp', '-r', filestore_path, filestore_dest])
             cmd.finals.append([echo('### Generating zip')])
@@ -1153,7 +1156,7 @@ class ConfigStep(models.Model):
         if upgrade_paths:
             migrate_cmd += ['--upgrade-path', ','.join(upgrade_paths)]
 
-        build._log('run', 'Start migration build %s' % build.dest)
+        build._logger('Start migration build')
 
         migrate_cmd.finals.append(['psql', migrate_db_name, '-c', '"SELECT id, name, state FROM ir_module_module WHERE state NOT IN (\'installed\', \'uninstalled\', \'uninstallable\') AND name NOT LIKE \'test_%\' "', '>', '/data/build/logs/modules_states.txt'])
 
@@ -1348,9 +1351,11 @@ class ConfigStep(models.Model):
         if database_exported:
             db_suffix = config_data.get('db_name') or ((build.params_id.restore_db_suffix or build.params_id.dump_db.db_suffix) if not self.create_db else False) or self._get_db_name(build)
             db_suffix = re.sub(r'[^a-z0-9\-_]', '_', db_suffix.lower())
-            message += ' [@icon-download](%s%s-%s.zip)'
-            args += [build._http_log_url(), build.dest, db_suffix]
-            log_type = 'markdown'
+            db_name = f'{build.dest}-{db_suffix}'
+            if build.database_ids.filtered(lambda database: database.name == db_name and database.exported):
+                message += ' [@icon-download](%s%s.zip)'
+                args += [build._http_log_url(), db_name]
+                log_type = 'markdown'
         build._log('', message, *args, log_type=log_type)
 
         if self.coverage and self.coverage_make_report:
@@ -1449,7 +1454,7 @@ class ConfigStep(models.Model):
         build.write(return_value)  # old style support
 
     def _make_upgrade_results(self, build):
-        build._log('upgrade', 'Getting results for build %s' % build.dest)
+        build._logger('Getting results')
 
         if build.local_result != 'ko':
             checkers = [
@@ -1581,7 +1586,7 @@ class ConfigStep(models.Model):
         return -241
 
     def _make_custom_result(self, build, enabled_checkers=None, expected_logs=None):
-        build._log('run', 'Getting results for build %s' % build.dest)
+        build._logger('Getting results')
         if build.local_result != 'ko':
             checkers = [self._check_log]
             if enabled_checkers is None or "ERROR" in enabled_checkers:
@@ -1598,7 +1603,7 @@ class ConfigStep(models.Model):
             build.local_result = self._get_checkers_result(build, checkers)
 
     def _make_odoo_results(self, build):
-        build._log('run', 'Getting results for build %s' % build.dest)
+        build._logger('Getting results')
 
         if build.local_result != 'ko':
             checkers = [
@@ -1625,9 +1630,10 @@ class ConfigStep(models.Model):
         current_dynamic_step = self._get_dynamic_step(build) or {}
         if current_dynamic_step and 'make_stats' in current_dynamic_step:
             make_stats = current_dynamic_step['make_stats']
+        make_stats = build.params_id.config_data.get('make_stats', make_stats)
         if not make_stats:  # TODO garbage collect non sticky stat
             return
-        build._log('make_stats', 'Getting stats from log file')
+        build._logger('Getting stats from log file')
         log_path = build._path('logs', '%s.txt' % self.sanitized_name(build))
         if not os.path.exists(log_path):
             build._log('make_stats', 'Log **%s.txt** file not found', self.sanitized_name(build), level='INFO', log_type='markdown')
@@ -1646,8 +1652,10 @@ class ConfigStep(models.Model):
                         'category': category,
                         'values': values,
                     } for category, values in stats_per_regex.items()
+                    if values  # don't store a row when the regex didn't match anything
                 ]
-                self.env['runbot.build.stat'].create(build_stats)
+                if build_stats:
+                    self.env['runbot.build.stat'].create(build_stats)
         except Exception as e:
             message = '**An error occured while computing statistics of %s:**\n`%s`' % (build.job, str(e).replace('\\n', '\n').replace("\\'", "'"))
             _logger.exception(message)
@@ -1838,6 +1846,7 @@ class ConfigStep(models.Model):
             cmd = Command(pres, command, [])
             env_variables = []
             if current_step.get('export_database'):
+                self.env['runbot.database'].create({'name': db_name, 'build_id': build.id})
                 self._add_export_database(build, cmd, db_name, env_variables)
             cpu_limit = self.cpu_limit
             if current_step.get('cpu_limit'):
