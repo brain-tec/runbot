@@ -36,6 +36,9 @@
                   <field name="on_dev"/>
                 </group>
               </group>
+              <group string="Purpose">
+                <field name="purpose" nolabel="1" colspan="2"/>
+              </group>
               <group>
                 <group string="Repositories">
                   <field name="repo_ids" nolabel="1" colspan="2"/>
@@ -191,6 +194,7 @@
                       <field name="fetch_pull" string="PR"/>
                       <field name="send_status"/>
                       <field name="token" password="True"/>
+                      <field name="webhook_secret" password="True"/>
                     </list>
                   </field>
                 </group>
@@ -230,6 +234,7 @@
                 <field name="sequence"/>
                 <field name="repo_id"/>
                 <field name="token" password="True"/>
+                <field name="webhook_secret" password="True"/>
                 <field name="fetch_pull"/>
                 <field name="fetch_heads"/>
                 <field name="send_status"/>

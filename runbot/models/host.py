@@ -83,7 +83,7 @@ class Host(models.Model):
             host.build_ids = self.env['runbot.build'].search([('host', '=', host.name), ('local_state', 'in', ('pending', 'testing', 'running'))])
 
     def _static_url(self):
-        use_ssl = self.env['ir.config_parameter'].get_param('runbot.use_ssl', default=True)
+        use_ssl = self.env['ir.config_parameter'].sudo().get_param('runbot.use_ssl', default=True)
         scheme = 'https' if use_ssl else 'http'
         return f'{scheme}://{self.name}/runbot/static/'
 
@@ -278,10 +278,11 @@ class Host(models.Model):
         self.psql_version = res[0].split()[1] if res else False
 
     def _total_testing(self):
-        return sum(host.nb_testing for host in self)
+        return self.env['runbot.build'].search_count([('local_state', '=', 'testing')])
 
     def _total_workers(self):
-        return sum(host.nb_worker for host in self)
+        [(total,)] = self.env['runbot.host']._read_group([('assigned_only', '=', False)], [], ['nb_worker:sum'])
+        return total
 
     def _disable(self):
         """ Reserve host if possible """

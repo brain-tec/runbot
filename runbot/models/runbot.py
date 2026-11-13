@@ -76,16 +76,22 @@ class Runbot(models.AbstractModel):
         self._commit()
         return processed
 
+    def _get_build_to_assign(self):
+        non_allocated_domain = [('local_state', '=', 'pending'), ('host', '=', False)]
+        build_to_assign = self.env['runbot.build'].search(non_allocated_domain, order='priority_level')
+        waiting_builds = build_to_assign.filtered(lambda b: b.params_id.reference_build_id and b.params_id.reference_build_id.local_state not in ('running', 'done'))
+        build_to_assign -= waiting_builds
+        priority_builds = build_to_assign.filtered(lambda b: b.build_type == 'priority' or b.config_id.use_extra_slot)
+        build_to_assign -= priority_builds
+        scheduled_builds = build_to_assign.filtered(lambda b: b.build_type == 'scheduled')
+        normal_builds = build_to_assign - scheduled_builds
+        return priority_builds, normal_builds, scheduled_builds, waiting_builds
+
     def _assign_pending_builds(self):
         _logger.info('Assigning pending builds to hosts')
-        builders = self.env['runbot.host'].search([('nb_worker', '>', 0), ('is_builder', '=', True), ('assigned_only', '=', False)])
-        non_allocated_domain = [('local_state', '=', 'pending'), ('host', '=', False)]
+        priority_builds, normal_builds, scheduled_builds, __ = self._get_build_to_assign()
 
-        build_to_assign = self.env['runbot.build'].search(non_allocated_domain, order='priority_level')
-        build_to_assign = build_to_assign.filtered(lambda b: not b.params_id.reference_build_id or b.params_id.reference_build_id.local_state in ('running', 'done'))
-        priority_builds = build_to_assign.filtered(lambda b: b.build_type == 'priority' or b.config_id.use_extra_slot)
-        scheduled_builds = build_to_assign.filtered(lambda b: b.build_type == 'scheduled')
-        normal_builds = build_to_assign.filtered(lambda b: b.build_type not in ('priority', 'scheduled'))
+        builders = self.env['runbot.host'].search([('nb_worker', '>', 0), ('is_builder', '=', True), ('assigned_only', '=', False)])
 
         groups = self.env['runbot.build']._read_group(
             [('host', 'in', builders.mapped('name')), ('local_state', 'in', ('testing', 'pending'))],
@@ -412,7 +418,7 @@ class Runbot(models.AbstractModel):
         db_gc_days = int(icp.get_param('runbot.db_gc_days', default=30))
         min_create_date = datetime.now() - timedelta(days=db_gc_days)
         batches_to_backup = self.env['runbot.batch'].search([('bundle_id.sticky', '=', True), ('create_date', '>', min_create_date)])
-        builds_to_backup = batches_to_backup.slot_ids.filtered('trigger_id.backup_databases').build_id
+        builds_to_backup = batches_to_backup.slot_ids.filtered(lambda rec: rec.trigger_id.backup_databases and rec.build_id.global_state == 'done').build_id
         backup_location = self._path('backups')
         os.makedirs(backup_location, exist_ok=True)
         existing_backups = {f.removesuffix('.zip') for f in os.listdir(backup_location) if f.endswith('.zip')}
@@ -424,10 +430,13 @@ class Runbot(models.AbstractModel):
             _logger.info('Backing up database %s', database.name)
             url = f'{database.build_id._http_log_url()}{database.name}.zip'
             assert str(database.build_id.id) in database.name  # ensure that database are well uniquified by build in order to avoid to forget to adapt this if it changes in the future
+            backup_dest = self._path('backups', f'{database.name}.zip')
             try:
-                subprocess.run(['wget', '-O', self._path('backups', f'{database.name}.zip'), url], check=True)
+                subprocess.run(['wget', '-q', '-O', backup_dest, url], check=True)
             except subprocess.CalledProcessError as e:
                 _logger.error('Failed to backup database %s: %s', database.name, e)
+                if os.path.exists(backup_dest):
+                    os.remove(backup_dest)
         # cleanup old backup
         # we could keep them longer than on hosts but let's keep it simple for now
         for remaining_backup in existing_backups:

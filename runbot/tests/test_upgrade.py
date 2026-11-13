@@ -508,6 +508,7 @@ class TestUpgradeFlow(RunbotCase):
         self.start_patcher('docker_state', 'odoo.addons.runbot.models.build.docker_state', 'END')
         for current_build in db_builds:
             with self.subTest(current_build.description):
+                self.docker_run_calls.clear()
                 suffix = current_build.params_id.restore_db_suffix
                 source_dest = current_build.params_id.reference_build_id.dest
 
@@ -516,26 +517,20 @@ class TestUpgradeFlow(RunbotCase):
                     zip_name = f'{source_dest}-{suffix}.zip'
                     db_name = f'{current_build.dest}-{suffix}'
                     self.assertEqual(
-                        str(cmd).split(' && '),
+                        [c for c in str(cmd).split(' && ') if not c.startswith('echo')],
                         [
                             'mkdir /data/build/restore',
                             'cd /data/build/restore',
                             f'wget --retry-on-host-error {dump_url}',
                             f'unzip -q {zip_name}',
-                            'echo "### restoring filestore"',
                             f'mkdir -p /data/build/datadir/filestore/{db_name}',
                             f'mv filestore/* /data/build/datadir/filestore/{db_name}',
-                            'echo "### restoring db"',
                             f'createdb {db_name} -T template0',
                             f'psql -q {db_name} < dump.sql',
-                            'echo "### performing an analyze"',
-                            f'psql -q -d {db_name} -c "ANALYZE;"',
                             'cd /data/build',
-                            'echo "### cleaning"',
                             'rm -r restore',
-                            'echo "### listing modules"',
+                            f'psql -q -d {db_name} -c "ANALYZE;"',
                             f'psql {db_name} -c "select name from ir_module_module where state = \'installed\'" -t -A > /data/build/logs/restore_modules_installed.txt',
-                            'echo "### restore" "successful"'
                         ]
                     )
                 current_build._schedule()()

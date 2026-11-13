@@ -46,6 +46,27 @@ _logger = logging.getLogger(__name__)
 
 result_order = ['ok', 'warn', 'ko', 'skipped', 'killed', 'manually_killed']  # TODO remove manually_killed
 state_order = ['pending', 'testing', 'waiting', 'running', 'done']
+fa_results = {'ok': 'check', 'warn': 'exclamation-triangle', 'skipped': 'ban', 'ko': 'times', 'killed': 'ban'}
+
+
+def get_color_class(state, result):
+    if result == 'ko':
+        return 'danger'
+    if result == 'warn':
+        return 'warning'
+
+    if state == 'pending':
+        return 'default'
+    if state in ('testing', 'waiting'):
+        return 'info'
+
+    if result == 'ok':
+        return 'success'
+
+    if result in ('skipped', 'killed'):
+        return 'secondary'
+    return 'default'
+
 
 COPY_WHITELIST = [
     "params_id",
@@ -109,7 +130,7 @@ class BuildParameters(models.Model):
     upgrade_from_build_id = fields.Many2one('runbot.build', index=True)  # use to download db
     dump_db = fields.Many2one('runbot.database', index=True)  # use to define db to download
 
-    fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True, index=True)
+    fingerprint = fields.Char('Fingerprint', compute='_compute_fingerprint', store=True)  # indexed by _unique_fingerprint
 
     slot_ids = fields.One2many('runbot.batch.slot', 'params_id')
 
@@ -295,7 +316,7 @@ class BuildResult(models.Model):
     create_batch_id = fields.Many2one('runbot.batch', related='params_id.create_batch_id', store=True, index=True)
     create_bundle_id = fields.Many2one('runbot.bundle', related='params_id.create_batch_id.bundle_id', index=True)
     dynamic_config = JsonDictField('Dynamic Config', related='params_id.dynamic_config')
-    priority_level = fields.Integer('Priority', related='create_batch_id.priority_level', store=True, index=True)
+    priority_level = fields.Integer('Priority', related='create_batch_id.priority_level', store=True)  # see _pending_priority_level_idx
 
     # state machine
     global_state = fields.Selection(make_selection(state_order), string='Status', default='pending')
@@ -392,6 +413,7 @@ class BuildResult(models.Model):
     access_token = fields.Char('Token', default=lambda self: uuid.uuid4().hex)
 
     _global_state_idx = models.Index("(global_state) WHERE global_state != 'done'")
+    _pending_priority_level_idx = models.Index("(priority_level) WHERE local_state = 'pending'")  # used to order builds to assign
 
     @api.depends('description', 'params_id.config_id')
     def _compute_display_name(self):
@@ -790,7 +812,7 @@ class BuildResult(models.Model):
         # TODO don't rebuild if there is a more recent build for this params?
         values = {
             'params_id': self.params_id.id,
-            'build_type': 'rebuild' if self.build_type == "normal" else self.build_type,
+            'build_type': 'rebuild' if self.build_type != 'priority' else self.build_type,
         }
         if self.keep_host:
             values['host'] = self.host
@@ -898,7 +920,7 @@ class BuildResult(models.Model):
 
         # TODO cleanup remove
         log_db = self.env['ir.config_parameter'].get_param('runbot.logdb_name')
-        existing_db = [db for db in list_local_dbs(additionnal_conditions=additionnal_conditions) if db != log_db]
+        existing_db = [db for db in list_local_dbs(additionnal_conditions=additionnal_conditions) if db != log_db]  # TODO cleanup remove
 
         for db in _filter(dest_list=existing_db, label='db'):
             self._logger('Removing database')
@@ -931,26 +953,32 @@ class BuildResult(models.Model):
                 build_dir = Path(builds_dir) / dest
                 gcstamp = build_dir / '.gcstamp'
                 for bdir_file in build_dir.iterdir():
-                    if bdir_file.is_dir() and bdir_file.name not in ('logs', 'tests'):
-                        try:
-                            shutil.rmtree(bdir_file, onexc=remove_readonly)
-                        except Exception:
-                            _logger.exception('Failed to remove %s', bdir_file)
-                    elif bdir_file.name == 'logs':
-                        for log_file_path in bdir_file.iterdir():
-                            if log_file_path.is_dir():
-                                try:
-                                    shutil.rmtree(log_file_path, onexc=remove_readonly)
-                                except Exception:
-                                    _logger.exception('Failed to remove %s', log_file_path)
-                            elif log_file_path.name in ('run.txt', 'wake_up.txt'):
-                                log_file_path.unlink()
-                            elif log_file_path.name.endswith('.zip'):
-                                if not self.children_ids:
+                    if bdir_file.is_dir():
+                        if bdir_file.name == 'logs':
+                            # In logs folder, keep only some files, (txt, json, zip, zst)
+                            for log_file_path in bdir_file.iterdir():
+                                if log_file_path.is_dir():
+                                    try:
+                                        shutil.rmtree(log_file_path, onexc=remove_readonly)
+                                    except Exception:
+                                        _logger.exception('Failed to remove %s', log_file_path)
+                                elif log_file_path.name in ('run.txt', 'wake_up.txt'):
                                     log_file_path.unlink()
-                            elif not (log_file_path.name.endswith('.txt') or log_file_path.name.endswith('logs.json')):
-                                log_file_path.unlink()
-                    gcstamp.write_text(f'gc date: {datetime.datetime.now()}')
+                                elif log_file_path.name.split('.')[-1] in ('zip', 'zstd'):
+                                    if not self.children_ids:
+                                        log_file_path.unlink()
+                                elif not (log_file_path.name.endswith('.txt') or log_file_path.name.endswith('logs.json')):
+                                    log_file_path.unlink()
+                                    # todo we should unlink text file that are too big in all cases.
+                        elif bdir_file.name != 'tests':  # TODO we should at least check for big file there.
+                            try:
+                                shutil.rmtree(bdir_file, onexc=remove_readonly)
+                            except Exception:
+                                _logger.exception('Failed to remove %s', bdir_file)
+                    else:  # remove all files at root level
+                        bdir_file.unlink()
+
+                gcstamp.write_text(f'gc date: {datetime.datetime.now()}')
 
     def _find_port(self):
         # currently used port
@@ -990,7 +1018,6 @@ class BuildResult(models.Model):
         build.job_start = now()
         build.build_start = now()
         build.job_end = False
-        build._log('_schedule', 'Init build environment with config %s ' % build.params_id.config_id.name)
         try:
             os.makedirs(build._path('logs'), exist_ok=True)
         except Exception:
@@ -1179,7 +1206,7 @@ class BuildResult(models.Model):
                 build._log("run", message, level='ERROR')
                 build._kill(result='ko')
 
-    def _docker_run(self, step, cmd=None, ro_volumes=None, env_variables=None, **kwargs):
+    def _docker_run(self, step, cmd=None, ro_volumes=None, env_variables=None, needs_postgres=True, **kwargs):
         self.ensure_one()
         _ro_volumes = ro_volumes or {}
         ro_volumes = {}
@@ -1243,10 +1270,18 @@ class BuildResult(models.Model):
         self.env.flush_all()
         env_variables = env_variables or []
         env_variables.append('ODOO_RUNBOT=1')
+        if not needs_postgres:
+            _logger.info('Disabling postgres via empty PGDATA')
+            env_variables.append('PGDATA=')
+
         self.cpu_limit = kwargs.get('cpu_limit')
+        docker_file = self.env['runbot.dockerfile'].search([('image_tag', '=', kwargs['image_tag'].split('.')[0])], limit=1)    # TODO cleanup postgres remove
+        use_host_postgres = self.params_id.config_data.get('use_host_postgres', docker_file and docker_file.use_host_postgres)
+
         def start_docker():
             docker_run(
                 cmd=cmd,
+                use_host_postgres=use_host_postgres,    # TODO cleanup postgres remove
                 container_name=container_name,
                 build_dir=build_dir,
                 log_path=log_path,
@@ -1723,23 +1758,10 @@ class BuildResult(models.Model):
             return False
 
     def _get_color_class(self):
+        return get_color_class(self.global_state, self.global_result)
 
-        if self.global_result == 'ko':
-            return 'danger'
-        if self.global_result == 'warn':
-            return 'warning'
-
-        if self.global_state == 'pending':
-            return 'default'
-        if self.global_state in ('testing', 'waiting'):
-            return 'info'
-
-        if self.global_result == 'ok':
-            return 'success'
-
-        if self.global_result in ('skipped', 'killed'):
-            return 'secondary'
-        return 'default'
+    def _fa_result(self):
+        return fa_results.get(self.global_result, '')
 
     def _get_file_url(self, path, line=None):
         repo_name = path.replace('/data/build/', '').split('/')[0]

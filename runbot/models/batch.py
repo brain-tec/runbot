@@ -5,6 +5,7 @@ import subprocess
 
 from odoo import models, fields, api
 from ..common import dt2time, s2human_long, pseudo_markdown, markdown_escape
+from .build import get_color_class, fa_results
 
 _logger = logging.getLogger(__name__)
 
@@ -70,6 +71,13 @@ class Batch(models.Model):
         return self.env['runbot.build']._get_worst_result([
             batch_result, *self.slot_ids.build_id.mapped('global_result'),
         ])
+
+    def _fa_result(self):
+        return fa_results.get(self._get_global_result(), '')
+
+    def _get_color_class(self):
+        state = 'testing' if self.state in ('preparing', 'ready') else 'done'
+        return get_color_class(state, self._get_global_result())
 
     def _url(self):
         self.ensure_one()
@@ -540,7 +548,11 @@ class Batch(models.Model):
                         except ValueError:  # binary files
                             pass
                 if link_commit.file_changed <= (self.bundle_id.file_limit or 450) and link_commit.base_ahead <= (self.bundle_id.commit_limit or 50):
-                    link_commit.diff = commit.repo_id._git(['diff', f'{merge_base_sha}..{commit.name}', '--', '*'], errors='ignore')
+                    diff = commit.repo_id._git(['diff', f'{merge_base_sha}..{commit.name}', '--', '*'], errors='ignore')
+                    if len(diff) > 100_000_000:
+                        diff = "Too long " + str(len(diff))
+                        _logger.error('Diff too long while processing batch %s', self.id)
+                    link_commit.diff = diff
             except subprocess.CalledProcessError:
                 self._warning('Commit info failed between %s and %s', commit.name, base_head.name)
 
@@ -592,7 +604,6 @@ class BatchLog(models.Model):
 
 
 fa_link_types = {'created': 'hashtag', 'matched': 'link', 'rebuild': 'refresh'}
-fa_results = {'ok': 'check', 'warn': 'exclamation-triangle', 'skipped': 'ban', 'ko': 'times'}
 
 class BatchSlot(models.Model):
     _name = 'runbot.batch.slot'

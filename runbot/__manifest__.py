@@ -6,7 +6,7 @@
     'author': "Odoo SA",
     'website': "http://runbot.odoo.com",
     'category': 'Website',
-    'version': '5.18',
+    'version': '5.19',
     'application': True,
     'depends': ['base', 'base_automation', 'website', 'auth_oauth'],
     'data': [
@@ -77,12 +77,17 @@
             'runbot/static/src/js/fields/*',
             'runbot/static/src/js/components/*',
         ],
+        # docker grammar missing from the Prism build shipped by web, used by the dockerfile field widget
+        'html_editor.assets_prism': [
+            'runbot/static/lib/prismjs/prism-docker.js',
+        ],
         'web.assets_tests': [
             'runbot/static/tests/tours/*.js',
         ],
         'runbot.assets_frontend': [
             'runbot/static/lib/bootstrap/css/bootstrap.css',
             'runbot/static/lib/fontawesome/css/font-awesome.css',
+            'runbot/static/src/css/runbot_theme.css',
             'runbot/static/src/css/table_group.css',
             'runbot/static/src/css/runbot.css',
 
@@ -95,6 +100,9 @@
             'runbot/static/src/js/table_filter.js',
             'runbot/static/src/js/table_group.js',
             'runbot/static/src/js/runbot.js',
+        ],
+        'runbot.assets_system_theme': [
+            'runbot/static/src/js/system_theme.js',
         ],
     },
     'post_load': 'runbot_post_load',

@@ -33,18 +33,26 @@ class TestDockerfile(RunbotCase, HttpCase):
             docker_render = self.env.ref('runbot.docker_default').dockerfile.replace('\n\n', '\n')
             docker_render = '\n'.join(line for line in docker_render.split('\n') if line and line[0] != '#')
             docker_render = re.sub(r'google-chrome-stable_\d{3}\.\d\.\d{1,4}\.\d{1,4}-\d', 'google-chrome-stable_xxx.x.xxxx.xx-x', docker_render)
+            docker_render = docker_render.rsplit('USER root', 1)[0]  # remove the added files at the end
 
         self.assertEqual(
-r"""FROM ubuntu:noble
+r"""FROM ubuntu:resolute
+ARG PG_VERSION=18
 ENV LANG C.UTF-8
 USER root
 RUN set -x ; \
     apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends apt-transport-https build-essential ca-certificates curl faketime file fonts-freefont-ttf fonts-noto-cjk gawk gnupg gsfonts libldap2-dev libjpeg9-dev libsasl2-dev libxslt1-dev lsb-release npm ocrmypdf sed sudo unzip xfonts-75dpi zip zlib1g-dev \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends apt-transport-https build-essential ca-certificates curl faketime file fonts-freefont-ttf fonts-noto-cjk gawk gnupg gsfonts libldap2-dev libjpeg-dev libsasl2-dev libxslt1-dev lsb-release npm ocrmypdf sed sudo unzip zstd xfonts-75dpi zip zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
+ENV PG_VERSION=${PG_VERSION}
 RUN set -x ; \
     apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends publicsuffix python3 flake8 python3-dbfread python3-dev python3-gevent python3-pip python3-setuptools python3-wheel python3-markdown python3-mock python3-phonenumbers python3-websocket python3-google-auth libpq-dev pylint python3-jwt python3-asn1crypto python3-html2text python3-suds python3-xmlsec python3-markdown2 python3-aiosmtpd python3-paramiko \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends postgresql-${PG_VERSION} postgresql-${PG_VERSION}-pgvector locales\
+    && rm -rf /var/lib/apt/lists/*
+RUN sed -i 's/^# *en_US.UTF-8 UTF-8$/en_US.UTF-8 UTF-8/' /etc/locale.gen && locale-gen
+RUN set -x ; \
+    apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends publicsuffix python3 flake8 python3-dbfread python3-dev python3-gevent python3-pip python3-setuptools python3-wheel python3-markdown python3-mock python3-phonenumbers python3-websocket python3-google-auth libpq-dev pylint python3-jwt python3-asn1crypto python3-html2text python3-suds python3-xmlsec python3-markdown2 python3-aiosmtpd python3-paramiko python3-jsonschema python3-yaml \
     && rm -rf /var/lib/apt/lists/*
 RUN curl -sSL https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-2/wkhtmltox_0.12.6.1-2.jammy_amd64.deb -o /tmp/wkhtml.deb \
     && apt-get update \
@@ -71,10 +79,10 @@ RUN deluser ubuntu
 RUN groupadd -g 1337 TestUser && useradd --create-home -u 4242 -g TestUser -G audio,video TestUser
 USER TestUser
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
-RUN python3 -m pip install --no-cache-dir ebaysdk==2.1.5 pdf417gen==0.7.1
+RUN python3 -m pip install --no-cache-dir ebaysdk==2.1.5 pdf417gen==0.7.1 && if [ -d /venv/main ]; then chmod -R a+rX /venv/main; fi
 ADD --chown=TestUser https://raw.githubusercontent.com/odoo/odoo/master/requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/requirements.txt
-USER TestUser""", docker_render)
+""", docker_render)
 
     def test_dockerfile_base_fields(self):
         dockerfile = self.env['runbot.dockerfile'].create({
@@ -174,6 +182,7 @@ class TestDockerfileCache(RunbotCase, HttpCase):
 some useless content
 
 USER TestUser
+ENV USER TestUser
 """
 
         self.start_patcher('hardlink_to', 'odoo.addons.runbot.models.docker.Path.hardlink_to')
@@ -191,6 +200,7 @@ ADD https://nowhere.example.org/nothing.txt /data/nothing.txt
 
 
 USER TestUser
+ENV USER TestUser
 """
         dockerfile.layer_ids[0].content = raw_layer
         content = dockerfile._get_cached_content('/tmp/fake_build_path')
@@ -209,6 +219,7 @@ COPY _data_nothing_txt /data/nothing.txt
 
 
 USER TestUser
+ENV USER TestUser
 """
         mock_response = MagicMock()
         mock_response.iter_content.return_value = [b'small file content']
@@ -275,6 +286,7 @@ COPY _data_nothing_txt /data/nothing.txt
 
 
 USER TestUser
+ENV USER TestUser
 """
 
         self.start_patcher('docker_username', 'odoo.addons.runbot.models.docker.USERNAME', new='TestUser')

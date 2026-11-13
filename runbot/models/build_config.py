@@ -52,6 +52,10 @@ _re_warning = r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ WARNING .*'
 PYTHON_DEFAULT = "# type python code here\n\n\n\n\n\n"
 
 
+def echo(text):
+    return f'echo $(date -u "+%Y-%m-%d %H:%M:%S,%3N") "{text}"'
+
+
 def filter_all_modules(selector, build, dynamic_vars):
     if selector.split(',', 1)[0] != '*':
         selector = f'*,{selector}'
@@ -419,6 +423,7 @@ TYPES = [
         ('configure_upgrade', 'Configure Upgrade'),
         ('test_upgrade', 'Test Upgrade'),
         ('restore', 'Restore'),
+        ('upgrade_cluster', 'Upgrade Cluster'),
         ('dynamic', 'Dynamic'),
         ('semgrep', 'Semgrep'),
     ]
@@ -446,8 +451,8 @@ class ConfigStep(models.Model):
     dockerfile_id = fields.Many2one('runbot.dockerfile', string='Dockerfile')
     dockerfile_variant = fields.Char('Docker Variant')
     # install_odoo
-    create_db = fields.Boolean('Create Db', default=True, tracking=True)  # future
-    custom_db_name = fields.Char('Custom Db Name', tracking=True)  # future
+    create_db = fields.Boolean('Create Db', default=True, tracking=True)  # TODO remove
+    custom_db_name = fields.Char('Custom Db Name', tracking=True)
     install_modules = fields.Char('Modules to install', help="List of module patterns to install, use * to install all available modules, prefix the pattern with dash to remove the module.", default='', tracking=True)
     db_name = fields.Char('Db Name', compute='_compute_db_name', inverse='_inverse_db_name', tracking=True)
     cpu_limit = fields.Integer('Cpu limit', default=3600, tracking=True)
@@ -498,6 +503,9 @@ class ConfigStep(models.Model):
 
     restore_download_db_suffix = fields.Char('Download db suffix')
     restore_rename_db_suffix = fields.Char('Rename db suffix')
+    restore_cluster = fields.Boolean('Restore the cluster if available', default=True)
+    export_database = fields.Boolean('Export database after install', default=True)
+    needs_postgres = fields.Boolean('Needs postgres', default=True)
 
     # TODO change the default to True once we are sure that it works as expected
     check_exit_status = fields.Boolean('Check exit status', default=False, help='Check exit status of the main command')
@@ -628,6 +636,10 @@ class ConfigStep(models.Model):
                 logical_cpu_count = psutil.cpu_count(logical=True)
                 physical_cpu_count = psutil.cpu_count(logical=False)
                 docker_params['cpus'] = float((logical_cpu_count / physical_cpu_count) * container_cpus)
+
+            if 'needs_postgres' not in docker_params:
+                docker_params['needs_postgres'] = self.needs_postgres
+
             return build._docker_run(self, **docker_params)
         return True
 
@@ -648,6 +660,9 @@ class ConfigStep(models.Model):
             description = child_data.pop('description', {})
             for create_config in self.env['runbot.build.config'].browse(child_data.get('config_id', config_ids.ids)):
                 child_data_values = {'config_data': {}, **child_data, 'config_id': create_config}
+                if 'make_stats' in config_data and 'make_stats' not in child_data_values['config_data']:
+                    # propagate make_stats to the whole build tree, unless the child defines its own
+                    child_data_values['config_data'] = {**child_data_values['config_data'], 'make_stats': config_data['make_stats']}
                 for _ in range(config_data.get('number_build', self.number_builds)):
                     count += 1
                     if count > max_build:
@@ -655,8 +670,7 @@ class ConfigStep(models.Model):
                         build._log('create_build', f'More than {max_build} build created, stopping', level='WARNING')
                         return
                     config_name = config_name or create_config.name
-                    child = build._add_child(child_data_values, orphan=self.make_orphan, description=description or config_name, reference_parent=reference_parent)
-                    build._log('create_build', 'created with config %s' % config_name, log_type='subbuild', path=str(child.id))
+                    build._add_child(child_data_values, orphan=self.make_orphan, description=description or config_name, reference_parent=reference_parent)
 
     def _make_python_ctx(self, build):
         def log(*args, **kwargs):
@@ -717,7 +731,7 @@ class ConfigStep(models.Model):
 
         exports = build._checkout()
 
-        build._log('run', 'Start running build %s' % build.dest)
+        build._logger('Start running build')
         # run server
         cmd = build._cmd(local_only=False, enable_log_db=self.enable_log_db)
 
@@ -797,6 +811,7 @@ class ConfigStep(models.Model):
         db_suffix = re.sub(r'[^a-z0-9\-_]', '_', db_suffix.lower())
         db_name = '%s-%s' % (build.dest, db_suffix)
         cmd += ['-d', db_name]
+        self.env['runbot.database'].create({'name': db_name, 'build_id': build.id})
 
         # Demo data behavior changed in 18.1 -> demo data became opt-in instead of opt-out
         available_options = build._parse_config()
@@ -861,15 +876,19 @@ class ConfigStep(models.Model):
 
         cmd.finals.extend(self._post_install_commands(build, config_data, py_version))  # coverage post, extra-checks, ...
 
-        if config_data.get('export_database', True):
-            self._add_zip_generation(build, cmd, db_name)
+        env_variables = self.additionnal_env.split(';') if self.additionnal_env else []
+        if config_env_variables := config_data.get('env_variables', False):
+            env_variables += config_env_variables.split(';')
+
+        if config_data.get('export_database', self.export_database):
+            self._add_export_database(build, cmd, db_name, env_variables)
+
+        if config_data.get('export_for_cluster_upgrade'):
+            self._add_export_database(build, cmd, db_name, env_variables, for_upgrade=True)
 
         if self.flamegraph:
             cmd.finals.append(['flamegraph.pl', '--title', 'Flamegraph %s for build %s' % (self.sanitized_name(build), build.id), self._perfs_data_path(build), '>', self._perfs_data_path(ext='svg')])
             cmd.finals.append(['gzip', '-f', self._perfs_data_path(build)])  # keep data but gz them to save disc space
-        env_variables = self.additionnal_env.split(';') if self.additionnal_env else []
-        if config_env_variables := config_data.get('env_variables', False):
-            env_variables += config_env_variables.split(';')
 
         if config_data.get('coverage_test_context', self.coverage_test_context):
             env_variables.append("COVERAGE_DYNAMIC_CONTEXT=test_function")
@@ -879,17 +898,25 @@ class ConfigStep(models.Model):
             cpu_limit = min(self.cpu_limit, int(config_data['cpu_limit']))
         return dict(cmd=cmd, ro_volumes=exports, cpu_limit=cpu_limit, env_variables=env_variables)
 
-    def _add_zip_generation(self, build, cmd, db_name):
+    def _add_export_database(self, build, cmd, db_name, env_variables, for_upgrade=False):
         dump_dir = '/data/build/logs/%s/' % db_name
         sql_dest = '%s/dump.sql' % dump_dir
-        filestore_path = '/data/build/datadir/filestore/%s' % db_name
-        filestore_dest = '%s/filestore/' % dump_dir
-        zip_path = '/data/build/logs/%s.zip' % db_name
+        cmd.finals.append([echo('### Generating dump')])
+        cmd.finals.append(['mkdir', dump_dir])
         cmd.finals.append(['pg_dump', db_name, '>', sql_dest])
-        cmd.finals.append(['cp', '-r', filestore_path, filestore_dest])
-        cmd.finals.append(['cd', dump_dir, '&&', 'zip', '-rmq9', zip_path, '*'])
-        infos = '{\n    "db_name": "%s",\n    "build_id": %s,\n    "shas": [%s]\n}' % (db_name, build.id, ', '.join(['"%s"' % build_commit.commit_id.dname for build_commit in build.params_id.commit_link_ids]))
-        build._write_file('logs/%s/info.json' % db_name, infos)
+        if not for_upgrade:
+            env_variables.append(f'CLUSTER_ZSTD_NAME={db_name}-cluster.tar.zstd')
+            filestore_path = '/data/build/datadir/filestore/%s' % db_name
+            filestore_dest = '%s/filestore/' % dump_dir
+            zip_path = '/data/build/logs/%s.zip' % db_name
+            build.database_ids.filtered(lambda database: database.name == db_name).exported = True
+            cmd.finals.append([echo('### Copying filestore')])
+            cmd.finals.append(['cp', '-r', filestore_path, filestore_dest])
+            cmd.finals.append([echo('### Generating zip')])
+            cmd.finals.append(['cd', dump_dir, '&&', 'zip', '-rmq9', zip_path, '*'])
+            cmd.finals.append([echo('### Done')])
+            infos = '{\n    "db_name": "%s",\n    "build_id": %s,\n    "shas": [%s]\n}' % (db_name, build.id, ', '.join(['"%s"' % build_commit.commit_id.dname for build_commit in build.params_id.commit_link_ids]))
+            build._write_file('logs/%s/info.json' % db_name, infos)
 
     def _run_configure_upgrade(self, build):
         """
@@ -1129,7 +1156,7 @@ class ConfigStep(models.Model):
         if upgrade_paths:
             migrate_cmd += ['--upgrade-path', ','.join(upgrade_paths)]
 
-        build._log('run', 'Start migration build %s' % build.dest)
+        build._logger('Start migration build')
 
         migrate_cmd.finals.append(['psql', migrate_db_name, '-c', '"SELECT id, name, state FROM ir_module_module WHERE state NOT IN (\'installed\', \'uninstalled\', \'uninstallable\') AND name NOT LIKE \'test_%\' "', '>', '/data/build/logs/modules_states.txt'])
 
@@ -1144,22 +1171,27 @@ class ConfigStep(models.Model):
     def _run_restore(self, build, config_data=None):
         # exports = build._checkout()
         params = build.params_id
+
+        docker_file = params.dockerfile_id
         if config_data:
             config_data = {**config_data, **params.config_data}
         else:
             config_data = params.config_data
-        dump_db = params.dump_db
+
+        cluster_url = None
+        default_target_suffix = self.restore_rename_db_suffix or 'all'
         if dump_url := config_data.get('dump_url'):
             zip_name = dump_url.split('/')[-1]
+            download_db_name = zip_name.replace('.zip', '')
             build._log('_run_restore', f'Restoring db [{zip_name}]({dump_url})', log_type='markdown')
         else:
             reference_build = None
-            if restore_build_id := config_data.get('restore_build_id'):
-                reference_build = self.env['runbot.build'].browse(int(restore_build_id)).exists()
-                if not reference_build:
-                    build._log('_run_restore', f'Reference build id {restore_build_id} not found', log_type='markdown', level='ERROR')
-                    build._kill(result='ko')
-                    return
+            dump_suffix = config_data.get('dump_suffix', build.params_id.restore_db_suffix or self.restore_download_db_suffix)
+            if params_dump_db := params.dump_db:
+                reference_build = params_dump_db.build_id
+                dump_suffix = params_dump_db.db_suffix
+            elif restore_build_id := config_data.get('restore_build_id'):
+                reference_build = self.env['runbot.build'].browse(int(restore_build_id))
             elif (dump_trigger_id := config_data.get('dump_trigger_id')):
                 dump_trigger = self.env['runbot.trigger'].browse(int(dump_trigger_id))
                 if config_data.get('dump_from_current_batch'):
@@ -1171,72 +1203,125 @@ class ConfigStep(models.Model):
                     build._log('_run_restore', f'No reference build found in batch {reference_batch.id} for trigger {dump_trigger.name}', log_type='markdown', level='ERROR')
                     build._kill(result='ko')
                     return
-            if reference_build:
-                dump_suffix = config_data.get('dump_suffix', 'all')
-                if reference_build.local_state not in ('done', 'running'):
-                    build._log('_run_restore', f'Reference build [{reference_build.id}]({reference_build.build_url}) is not yet finished, database may not exist', log_type='markdown', level='WARNING')
-                dump_db = reference_build.database_ids.filtered(lambda d: d.db_suffix == dump_suffix)
-                if not dump_db:
-                    build._log('_run_restore', f'No dump with suffix {dump_suffix} found in build [{reference_build.id}]({reference_build.build_url})', log_type='markdown', level='ERROR')
-                    build._kill(result='ko')
-                    return
-            if dump_db:
-                download_db_suffix = dump_db.db_suffix
-                dump_build = dump_db.build_id
             else:
-                dump_build = params.reference_build_id or build.parent_id  # TODO cleanup parent_id
-                download_db_suffix = config_data.get('dump_suffix', build.params_id.restore_db_suffix or self.restore_download_db_suffix)
-                if not download_db_suffix:
-                    if dump_build and len(dump_build.database_ids) == 1:
-                        download_db_suffix = dump_build.database_ids[0].db_suffix
-                    else:
-                        download_db_suffix = 'all'
+                reference_build = params.reference_build_id or build.parent_id  # TODO cleanup parent_id
 
-            if not (download_db_suffix and dump_build):
-                build._log('_run_restore', 'No dump suffix or reference build specified', level='ERROR')
+            if not reference_build:
+                build._log('_run_restore', 'No reference build or download url defined', log_type='markdown', level='ERROR')
                 build._kill(result='ko')
                 return
-            download_db_name = f'{dump_build.dest}-{download_db_suffix}'
+
+            if reference_build != build.parent_id and reference_build.local_state not in ('done', 'running'):
+                build._log('_run_restore', f'Reference build [{reference_build.id}]({reference_build.build_url}) is not yet finished, database may not exist', log_type='markdown', level='WARNING')
+
+            dump_db = None
+            if dump_suffix:
+                dump_db = reference_build.database_ids.filtered(lambda d: d.db_suffix == dump_suffix)
+            elif len(reference_build.database_ids) == 1:
+                dump_db = reference_build.database_ids[0]
+            else:
+                dump_db = reference_build.database_ids.filtered(lambda d: d.db_suffix == 'all')
+
+            if not dump_db:
+                build._log('_run_restore', f'No database {dump_suffix or "<any>"} found in build [{reference_build.id}]({reference_build.build_url})', log_type='markdown', level='ERROR')
+                build._kill(result='ko')
+                return
+
+            docker_file = reference_build.params_id.dockerfile_id
+            download_db_name = f'{reference_build.dest}-{dump_db.db_suffix}'
             zip_name = f'{download_db_name}.zip'
-            dump_url = f'{dump_build._http_log_url()}{zip_name}'
+            dump_url = f'{reference_build._http_log_url()}{zip_name}'
             use_backup = False
-            if dump_build.trigger_id.backup_databases and requests.head(dump_url, timeout=5).status_code != 200:
+            use_host_postgres = config_data.get('use_host_postgres', docker_file.use_host_postgres)
+            if config_data.get('restore_cluster', self.restore_cluster) and not use_host_postgres:   # TODO cleanup postgres remove
+                cluster_url = dump_url.replace('.zip', '-cluster.tar.zstd')
+                if requests.head(cluster_url, timeout=5).status_code != 200:  # TODO remove check once all dumps have a cluster zip
+                    build._log('', 'Using dump url, [no cluster](%s) was found', cluster_url, log_type='markdown')
+                    cluster_url = None
+
+            if not cluster_url and reference_build.trigger_id.backup_databases and requests.head(dump_url, timeout=5).status_code != 200:
                 for backup_host in self.env['runbot.host'].search([('is_backup', '=', True)]):
                     backup_url = f'{backup_host._backup_url()}{zip_name}'
                     if requests.head(backup_url, timeout=5).status_code == 200:
-                        build._log('_run_restore', 'Template [%s](%s) from build [%s](%s) is missing, using [backup](%s)', zip_name, dump_url, dump_build.id, dump_build.build_url, backup_url, log_type='markdown')
+                        build._log('_run_restore', 'Template [%s](%s) from build [%s](%s) is missing, using [backup](%s)', zip_name, dump_url, reference_build.id, reference_build.build_url, backup_url, log_type='markdown')
                         dump_url = backup_url
                         use_backup = True
                         break
             if not use_backup:
-                build._log('_run_restore', 'Restoring template [%s](%s) from build [%s](%s)', zip_name, dump_url, dump_build.id, dump_build.build_url, log_type='markdown')
-        target_suffix = config_data.get('target_suffix', self.restore_rename_db_suffix or download_db_suffix)
+                message = 'Restoring template [%s](%s) from build [%s](%s)'
+                params = [zip_name, dump_url, reference_build.id, reference_build.build_url]
+                if cluster_url:
+                    message = f'{message} using [cluster](%s)'
+                    params.append(cluster_url)
+                build._log('_run_restore', message, *params, log_type='markdown')
+            default_target_suffix = dump_db.db_suffix
+        target_suffix = build.params_id.restore_db_suffix or default_target_suffix
         restore_db_name = '%s-%s' % (build.dest, target_suffix)
 
         icp = self.env['ir.config_parameter']
         db_template = icp.get_param('runbot.runbot_db_template', default='template0')
-        cmd = ' && '.join([
-            'mkdir /data/build/restore',
-            'cd /data/build/restore',
-            'wget --retry-on-host-error %s' % dump_url,
-            'unzip -q %s' % zip_name,
-            'echo "### restoring filestore"',
-            'mkdir -p /data/build/datadir/filestore/%s' % restore_db_name,
-            'mv filestore/* /data/build/datadir/filestore/%s' % restore_db_name,
-            'echo "### restoring db"',
-            'createdb %s -T %s' % (restore_db_name, db_template),
-            'psql -q %s < dump.sql' % (restore_db_name),
-            'echo "### performing an analyze"',
-            'psql -q -d %s -c "ANALYZE;"' % restore_db_name,
-            'cd /data/build',
-            'echo "### cleaning"',
-            'rm -r restore',
-            'echo "### listing modules"',
-            """psql %s -c "select name from ir_module_module where state = 'installed'" -t -A > /data/build/logs/restore_modules_installed.txt""" % restore_db_name,
-            'echo "### restore" "successful"',  # two part string to avoid miss grep
-            ])
+        self.env['runbot.database'].create({'name': restore_db_name, 'build_id': build.id})
+        env_variables = []
+        if cluster_url:
+            env_variables.append(f'RESTORE_CLUSTER_URL={cluster_url}')
+            cmd = [
+                echo('### Moving filestore'),
+                f'mv /data/build/datadir/filestore/{download_db_name} /data/build/datadir/filestore/{restore_db_name}',
+                echo('### Renaming db'),
+                f'psql -q -d postgres -c \'ALTER DATABASE "{download_db_name}" RENAME TO "{restore_db_name}";\'',
+                ]
+        else:
+            cmd = [
+                'mkdir /data/build/restore',
+                'cd /data/build/restore',
+                echo('### getting archive'),
+                'wget --retry-on-host-error %s' % dump_url,
+                'unzip -q %s' % zip_name,
+                echo('### restoring filestore'),
+                'mkdir -p /data/build/datadir/filestore/%s' % restore_db_name,
+                'mv filestore/* /data/build/datadir/filestore/%s' % restore_db_name,
+                echo('### restoring db'),
+                'createdb %s -T %s' % (restore_db_name, db_template),
+                'psql -q %s < dump.sql' % (restore_db_name),
+                echo('### cleaning'),
+                'cd /data/build',
+                'rm -r restore',
+                ]
+        cmd += [
+            echo('### Performing an analyze'),
+            f'psql -q -d {restore_db_name} -c "ANALYZE;"',
+            echo('### listing modules'),
+            f"""psql {restore_db_name} -c "select name from ir_module_module where state = 'installed'" -t -A > /data/build/logs/restore_modules_installed.txt""",
+            echo('### restore" "successful'),  # two part string to avoid miss grep
+        ]
+        return dict(cmd=' && '.join(cmd), network_enabled=True, env_variables=env_variables, image_tag=docker_file.image_tag)
 
-        return dict(cmd=cmd, network_enabled=True)
+    def _run_upgrade_cluster(self, build, config_data=None):
+        if config_data:
+            config_data = {**config_data, **build.params_id.config_data}
+        else:
+            config_data = build.params_id.config_data
+        """Allows to restore a zipped database to upgrade it in another cluster, mostly needed if a build uses multiple docker"""
+        # Keep it simple for now: restore the first database of this build. This is mostly to upgrade a restored database from one cluster to another
+        from_docker_file = build.params_id.upgrade_from_build_id.params_id.dockerfile_id
+        to_docker_file = build.params_id.dockerfile_id
+        db_template = self.env['ir.config_parameter'].get_param('runbot.runbot_db_template', default='template0')
+
+        from_docker_file_use_host_postgres = config_data.get('use_host_postgres', from_docker_file.use_host_postgres)
+        to_docker_file_use_host_postgres = config_data.get('use_host_postgres', to_docker_file.use_host_postgres)
+        if from_docker_file != to_docker_file and (not to_docker_file_use_host_postgres or not from_docker_file_use_host_postgres):
+            db_name = build.database_ids[0].name
+            cmd = ' && '.join([
+                f'cd /data/build/logs/{db_name}',
+                echo('### restoring db'),
+                'createdb %s -T %s' % (db_name, db_template),
+                'psql -q %s < dump.sql' % (db_name),
+                echo('### performing an analyze'),
+                'psql -q -d %s -c "ANALYZE;"' % db_name,
+                echo('### restore" "successful'),  # two part string to avoid miss grep
+                ])
+            cmd = f"(psql {db_name} -c 'SELECT 1' > /dev/null 2>&1 && echo 'Database exists, skipping') || ({cmd})"
+            return dict(cmd=cmd, network_enabled=True)
 
     def _log_end(self, build):
         # TODO fixme config data are not the same as the run part in dynamic steps
@@ -1266,9 +1351,11 @@ class ConfigStep(models.Model):
         if database_exported:
             db_suffix = config_data.get('db_name') or ((build.params_id.restore_db_suffix or build.params_id.dump_db.db_suffix) if not self.create_db else False) or self._get_db_name(build)
             db_suffix = re.sub(r'[^a-z0-9\-_]', '_', db_suffix.lower())
-            message += ' [@icon-download](%s%s-%s.zip)'
-            args += [build._http_log_url(), build.dest, db_suffix]
-            log_type = 'markdown'
+            db_name = f'{build.dest}-{db_suffix}'
+            if build.database_ids.filtered(lambda database: database.name == db_name and database.exported):
+                message += ' [@icon-download](%s%s.zip)'
+                args += [build._http_log_url(), db_name]
+                log_type = 'markdown'
         build._log('', message, *args, log_type=log_type)
 
         if self.coverage and self.coverage_make_report:
@@ -1352,6 +1439,8 @@ class ConfigStep(models.Model):
             self._make_upgrade_results(build)
         elif active_job_type == 'restore':
             self._make_restore_results(build)
+        elif active_job_type == 'upgrade_cluster':
+            pass  # TODO add check, not straightforward since the upgrade will not always occur
         elif active_job_type == 'semgrep':
             self._make_semgrep_results(build)
 
@@ -1365,7 +1454,7 @@ class ConfigStep(models.Model):
         build.write(return_value)  # old style support
 
     def _make_upgrade_results(self, build):
-        build._log('upgrade', 'Getting results for build %s' % build.dest)
+        build._logger('Getting results')
 
         if build.local_result != 'ko':
             checkers = [
@@ -1497,7 +1586,7 @@ class ConfigStep(models.Model):
         return -241
 
     def _make_custom_result(self, build, enabled_checkers=None, expected_logs=None):
-        build._log('run', 'Getting results for build %s' % build.dest)
+        build._logger('Getting results')
         if build.local_result != 'ko':
             checkers = [self._check_log]
             if enabled_checkers is None or "ERROR" in enabled_checkers:
@@ -1514,7 +1603,7 @@ class ConfigStep(models.Model):
             build.local_result = self._get_checkers_result(build, checkers)
 
     def _make_odoo_results(self, build):
-        build._log('run', 'Getting results for build %s' % build.dest)
+        build._logger('Getting results')
 
         if build.local_result != 'ko':
             checkers = [
@@ -1541,9 +1630,10 @@ class ConfigStep(models.Model):
         current_dynamic_step = self._get_dynamic_step(build) or {}
         if current_dynamic_step and 'make_stats' in current_dynamic_step:
             make_stats = current_dynamic_step['make_stats']
+        make_stats = build.params_id.config_data.get('make_stats', make_stats)
         if not make_stats:  # TODO garbage collect non sticky stat
             return
-        build._log('make_stats', 'Getting stats from log file')
+        build._logger('Getting stats from log file')
         log_path = build._path('logs', '%s.txt' % self.sanitized_name(build))
         if not os.path.exists(log_path):
             build._log('make_stats', 'Log **%s.txt** file not found', self.sanitized_name(build), level='INFO', log_type='markdown')
@@ -1562,8 +1652,10 @@ class ConfigStep(models.Model):
                         'category': category,
                         'values': values,
                     } for category, values in stats_per_regex.items()
+                    if values  # don't store a row when the regex didn't match anything
                 ]
-                self.env['runbot.build.stat'].create(build_stats)
+                if build_stats:
+                    self.env['runbot.build.stat'].create(build_stats)
         except Exception as e:
             message = '**An error occured while computing statistics of %s:**\n`%s`' % (build.job, str(e).replace('\\n', '\n').replace("\\'", "'"))
             _logger.exception(message)
@@ -1725,7 +1817,7 @@ class ConfigStep(models.Model):
             if 'cpu_limit' in current_step:
                 config_data['cpu_limit'] = int(current_step.get('cpu_limit'))
 
-            for key in ('screencast', 'demo_mode', 'enable_auto_tags', 'with_test_data'):
+            for key in ('screencast', 'demo_mode', 'enable_auto_tags', 'with_test_data', 'export_database'):
                 if key in current_step:
                     value = current_step[key]
                     config_data[key] = value
@@ -1752,13 +1844,15 @@ class ConfigStep(models.Model):
             if current_step.get('install_requirements', False):
                 pres = build._make_pip_command()
             cmd = Command(pres, command, [])
+            env_variables = []
             if current_step.get('export_database'):
-                self._add_zip_generation(build, cmd, db_name)
+                self.env['runbot.database'].create({'name': db_name, 'build_id': build.id})
+                self._add_export_database(build, cmd, db_name, env_variables)
             cpu_limit = self.cpu_limit
             if current_step.get('cpu_limit'):
                 cpu_limit = min(self.cpu_limit, int(current_step['cpu_limit']))
 
-            return dict(cmd=cmd, ro_volumes=exports, cpu_limit=cpu_limit)
+            return dict(cmd=cmd, ro_volumes=exports, cpu_limit=cpu_limit, env_variables=env_variables)
 
         build._log('Dynamic Step', f'Unknown job_type {current_step["job_type"]} in dynamic config', level="ERROR")
 
@@ -1878,6 +1972,7 @@ class ConfigStep(models.Model):
             "cmd": cmd,
             "container_name": build._get_docker_name(),
             "ro_volumes": exports,
+            "needs_postgres": False,
         }
 
     def _make_semgrep_results(self, build):
