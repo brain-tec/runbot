@@ -11,11 +11,15 @@ def _check_max_records(count):
         raise BadRequest(f'Too many records requested ({count}), maximum is {max_records}')
 
 
+def _datetime_ms(value):
+    return value.isoformat(sep=' ', timespec='milliseconds') if value else False
+
+
 def _serialize_log(log):
     error = log.error_content_id.error_id
     return {
         'id': log.id,
-        'create_date': log.create_date,
+        'create_date': _datetime_ms(log.create_date),
         'level': log.level,
         'type': log.type,
         'message': log.message,
@@ -64,6 +68,18 @@ def _serialize_build(build, depth=1, logs='errors', parent_values=None):
         'build_time': build.build_time,
         'docker_time': build.docker_time,
         'logs': [_serialize_log(log) for log in build_logs],
+        'jobs': [{
+            'name': job.name,
+            'start_date': _datetime_ms(job.start_date),
+            'duration': job.duration,
+            'python_time': job.python_time,
+            'git_time': job.git_time,
+            'docker_pull_time': job.docker_pull_time,
+            'docker_time': job.docker_time,
+            'result_time': job.result_time,
+            'docker_image': job._image_tag(),
+            'log_url': f'{build._http_log_url()}{job.log_name}.txt' if job.log_name else False,
+        } for job in build.sudo().job_ids],
         'log_files': [
             {'name': name, 'url': f'{build._http_log_url()}{name}.txt'}
             for name in (build.log_list or '').split(',') if name
@@ -157,6 +173,27 @@ def _serialize_bundle(bundle):
     }
 
 
+def _serialize_commit(commit):
+    _statuses, last_status_by_context = commit._get_last_statuses()
+    return {
+        'id': commit.id,
+        'repo': commit.repo_id.name,
+        'sha': commit.name,
+        'subject': commit.subject,
+        'author': commit.author,
+        'date': commit.date,
+        'statuses': [{
+            'context': status.context,
+            'state': status.state,
+            'description': status.description,
+            'target_url': status.target_url,
+            'build_id': status.build_id.id or False,
+            'create_date': status.create_date,
+            'sent_date': status.sent_date,
+        } for status in last_status_by_context.values()],
+    }
+
+
 class RunbotApi(Controller):
 
     @route(['/runbot/api'], type='http', auth='public', methods=['GET'], sitemap=False)
@@ -181,6 +218,20 @@ class RunbotApi(Controller):
         _check_max_records(len(batch_ids))
         batches = request.env['runbot.batch'].browse(batch_ids).exists()
         return request.make_json_response([_serialize_batch(batch, depth=int(depth), logs=logs) for batch in batches])
+
+    @route(['/runbot/api/commit/<string:ids_or_shas>'], type='http', auth='public', methods=['GET'], sitemap=False)
+    def api_commit(self, ids_or_shas, **kwargs):
+        values = ids_or_shas.split(',')
+        _check_max_records(len(values))
+        ids, shas = [], []
+        for value in values:
+            _slug, record_id = request.env['ir.http']._unslug(value)
+            if record_id is None:
+                shas.append(value)
+            else:
+                ids.append(record_id)
+        commits = request.env['runbot.commit'].search(Domain('id', 'in', ids) | Domain('name', 'in', shas), order='id')
+        return request.make_json_response([_serialize_commit(commit) for commit in commits])
 
     @route(['/runbot/api/bundle', '/runbot/api/bundle/<path:ids_or_names>'], type='http', auth='public', methods=['GET'], sitemap=False)
     def api_bundle(self, ids_or_names='', project_id=None, pr='', **kwargs):

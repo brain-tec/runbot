@@ -11,7 +11,10 @@ a build is one test of a batch (one per trigger) and can have child builds.
 - `GET /runbot/api/bundle?pr=odoo:297417`: bundles of pull requests, by number, optionally prefixed by the repo name.
   A number without repo can match pull requests of several repos. When `pr` is given, ids and names are ignored.
 - `GET /runbot/api/batch/<ids>?depth=1&logs=errors`: batches with their commits, logs and slots (one per trigger, with its build).
-- `GET /runbot/api/build/<ids>?depth=1&logs=errors`: builds with their state, commits, logs, log_files, databases and children.
+- `GET /runbot/api/build/<ids>?depth=1&logs=errors`: builds with their state, commits, logs, jobs, log_files, databases and children.
+- `GET /runbot/api/commit/<ids_or_shas>`: commits by id, slug (`odoo-d14d38cc-123456`) or full sha, with their last status for each context, as on the commit page.
+  It can be more up to date than GitHub: a status with `sent_date` false was not sent to GitHub yet.
+  The same sha can exist in multiple repos or be rebased on different commits, so a sha can return multiple commits.
 
 ## Conventions
 
@@ -30,11 +33,13 @@ a build is one test of a batch (one per trigger) and can have child builds.
 - Builds requested with the build route also have the `bundle_id` and `bundle_name` of their `create_batch_id`.
   A build can be reused in other batches and bundles than the one that created it.
 - `build_time` and `docker_time` are in seconds and only cover the build itself, not its children.
+- `jobs` are the steps run by the build, in order. Their times are in milliseconds: `duration` (wall time, 0 while running
+  and for running steps), `python_time` (preparation, including `git_time` and `docker_pull_time`), `docker_time` and `result_time`.
 - Batch logs only include the non-INFO ones.
 - `slots` of a batch give the trigger and its `build` (false if none was created, `manual` triggers without build are not listed).
   `link_type` is `created`, `matched` (build reused from another batch) or `rebuild`. The build of a slot has no `trigger` key
   when it is the trigger of the slot.
-- Dates are UTC.
+- Dates are UTC. Log `create_date` and job `start_date` have milliseconds, to place the logs within the jobs.
 
 ## Parameters
 

@@ -1,4 +1,5 @@
 import base64
+import datetime
 import fnmatch
 import glob
 import json
@@ -24,7 +25,6 @@ from ..common import (
     now,
     os,
     rfind,
-    s2human,
     time2str,
     DEFAULT_MAX_FILE_SIZE,
 )
@@ -46,6 +46,14 @@ if VERSION == '0.7.3':
 _SAFE_OPCODES |= set(to_opcodes(['LOAD_DEREF', 'STORE_DEREF', 'LOAD_CLOSURE', 'MAKE_CELL', 'COPY_FREE_VARS']))
 
 _logger = logging.getLogger(__name__)
+
+
+def _url_exists(url, timeout=5):
+    try:
+        return requests.head(url, timeout=timeout).status_code == 200
+    except requests.RequestException:
+        return False
+
 
 _re_warning = r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ WARNING .*'
 
@@ -605,18 +613,26 @@ class ConfigStep(models.Model):
 
     def _run(self, build):
         build.write({'job_start': now(), 'job_end': False})  # state, ...
-        log = build._log('run', f'Starting step **{self._get_display_name(build)}** from config **{build.params_id.config_id.name}**', log_type='markdown', level='SEPARATOR')
-        result = self._run_step(build)
+        result = self._start_job_and_run(build)
         if callable(result):  # docker step, should have text logs
             if build.log_list:
                 build.log_list = f'{build.log_list},{self.sanitized_name(build)}'
             else:
                 build.log_list = self.sanitized_name(build)
-            log_url = f'http://{build.host}'
-            url = f"{log_url}/runbot/static/build/{build.dest}/logs/{self.sanitized_name(build)}.txt"
-            log_link = f'[@icon-file-text]({url})'
-            log.message = f'{log.message}  {log_link}'
         return result
+
+    def _start_job_and_run(self, build, **kwargs):
+        assert 'runbot_job_id' not in self.env.context
+        self.ensure_one()
+        job = self.env['runbot.build.job'].create({
+            'build_id': build.id,
+            'config_step_id': self.id,
+            'name': self._get_display_name(build),
+            'start_date': datetime.datetime.now(),
+        })
+        build.active_job_id = job
+        with job._timer('python_time'):
+            return self.with_context(runbot_job_id=job.id)._run_step(build.with_context(runbot_job_id=job.id), **kwargs)
 
     def _run_step(self, build, **kwargs):
         build.log_counter = self.env['ir.config_parameter'].sudo().get_param('runbot.runbot_maxlogs', 100)
@@ -1235,14 +1251,14 @@ class ConfigStep(models.Model):
             use_host_postgres = config_data.get('use_host_postgres', docker_file.use_host_postgres)
             if config_data.get('restore_cluster', self.restore_cluster) and not use_host_postgres:   # TODO cleanup postgres remove
                 cluster_url = dump_url.replace('.zip', '-cluster.tar.zstd')
-                if requests.head(cluster_url, timeout=5).status_code != 200:  # TODO remove check once all dumps have a cluster zip
+                if not _url_exists(cluster_url):  # TODO remove check once all dumps have a cluster zip
                     build._log('', 'Using dump url, [no cluster](%s) was found', cluster_url, log_type='markdown')
                     cluster_url = None
 
-            if not cluster_url and reference_build.trigger_id.backup_databases and requests.head(dump_url, timeout=5).status_code != 200:
+            if not cluster_url and reference_build.trigger_id.backup_databases and not _url_exists(dump_url):
                 for backup_host in self.env['runbot.host'].search([('is_backup', '=', True)]):
                     backup_url = f'{backup_host._backup_url()}{zip_name}'
-                    if requests.head(backup_url, timeout=5).status_code == 200:
+                    if _url_exists(backup_url):
                         build._log('_run_restore', 'Template [%s](%s) from build [%s](%s) is missing, using [backup](%s)', zip_name, dump_url, reference_build.id, reference_build.build_url, backup_url, log_type='markdown')
                         dump_url = backup_url
                         use_backup = True
@@ -1275,7 +1291,7 @@ class ConfigStep(models.Model):
                 'mkdir /data/build/restore',
                 'cd /data/build/restore',
                 echo('### getting archive'),
-                'wget --retry-on-host-error %s' % dump_url,
+                'wget -nv --retry-on-host-error %s' % dump_url,
                 'unzip -q %s' % zip_name,
                 echo('### restoring filestore'),
                 'mkdir -p /data/build/datadir/filestore/%s' % restore_db_name,
@@ -1342,21 +1358,14 @@ class ConfigStep(models.Model):
                     job_type = 'install_odoo'
 
         if job_type == 'create_build':
-            build._logger('Step %s finished in %s' % (self._get_display_name(build), s2human(build.job_time)))
             return
 
-        message = 'Step %s finished in %s'
-        args = [self._get_display_name(build), s2human(build.job_time)]
-        log_type = 'runbot'
         if database_exported:
             db_suffix = config_data.get('db_name') or ((build.params_id.restore_db_suffix or build.params_id.dump_db.db_suffix) if not self.create_db else False) or self._get_db_name(build)
             db_suffix = re.sub(r'[^a-z0-9\-_]', '_', db_suffix.lower())
             db_name = f'{build.dest}-{db_suffix}'
             if build.database_ids.filtered(lambda database: database.name == db_name and database.exported):
-                message += ' [@icon-download](%s%s.zip)'
-                args += [build._http_log_url(), db_name]
-                log_type = 'markdown'
-        build._log('', message, *args, log_type=log_type)
+                build.active_job_id.exported_db = db_suffix
 
         if self.coverage and self.coverage_make_report:
             json_url = f'http://{build.host}/runbot/static/build/{build.dest}/logs/coverage/coverage.json'
