@@ -39,6 +39,7 @@ class RunbotClient():
         self.gc_thread = None
         self.gc_thread_repo = None
         self.gc_thread_result = None
+        self.repo_update_times = {}
 
     def on_start(self):
         pass
@@ -173,6 +174,20 @@ class RunbotClient():
             _logger.info('Starting git gc cycle on %s repositories', len(self.repos_to_gc))
             self.update_next_git_gc_date()
 
+    def update_repos(self):
+        """Fully fetch the repos flagged with builder_update every runbot.builder_repo_update_delay seconds"""
+        delay = int(self.env['ir.config_parameter'].sudo().get_param('runbot.builder_repo_update_delay', 3600))
+        repos = self.env['runbot.repo'].search([('builder_update', '=', True), ('mode', '!=', 'disabled')])
+        for repo in repos:
+            if self.gc_thread_repo and self.gc_thread_repo[0] == repo.id:
+                continue  # the gc finalize will update it
+            if time.time() - self.repo_update_times.get(repo.id, 0) < delay:
+                continue
+            self.env.cr.commit()  # avoid keeping a transaction open during the fetch
+            repo._update(force=True)
+            self.repo_update_times[repo.id] = time.time()
+            self.env.cr.commit()
+
     def _gc_start_next(self):
         repo = self.env['runbot.repo'].browse(self.repos_to_gc.pop(0))
         if not repo.exists():
@@ -227,6 +242,7 @@ class RunbotClient():
             _logger.info('Git %s of %s took %.2fs', step, repo_name, time.time() - start)
             if self.gc_process.returncode:
                 result['error'] = f'git {step} failed for {repo_name} with exit status {self.gc_process.returncode} and message "{output.decode()[:300]}"'
+                _logger.warning(result['error'])  # the runbot warning is only created in the main loop
                 if needed:
                     return
         result['done'] = True
