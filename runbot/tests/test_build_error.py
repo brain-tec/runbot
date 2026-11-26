@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from odoo import fields
 from odoo.exceptions import AccessError, ValidationError
-from odoo.tests import new_test_user
+from odoo.tests import HttpCase, new_test_user, tagged
 
 from .common import RunbotCase
 
@@ -317,6 +317,26 @@ class TestBuildError(TestBuildErrorCommon):
         self.assertIn(build_14, error.build_ids)
         self.assertEqual(error.tags_min_version_id, self.version_13)
         self.assertEqual(error.tags_max_version_id, version_14)
+
+    def test_parse_logs_other_project(self):
+        other_project = self.env['runbot.project'].create({'name': 'Other'})
+        other_content = self.BuildErrorContent.create({'content': 'Error Very Bad Trip', 'project_id': other_project.id})
+        build = self.create_test_build({'local_result': 'ko', 'local_state': 'done'})
+        log = self.IrLog.create({
+            'name': 'test-parse-logs',
+            'type': 'server',
+            'path': 'runbot',
+            'level': 'ERROR',
+            'func': 'test_trip',
+            'line': 242,
+            'message': 'Error Very Bad Trip',
+            'build_id': build.id,
+        })
+        action = self.BuildError._parse_logs(log)
+        error_content = self.BuildErrorContent.browse(action.get('res_id'))
+        self.assertEqual(error_content.fingerprint, other_content.fingerprint)
+        self.assertEqual(error_content.project_id, self.project)
+        self.assertFalse(other_content.build_ids)
 
     def test_parse_logs_no_update_without_flag(self):
         build_13 = self.create_test_build({'local_result': 'ko', 'local_state': 'done'})
@@ -913,6 +933,24 @@ class TestBuildError(TestBuildErrorCommon):
         # and the runbot admin user can change it back
         error.with_user(runbot_manager).test_tags = False
 
+    def test_build_error_project_acl(self):
+        self.stop_patcher('isfile')  # prevent user creation
+        error_content = self.env['runbot.build.error.content'].create({'content': 'foo bar', 'project_id': self.project.id})
+        error = error_content.error_id
+        error_link = self.env['runbot.build.error.link'].create({'build_id': self.Build.create({'params_id': self.base_params.id}).id, 'error_content_id': error_content.id})
+        # runbot.group_user is implied by base.group_user
+        self.project.group_ids = self.env.ref('runbot.group_user')
+        internal_user = new_test_user(self.env, login='internal', groups='base.group_user')
+        self.assertEqual(self.BuildError.with_user(internal_user).search([('id', '=', error.id)]), error)
+        self.assertEqual(self.env['runbot.build.error.content'].with_user(internal_user).search([('id', '=', error_content.id)]), error_content)
+        self.assertEqual(self.env['runbot.build.error.link'].with_user(internal_user).search([('id', '=', error_link.id)]), error_link)
+
+        self.project.group_ids = self.env.ref('runbot.group_runbot_admin')
+        self.assertFalse(self.BuildError.with_user(internal_user).search([('id', '=', error.id)]))
+        self.assertFalse(self.env['runbot.build.error.content'].with_user(internal_user).search([('id', '=', error_content.id)]))
+        # links have no rule, their contents and builds are restricted
+        self.assertEqual(self.env['runbot.build.error.link'].with_user(internal_user).search([('id', '=', error_link.id)]), error_link)
+
 
 class TestErrorMerge(TestBuildErrorCommon):
 
@@ -1086,3 +1124,33 @@ class TestCodeOwner(RunbotCase):
                 'regex': '*debian.*',
                 'github_teams': 'rd-test',
             })
+
+
+@tagged('-at_install', 'post_install')
+class TestBuildErrorPages(RunbotCase, HttpCase):
+
+    def test_error_pages(self):
+        self.project.group_ids = False
+        error_content = self.env['runbot.build.error.content'].create({'content': 'foo bar', 'project_id': self.project.id})
+        error = error_content.error_id
+        builds = self.Build.create([{'params_id': self.base_params.id}, {'params_id': self.base_params.id}])
+        self.env['runbot.build.error.link'].create([{'build_id': build.id, 'error_content_id': error_content.id} for build in builds])
+        # visible without login when the project requires no group
+        for url in (f'/runbot/error/{error.id}', f'/runbot/error/foo-bar-{error.id}', '/runbot/errors', '/runbot/errors?limit=0'):
+            with self.subTest(url=url):
+                response = self.url_open(url)
+                self.assertEqual(response.status_code, 200)
+                self.assertIn('foo bar', response.text)
+
+        self.project.group_ids = self.env.ref('runbot.group_user')
+        self.assertEqual(self.url_open(f'/runbot/error/{error.id}').status_code, 404)
+        self.assertEqual(self.url_open('/runbot/error/foo').status_code, 404)
+        self.assertNotIn('foo bar', self.url_open('/runbot/errors').text)
+        # os.path patches break the filestore (user avatar) and the http sessions
+        for patcher_name in ('isfile', 'isdir', 'file_exist'):
+            self.stop_patcher(patcher_name)
+        new_test_user(self.env, login='error_user', groups='base.group_user', password='error_user')
+        self.authenticate('error_user', 'error_user')
+        response = self.url_open(f'/runbot/error/{error.id}')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('foo bar', response.text)

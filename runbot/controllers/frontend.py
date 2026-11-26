@@ -9,8 +9,8 @@ from dateutil.relativedelta import relativedelta
 from werkzeug.exceptions import BadRequest, Forbidden, NotFound
 
 from odoo import fields
-from odoo.http import Controller, Response, request, route
 from odoo.fields import Domain
+from odoo.http import Controller, Response, request, route
 from odoo.tools import str2bool
 
 _logger = logging.getLogger(__name__)
@@ -434,7 +434,7 @@ class Runbot(Controller):
 
     @route(['/runbot/errors',
             '/runbot/errors/page/<int:page>',
-            ], type='http', auth='user', website=True, sitemap=False)
+            ], type='http', auth='public', website=True, sitemap=False)
     def build_errors(self, sort=None, page=1, limit=20, **kwargs):
         sort_order_choices = {
             'last_seen_date desc': 'Last seen date: Newer First',
@@ -448,26 +448,29 @@ class Runbot(Controller):
         }
 
         sort_order = sort if sort in sort_order_choices else 'last_seen_date desc'
+        limit = min(max(int(limit), 1), 100)
 
-        current_user_errors = request.env['runbot.build.error'].search([
-            ('responsible', '=', request.env.user.id),
-        ], order='last_seen_date desc, build_count desc')
-        current_team_errors = request.env['runbot.build.error'].search([
-            ('responsible', '=', False),
-            ('team_id', 'in', request.env.user.runbot_team_ids.ids),
-        ], order='last_seen_date desc, build_count desc')
-        domain = [('responsible', '!=', request.env.user.id), ('build_count', '>', 1)]
-        build_errors_count = request.env['runbot.build.error'].search_count(domain)
+        BuildError = request.env['runbot.build.error']
+        current_user_errors = current_team_errors = BuildError
+        if not request.env.user._is_public():
+            current_user_errors = BuildError.search(Domain('responsible', '=', request.env.user.id), order='last_seen_date desc, build_count desc')
+            current_team_errors = BuildError.search(Domain([
+                ('responsible', '=', False),
+                ('team_id', 'in', request.env.user.runbot_team_ids.ids),
+            ]), order='last_seen_date desc, build_count desc')
+        domain = Domain([('responsible', '!=', request.env.user.id), ('build_count', '>', 1)])
+        build_errors_count = BuildError.search_count(domain)
         url_args = {}
         url_args['sort'] = sort
-        pager = request.website.pager(url='/runbot/errors/', url_args=url_args, total=build_errors_count, page=page, step=int(limit))
+        pager = request.website.pager(url='/runbot/errors/', url_args=url_args, total=build_errors_count, page=page, step=limit)
 
-        build_errors = request.env['runbot.build.error'].search(domain, order=sort_order, limit=limit, offset=pager.get('offset', 0))
+        build_errors = BuildError.search(domain, order=sort_order, limit=limit, offset=pager.get('offset', 0))
 
         qctx = {
             'current_user_errors': current_user_errors,
             'current_team_errors': current_team_errors,
             'build_errors': build_errors,
+            'build_errors_count': build_errors_count,
             'title': 'Build Errors',
             'sort_order_choices': sort_order_choices,
             'sort_order': sort_order,
@@ -475,6 +478,24 @@ class Runbot(Controller):
             'pager': pager,
         }
         return request.render('runbot.build_error', qctx)
+
+    @route([
+        '/runbot/error/<int:build_error_id>',
+        '/runbot/error/<string:build_error_slug>',
+    ], type='http', auth='public', website=True, sitemap=False)
+    def build_error_details(self, build_error_id=None, build_error_slug=None, **kwargs):
+        if build_error_slug:
+            # e.g. /runbot/error/some-error-name-42
+            build_error_id = request.env['ir.http']._unslug(build_error_slug)[1]
+            if not build_error_id:
+                raise NotFound()
+        build_error = request.env['runbot.build.error'].with_context(active_test=False).search([('id', '=', build_error_id)])
+        if not build_error:
+            raise NotFound()
+        return request.render('runbot.build_error_details', {
+            'build_error': build_error,
+            'title': 'Error %s' % build_error.id,
+        })
 
     @route(['/runbot/teams', '/runbot/teams/<model("runbot.team"):team>'], type='http', auth='user', website=True, sitemap=False)
     def team_dashboards(self, team=None, hide_empty=False, **kwargs):
@@ -525,6 +546,30 @@ class Runbot(Controller):
         }
         return request.render('runbot.dashboard_page', qctx)
 
+    def _get_stats_parents(self, top_builds):
+        """Map the builds whose stats count in the given top builds to these top builds."""
+        def without_orphans(tree):
+            # orphan builds don't count in their parent, e.g. once replaced by a rebuild, nor do their children
+            tree_no_prefetch = tree.with_context(prefetch_fields=False)
+            orphan_ids = set(tree_no_prefetch.filtered('orphan_result').ids)
+            if not orphan_ids:
+                return tree
+            return tree.browse([b.id for b in tree_no_prefetch if orphan_ids.isdisjoint(b.ancestors.ids)])
+
+        builds = without_orphans(top_builds.search([('id', 'child_of', top_builds.ids)]))
+        parents = defaultdict(set)
+        for build in builds.with_context(prefetch_fields=False):
+            parents[build.id].add(build.top_parent.id)
+
+        # linked builds are top builds of their own tree, possibly linked to several builds
+        linked_parents = defaultdict(set)
+        for link in builds.child_link_ids.filtered(lambda link: not link.orphan_result):
+            linked_parents[link.child_id.id] |= parents[link.parent_id.id]
+        linked_builds = without_orphans(builds.search([('id', 'child_of', list(linked_parents))]))
+        for build in linked_builds.with_context(prefetch_fields=False):
+            parents[build.id] |= linked_parents[build.top_parent.id]
+        return parents
+
     @route(['/runbot/stats/'], type='jsonrpc', auth="user", website=False, sitemap=False)
     def stats_json(self, bundle_id=False, trigger_id=False, key_category='', key_step=None, center_build_id=False, limit=100, **post):
         """ Json stats """
@@ -541,8 +586,9 @@ class Runbot(Controller):
         batch_domain = [
             ('state', '=', 'done'),
             ('bundle_id', '=', bundle_id),
+            ('category_id', '=', trigger.category_id.id),
         ]
-        batches = request.env['runbot.batch'].with_context(category_id=trigger.category_id.id)
+        batches = request.env['runbot.batch']
         if center_build_id:
             center_batch = request.env['runbot.build'].browse(center_build_id).slot_ids.batch_id.filtered(lambda b: b.bundle_id == bundle)
             if center_batch:
@@ -555,55 +601,62 @@ class Runbot(Controller):
         batches |= batches.search(batch_domain, order='id desc', limit=limit)
         builds = batches.slot_ids.build_id.filtered(lambda b: b.params_id.trigger_id == trigger)
         if not builds:
-            return {}
+            return {'stats': {}, 'dates': {}, 'builds': []}
 
-        builds = builds.search([('id', 'child_of', builds.ids)])
-        builds = builds | builds.linked_children_build_ids
-
-        parents = {b.id: b.top_parent.id for b in builds.with_context(prefetch_fields=False)}
+        parents = self._get_stats_parents(builds)
+        if not parents:
+            # only orphan builds
+            return {'stats': {}, 'dates': {}, 'builds': []}
         dates = {b.top_parent.id: b.create_date for b in builds.with_context(prefetch_fields=False)}
         query = "SELECT build_id, values FROM runbot_build_stat WHERE build_id IN %s AND category = %s"
-        values = [tuple(builds.ids), key_category]
+        values = [tuple(parents), key_category]
         if key_step:
-            query += " AND dynamic_step_name LIKE %s"
+            step_query = "dynamic_step_name LIKE %s"
             values.append(key_step)
             if config_steps := request.env['runbot.build.config.step'].search([('name', '=like', key_step)]):
-                query += " AND config_step_id in %s"
+                # stats of a config step have no dynamic step name
+                step_query += " OR (COALESCE(dynamic_step_name, '') = '' AND config_step_id IN %s)"
                 values.append(tuple(config_steps.ids))
+            query += f" AND ({step_query})"
 
         request.env.cr.execute(query, values)  # read manually is way faster than using orm
         res = {}
 
         for (build_id, values) in request.env.cr.fetchall():
             if values:
-                current_values = res.get(parents[build_id], {})
-                for key, value in values.items():
-                    if key in current_values:
-                        current_values[key] += value
-                    else:
-                        current_values[key] = value
-                res[parents[build_id]] = current_values
+                for parent_id in parents[build_id]:
+                    current_values = res.setdefault(parent_id, {})
+                    for key, value in values.items():
+                        if key in current_values:
+                            current_values[key] += value
+                        else:
+                            current_values[key] = value
             # we need to update here to manage the post install case: we want to combine stats from all post_install childrens.
+        # ordered on their first batch, a rebuild being newer than the builds of the next batches
+        batch_per_build = {}
+        for slot in batches.slot_ids.sorted(lambda slot: slot.batch_id.id):
+            batch_per_build.setdefault(slot.build_id.id, slot.batch_id.id)
         return {
             'stats': res,
             'dates': dates,
+            'builds': sorted(res, key=batch_per_build.get),
         }
 
-    @route(['/runbot/stats/<model("runbot.bundle"):bundle>'], type='http', auth="public", website=True, sitemap=False)
+    @route(['/runbot/stats/<model("runbot.bundle"):bundle>'], type='http', auth="user", website=True, sitemap=False)
     def modules_stats(self, bundle, search=None, **post):
         """Modules statistics"""
-        all_builds = bundle.last_done_batch.slot_ids.build_id
-        all_builds |= bundle.with_context(category_id=request.env.ref('runbot.nightly_category').id).last_done_batch.slot_ids.build_id
-        all_builds = request.env['runbot.build'].search([('id', 'child_of', all_builds.ids)])
-        all_builds = all_builds | all_builds.linked_children_build_ids
-        all_stats = all_builds.sudo().stat_ids
+        top_builds = bundle.last_done_batch.slot_ids.build_id
+        top_builds |= bundle.with_context(category_id=request.env.ref('runbot.nightly_category').id).last_done_batch.slot_ids.build_id
+        parents = self._get_stats_parents(top_builds)
+        all_stats = top_builds.browse(list(parents)).sudo().stat_ids
         category_per_trigger = {}
         step_per_trigger_category = {}
         all_categories = set()
         all_steps = set()
         all_triggers = set()
         for stat in all_stats:
-            stat_triggers = stat.build_id.params_id.trigger_id | stat.build_id.linked_parent_build_ids.params_id.trigger_id
+            # as the stats route, the trigger of the top builds
+            stat_triggers = top_builds.browse(parents[stat.build_id.id]).params_id.trigger_id
             has_stats = False
             for stat_trigger in stat_triggers:
                 if stat_trigger.has_stats:
@@ -617,6 +670,14 @@ class Runbot(Controller):
         all_triggers = sorted(all_triggers, key=lambda t: (t.category_id.id, t.sequence, t.id))
         main_trigger = all_triggers[0] if all_triggers else None
         context = {
+            'category_triggers': {
+                category: ','.join(str(trigger.id) for trigger in all_triggers if category in category_per_trigger[trigger])
+                for category in all_categories
+            },
+            'step_scopes': {
+                step: ','.join(f'{trigger.id}:{category}' for (trigger, category), steps in step_per_trigger_category.items() if step in steps)
+                for step in all_steps
+            },
             'category_per_trigger': category_per_trigger,
             'step_per_trigger_category': step_per_trigger_category,
             'bundle': bundle,
